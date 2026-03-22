@@ -1,0 +1,748 @@
+"use client";
+
+import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { useQuery, useMutation } from "convex/react";
+import { api } from "@/convex/_generated/api";
+import type { Doc } from "@/convex/_generated/dataModel";
+import {
+  getCalendarEvents,
+  type GoogleEvent,
+} from "@/app/actions/calendar";
+import KanbanCard, { TaskEditDialog } from "@/components/kanban/KanbanCard";
+import { useResizablePanel } from "@/hooks/use-resizable-panel";
+import { ResizeHandle } from "@/components/ResizeHandle";
+import { Kbd } from "@/components/ui/kbd";
+import { Calendar } from "@/components/ui/calendar";
+import { Popover, PopoverTrigger, PopoverPopup } from "@/components/ui/popover";
+import {
+  Menu, MenuTrigger, MenuPopup, MenuItem,
+} from "@/components/ui/menu";
+import { motion, AnimatePresence } from "motion/react";
+import { HugeiconsIcon } from "@hugeicons/react";
+import {
+  ArrowLeft01Icon,
+  ArrowRight01Icon,
+  ArrowLeftDoubleIcon,
+} from "@hugeicons/core-free-icons";
+import {
+  format, startOfWeek, startOfMonth, endOfMonth, addDays, subDays,
+  addWeeks, subWeeks, addMonths, subMonths, isToday,
+  parseISO, isSameDay, isSameMonth, eachWeekOfInterval,
+  differenceInMinutes, startOfDay, isBefore, getDate, endOfWeek,
+} from "date-fns";
+
+const HOUR_HEIGHT = 96;
+const START_HOUR = 0;
+const END_HOUR = 24;
+const QUARTER_PX = HOUR_HEIGHT / 4; // 24px per 15-min slot
+
+type CalView = "day" | "week" | "month" | number;
+
+const viewBtnBase = "relative z-10 rounded-[7px] px-2.5 py-1.5 text-[11px] font-medium transition-all";
+const viewBtnActive = `${viewBtnBase} border border-[#3a3a4a] bg-[#2a2a38] text-white shadow-[0_1px_0_0_rgba(0,0,0,0.3),inset_0_1px_0_0_rgba(255,255,255,0.06)]`;
+const viewBtnInactive = `${viewBtnBase} border border-transparent text-[#71717a] hover:text-[#a1a1aa]`;
+const navBtn = "flex size-[30px] items-center justify-center rounded-[7px] border border-[#2a2a36] bg-[#131318] text-[#a1a1aa] shadow-[0_2px_0_0_rgba(0,0,0,0.4),inset_0_1px_0_0_rgba(255,255,255,0.04)] transition-colors hover:border-[#3a3a4a] hover:text-white active:translate-y-[1px] active:shadow-[0_1px_0_0_rgba(0,0,0,0.4)]";
+
+export default function PlannerView() {
+  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [calAnchor, setCalAnchor] = useState(new Date());
+  const [calView, setCalView] = useState<CalView>("week");
+  const tasks = useQuery(api.tasks.list, {});
+  const createTask = useMutation(api.tasks.create);
+  const updateTask = useMutation(api.tasks.update);
+
+  const [events, setEvents] = useState<GoogleEvent[]>([]);
+  const [addingTask, setAddingTask] = useState(false);
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [newTitle, setNewTitle] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Visible days for time-grid views (day, week, X-days)
+  const visibleDays = useMemo(() => {
+    if (calView === "day") return [calAnchor];
+    if (calView === "week") {
+      const ws = startOfWeek(calAnchor, { weekStartsOn: 1 });
+      return Array.from({ length: 7 }, (_, i) => addDays(ws, i));
+    }
+    if (calView === "month") return []; // month uses grid, not time-grid
+    // X days
+    return Array.from({ length: calView }, (_, i) => addDays(calAnchor, i));
+  }, [calAnchor, calView]);
+
+  const weekOfMonth = Math.ceil(getDate(calAnchor) / 7);
+  const selectedDateStr = format(selectedDate, "yyyy-MM-dd");
+
+  // Sync calendar anchor when selected date changes
+  useEffect(() => { setCalAnchor(selectedDate); }, [selectedDate]);
+
+  // Nav
+  const navForward = useCallback(() => {
+    if (calView === "day") setCalAnchor((d) => addDays(d, 1));
+    else if (calView === "week") setCalAnchor((d) => addWeeks(d, 1));
+    else if (calView === "month") setCalAnchor((d) => addMonths(d, 1));
+    else setCalAnchor((d) => addDays(d, 1)); // X-days: scroll by 1 day
+  }, [calView]);
+
+  const navBackward = useCallback(() => {
+    if (calView === "day") setCalAnchor((d) => subDays(d, 1));
+    else if (calView === "week") setCalAnchor((d) => subWeeks(d, 1));
+    else if (calView === "month") setCalAnchor((d) => subMonths(d, 1));
+    else setCalAnchor((d) => subDays(d, 1)); // X-days: scroll by 1 day
+  }, [calView]);
+
+  // Fetch calendar events
+  useEffect(() => {
+    async function load() {
+      try {
+        let timeMin: string, timeMax: string;
+        if (calView === "month") {
+          timeMin = startOfMonth(calAnchor).toISOString();
+          timeMax = addDays(endOfMonth(calAnchor), 1).toISOString();
+        } else if (visibleDays.length > 0) {
+          timeMin = visibleDays[0].toISOString();
+          timeMax = addDays(visibleDays[visibleDays.length - 1], 1).toISOString();
+        } else return;
+        const allEvents = await getCalendarEvents(timeMin, timeMax);
+        setEvents(allEvents);
+      } catch { /* Calendar not connected */ }
+    }
+    load();
+  }, [calAnchor, calView]);
+
+  // Scroll to current hour on mount
+  useEffect(() => {
+    if (scrollRef.current) {
+      const hour = new Date().getHours();
+      scrollRef.current.scrollTop = Math.max(0, (hour - 2) * HOUR_HEIGHT);
+    }
+  }, []);
+
+  // Tasks for selected day
+  const dayTasks = useMemo(() => {
+    if (!tasks) return { overdue: [], day: [] };
+    const active = tasks.filter((t) => t.status !== "done");
+    const overdue: Doc<"tasks">[] = [];
+    const dayList: Doc<"tasks">[] = [];
+    const dayStart = startOfDay(selectedDate);
+    for (const t of active) {
+      const d = t.dueDate || t.scheduledDate;
+      if (!d) continue;
+      const pd = parseISO(d);
+      if (isBefore(pd, dayStart) && !isSameDay(pd, selectedDate)) overdue.push(t);
+      else if (isSameDay(pd, selectedDate)) dayList.push(t);
+    }
+    return { overdue, day: dayList };
+  }, [tasks, selectedDate]);
+
+  async function handleAdd() {
+    if (!newTitle.trim()) return;
+    await createTask({ title: newTitle.trim(), dueDate: selectedDateStr });
+    setNewTitle("");
+    inputRef.current?.focus();
+  }
+
+  useEffect(() => {
+    if (addingTask) requestAnimationFrame(() => inputRef.current?.focus());
+    else setNewTitle("");
+  }, [addingTask]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      if (e.key === "c" || e.key === "C") setAddingTask(true);
+      if (e.key === "t" || e.key === "T") { setSelectedDate(new Date()); setCalAnchor(new Date()); }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  const totalTasks = dayTasks.overdue.length + dayTasks.day.length;
+  const { width: panelWidth, onMouseDown: handleResize } = useResizablePanel("planner-today", 380, 280, 500);
+  const overdueDuration = calcDuration(dayTasks.overdue);
+
+  // Left panel drop
+  const [leftDropOver, setLeftDropOver] = useState(false);
+  const leftDragCounter = useRef(0);
+  const handleLeftDrop = useCallback(async (e: React.DragEvent) => {
+    e.preventDefault();
+    leftDragCounter.current = 0;
+    setLeftDropOver(false);
+    const taskId = e.dataTransfer.getData("text/plain");
+    if (!taskId) return;
+    const allTasks = [...dayTasks.overdue, ...dayTasks.day];
+    if (allTasks.some((t) => t._id === taskId)) return;
+    await updateTask({ id: taskId as Parameters<typeof updateTask>[0]["id"], dueDate: selectedDateStr });
+  }, [selectedDateStr, dayTasks, updateTask]);
+
+  // View label for header
+  const viewLabel = calView === "month" ? format(calAnchor, "MMMM yyyy") : `${format(calAnchor, "MMM yyyy")}`;
+
+  return (
+    <div className="flex flex-1 overflow-hidden">
+      {/* ── Left panel ── */}
+      <div
+        className="relative flex shrink-0 flex-col border-r border-dashed border-[#3a3a48]"
+        style={{ width: panelWidth }}
+        onDragEnter={(e) => { e.preventDefault(); leftDragCounter.current++; setLeftDropOver(true); }}
+        onDragLeave={() => { leftDragCounter.current--; if (leftDragCounter.current <= 0) { leftDragCounter.current = 0; setLeftDropOver(false); } }}
+        onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
+        onDrop={handleLeftDrop}
+      >
+        {leftDropOver && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+            className="pointer-events-none absolute inset-2 z-20 rounded-xl border-2 border-dashed border-[#a78bfa]/60 bg-[#a78bfa]/5" />
+        )}
+
+        {/* Header with date picker */}
+        <div className="flex items-center justify-between px-5 pb-3 pt-4">
+          <Popover>
+            <PopoverTrigger render={
+              <button className="flex items-center gap-1.5 text-[15px] font-bold text-white transition-colors hover:text-[#a78bfa]" />
+            }>
+              {isToday(selectedDate) ? "Today" : format(selectedDate, "EEE, MMM d")}
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 5l3 3 3-3" /></svg>
+            </PopoverTrigger>
+            <PopoverPopup sideOffset={4} className="p-0">
+              <Calendar mode="single" selected={selectedDate} onSelect={(d) => { if (d) setSelectedDate(d); }} />
+              <div className="border-t px-3 py-2">
+                <button onClick={() => setSelectedDate(new Date())}
+                  className="rounded-[7px] border border-[#2a2a36] bg-[#131318] px-3 py-1.5 text-xs font-medium text-[#a78bfa] shadow-[0_2px_0_0_rgba(0,0,0,0.4),inset_0_1px_0_0_rgba(255,255,255,0.04)] transition-colors hover:border-[#3a3a4a] hover:text-white active:translate-y-[1px] active:shadow-[0_1px_0_0_rgba(0,0,0,0.4)]">
+                  Go to today
+                </button>
+              </div>
+            </PopoverPopup>
+          </Popover>
+        </div>
+
+        {/* Add task */}
+        <div
+          onClick={() => { if (!addingTask) setAddingTask(true); }}
+          className={`mx-5 mb-3 flex items-center justify-between rounded-[10px] border px-3.5 py-2.5 transition-colors ${
+            addingTask ? "border-[#4a4a58] bg-[#1a1a22]" : "cursor-pointer border-[#333340] bg-[#16161e] hover:border-[#4a4a58] hover:bg-[#1e1e28]"
+          }`}
+        >
+          {addingTask ? (
+            <input ref={inputRef} value={newTitle} onChange={(e) => setNewTitle(e.target.value)}
+              placeholder="Enter = quick add, Tab = full editor"
+              onKeyDown={(e) => {
+                if (e.key === "Enter") { e.preventDefault(); handleAdd(); }
+                if (e.key === "Tab") { e.preventDefault(); setAddingTask(false); setCreateDialogOpen(true); }
+                if (e.key === "Escape") setAddingTask(false);
+              }}
+              onBlur={() => { if (!newTitle.trim()) setAddingTask(false); }}
+              className="flex-1 bg-transparent text-[13px] text-white outline-none placeholder:text-[#71717a]"
+            />
+          ) : (
+            <>
+              <span className="flex items-center gap-2.5 text-[13px] text-[#a1a1aa]">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><circle cx="8" cy="8" r="6.5" /><path d="M8 5v6M5 8h6" /></svg>
+                Add new task
+              </span>
+              <Kbd>C</Kbd>
+            </>
+          )}
+        </div>
+
+        {/* Tasks */}
+        <div className="flex flex-1 flex-col overflow-y-auto px-5 pb-4">
+          {dayTasks.overdue.length > 0 && (
+            <div className="mb-4">
+              <div className="mb-2 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="text-[12px] font-bold text-[#ef4444]">Overdue</span>
+                  <span className="text-[12px] font-medium text-[#a1a1aa]">{dayTasks.overdue.length}</span>
+                </div>
+                {overdueDuration && <span className="text-[11px] font-medium text-[#a1a1aa]">{overdueDuration}</span>}
+              </div>
+              <div className="flex flex-col gap-1.5">
+                {dayTasks.overdue.map((t) => <KanbanCard key={t._id} task={t} isOverdue />)}
+              </div>
+            </div>
+          )}
+          {dayTasks.day.length > 0 && (
+            <div className="flex flex-col gap-1.5">
+              {dayTasks.day.map((t) => <KanbanCard key={t._id} task={t} />)}
+            </div>
+          )}
+          {totalTasks === 0 && (
+            <div className="mt-auto flex items-center gap-2 pb-2">
+              <span className="text-[12px] tracking-wide text-[#52525b]">No tasks planned yet</span>
+              <span className="flex size-[18px] items-center justify-center rounded-full border border-[#3a3a48] text-[10px] font-medium text-[#52525b]">0</span>
+            </div>
+          )}
+        </div>
+
+      </div>
+
+      <ResizeHandle onMouseDown={handleResize} />
+
+      {/* ── Right panel: Calendar ── */}
+      <div className="flex flex-1 flex-col overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-[#2a2a32] px-5 py-3">
+          <div className="flex items-center gap-3">
+            <span className="text-[15px] font-bold text-white">{viewLabel}</span>
+            {calView !== "month" && <span className="text-[13px] font-medium text-[#71717a]">W{weekOfMonth}</span>}
+          </div>
+          <div className="flex items-center gap-2">
+            {/* View switcher */}
+            <div className="flex items-center rounded-[10px] border border-[#2a2a36] bg-[#131318] p-[3px] shadow-[0_2px_0_0_rgba(0,0,0,0.4),inset_0_1px_0_0_rgba(255,255,255,0.04)]">
+              {([
+                { id: "day" as const, label: "D" },
+                { id: "week" as const, label: "W" },
+                { id: "month" as const, label: "M" },
+              ] as const).map((v) => (
+                <button key={v.id} onClick={() => setCalView(v.id)}
+                  className={calView === v.id ? viewBtnActive : viewBtnInactive}>
+                  {v.label}
+                </button>
+              ))}
+              <Menu>
+                <MenuTrigger render={
+                  <button className={typeof calView === "number" ? viewBtnActive : viewBtnInactive} />
+                }>
+                  {typeof calView === "number" ? `${calView}D` : "X"}
+                </MenuTrigger>
+                <MenuPopup>
+                  {[2, 3, 4, 5, 6].map((n) => (
+                    <MenuItem key={n} onClick={() => setCalView(n)}>
+                      {n} days
+                      {calView === n && <span className="ml-auto text-xs text-muted-foreground">✓</span>}
+                    </MenuItem>
+                  ))}
+                </MenuPopup>
+              </Menu>
+            </div>
+
+            {/* Today + nav */}
+            <button onClick={() => { setCalAnchor(new Date()); setSelectedDate(new Date()); }} className={navBtn}>
+              <span className="text-[11px] font-bold">T</span>
+            </button>
+            <button onClick={navBackward} className={navBtn}>
+              <HugeiconsIcon icon={ArrowLeft01Icon} size={14} />
+            </button>
+            <button onClick={navForward} className={navBtn}>
+              <HugeiconsIcon icon={ArrowRight01Icon} size={14} />
+            </button>
+          </div>
+        </div>
+
+        {/* Calendar body — animated transitions */}
+        <AnimatePresence mode="wait">
+          {calView === "month" ? (
+            <motion.div key="month" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} className="flex-1 overflow-y-auto">
+              <MonthGrid
+                anchor={calAnchor}
+                selectedDate={selectedDate}
+                onSelectDate={setSelectedDate}
+                events={events}
+                tasks={tasks || []}
+                updateTask={updateTask}
+              />
+            </motion.div>
+          ) : (
+            <motion.div key={`time-${calView}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} className="flex flex-1 flex-col overflow-hidden">
+              {/* Day headers */}
+              <div className="flex border-b border-[#2a2a32]">
+                <div className="w-14 shrink-0 px-2 py-2 text-[11px] text-[#52525b]">
+                  {Intl.DateTimeFormat().resolvedOptions().timeZone.split("/").pop()?.replace("_", " ") || ""}
+                </div>
+                {visibleDays.map((day) => {
+                  const isNow = isToday(day);
+                  const isSel = isSameDay(day, selectedDate);
+                  return (
+                    <button key={day.toISOString()} onClick={() => setSelectedDate(day)}
+                      className={`flex flex-1 items-center gap-1.5 px-2 py-2 transition-colors ${isSel ? "bg-[#1a1a28]" : "hover:bg-[#14141c]"}`}>
+                      <span className={`text-[12px] font-medium ${isNow ? "text-white" : isSel ? "text-[#a78bfa]" : "text-[#a1a1aa]"}`}>
+                        {format(day, "EEE")}
+                      </span>
+                      <span className={`flex size-[22px] items-center justify-center rounded-[5px] text-[12px] font-bold ${
+                        isNow ? "bg-[#7c3aed] text-white" : isSel ? "bg-[#2a2a3a] text-[#a78bfa]" : "text-[#a1a1aa]"
+                      }`}>
+                        {format(day, "d")}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Time grid */}
+              <div ref={scrollRef} className="flex-1 overflow-y-auto">
+                <div className="relative flex" style={{ height: (END_HOUR - START_HOUR) * HOUR_HEIGHT }}>
+                  <div className="sticky left-0 z-10 w-14 shrink-0 bg-[#0c0c10]">
+                    {Array.from({ length: END_HOUR - START_HOUR }, (_, i) => i + START_HOUR).map((hour) => (
+                      <div key={hour} className="flex items-start justify-end pr-2 text-[11px] text-[#52525b]"
+                        style={{ height: HOUR_HEIGHT, paddingTop: 2 }}>
+                        {hour === 0 ? "12 am" : hour < 12 ? `${hour} am` : hour === 12 ? "12 pm" : `${hour - 12} pm`}
+                      </div>
+                    ))}
+                  </div>
+                  {visibleDays.map((day) => (
+                    <CalendarDayColumn key={day.toISOString()} day={day} selectedDate={selectedDate} events={events} tasks={tasks || []} updateTask={updateTask} />
+                  ))}
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Bottom bar */}
+        <div className="flex items-center gap-3 border-t border-[#2a2a32] px-5 py-2">
+          <span className="text-[12px] font-medium text-[#7c3aed]">{format(new Date(), "h:mm a")}</span>
+          <div className="h-px flex-1 border-t border-dashed border-[#3a3a48]" />
+          <span className="text-[12px] font-medium text-[#a1a1aa]">{totalTasks} Task{totalTasks !== 1 ? "s" : ""}</span>
+        </div>
+      </div>
+
+      <TaskEditDialog open={createDialogOpen} onOpenChange={setCreateDialogOpen} defaultDueDate={selectedDateStr} />
+    </div>
+  );
+}
+
+/* ─── Month Grid (Google Calendar style) with drop support ─── */
+function MonthGrid({ anchor, selectedDate, onSelectDate, events, tasks, updateTask }: {
+  anchor: Date;
+  selectedDate: Date;
+  onSelectDate: (d: Date) => void;
+  events: GoogleEvent[];
+  tasks: Doc<"tasks">[];
+  updateTask: ReturnType<typeof useMutation<typeof api.tasks.update>>;
+}) {
+  const mStart = startOfMonth(anchor);
+  const mEnd = endOfMonth(anchor);
+  const weeks = eachWeekOfInterval({ start: mStart, end: mEnd }, { weekStartsOn: 1 });
+  const activeTasks = tasks.filter((t) => t.status !== "done");
+
+  return (
+    <div className="flex flex-1 flex-col">
+      <div className="grid grid-cols-7 border-b border-[#2a2a32]">
+        {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => (
+          <div key={d} className="px-2 py-2 text-center text-[11px] font-medium text-[#71717a]">{d}</div>
+        ))}
+      </div>
+      {weeks.map((ws) => (
+        <div key={ws.toISOString()} className="grid min-h-[100px] grid-cols-7 border-b border-[#1a1a22]">
+          {Array.from({ length: 7 }, (_, i) => (
+            <MonthDayCell
+              key={i}
+              day={addDays(ws, i)}
+              anchor={anchor}
+              selectedDate={selectedDate}
+              onSelectDate={onSelectDate}
+              events={events}
+              activeTasks={activeTasks}
+              updateTask={updateTask}
+            />
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function MonthDayCell({ day, anchor, selectedDate, onSelectDate, events, activeTasks, updateTask }: {
+  day: Date; anchor: Date; selectedDate: Date;
+  onSelectDate: (d: Date) => void;
+  events: GoogleEvent[];
+  activeTasks: Doc<"tasks">[];
+  updateTask: ReturnType<typeof useMutation<typeof api.tasks.update>>;
+}) {
+  const [isOver, setIsOver] = useState(false);
+  const dragCounter = useRef(0);
+  const isNow = isToday(day);
+  const isSel = isSameDay(day, selectedDate);
+  const isOtherMonth = !isSameMonth(day, anchor);
+  const dayStr = format(day, "yyyy-MM-dd");
+
+  const dayTasks = activeTasks.filter((t) => {
+    const d = t.dueDate || t.scheduledDate;
+    return d && isSameDay(parseISO(d), day);
+  });
+  const dayEvents = events.filter((e) => {
+    if (!e.start.dateTime && !e.start.date) return false;
+    const eDate = e.start.dateTime ? parseISO(e.start.dateTime) : parseISO(e.start.date!);
+    return isSameDay(eDate, day);
+  });
+
+  const handleDrop = useCallback(async (e: React.DragEvent) => {
+    e.preventDefault();
+    dragCounter.current = 0;
+    setIsOver(false);
+    const taskId = e.dataTransfer.getData("text/plain");
+    if (!taskId) return;
+    await updateTask({ id: taskId as Parameters<typeof updateTask>[0]["id"], dueDate: dayStr });
+  }, [dayStr, updateTask]);
+
+  return (
+    <div
+      onClick={() => onSelectDate(day)}
+      onDragEnter={(e) => { e.preventDefault(); dragCounter.current++; setIsOver(true); }}
+      onDragLeave={() => { dragCounter.current--; if (dragCounter.current <= 0) { dragCounter.current = 0; setIsOver(false); } }}
+      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
+      onDrop={handleDrop}
+      className={`relative flex cursor-pointer flex-col gap-0.5 border-r border-[#1a1a22] p-1.5 text-left transition-colors last:border-r-0 ${
+        isSel ? "bg-[#1a1a28]" : "hover:bg-[#14141c]"
+      } ${isOtherMonth ? "opacity-40" : ""}`}
+    >
+      {isOver && (
+        <div className="pointer-events-none absolute inset-0.5 rounded-md border-2 border-dashed border-[#a78bfa]/60 bg-[#a78bfa]/5" />
+      )}
+      <span className={`mb-0.5 flex size-[24px] items-center justify-center self-end rounded-full text-[12px] font-bold ${
+        isNow ? "bg-[#7c3aed] text-white" : isSel ? "text-[#a78bfa]" : "text-[#a1a1aa]"
+      }`}>
+        {format(day, "d")}
+      </span>
+      {dayEvents.slice(0, 2).map((evt) => (
+        <div key={evt.id} className="truncate rounded-[3px] px-1 py-px text-[10px] font-medium text-white"
+          style={{ backgroundColor: evt.calendarColor || "#059669" }}>
+          {evt.summary || "(No title)"}
+        </div>
+      ))}
+      {dayTasks.slice(0, 2).map((t) => (
+        <div key={t._id} className="flex items-center gap-1 truncate px-1 py-px text-[10px]">
+          <span className="size-1.5 shrink-0 rounded-full" style={{
+            backgroundColor: { p1: "#f87171", p2: "#fb923c", p3: "#a78bfa", p4: "#a1a1aa" }[t.priority]
+          }} />
+          <span className="truncate text-[#d4d4d8]">{t.title}</span>
+        </div>
+      ))}
+      {(dayEvents.length + dayTasks.length > 4) && (
+        <span className="px-1 text-[9px] text-[#71717a]">+{dayEvents.length + dayTasks.length - 4} more</span>
+      )}
+    </div>
+  );
+}
+
+/* ─── Snap to 15-min grid helper ─── */
+const HALF_HOUR_PX = HOUR_HEIGHT / 2; // for default block height (30-min)
+
+function yToSnappedTime(y: number): { timeStr: string; topPx: number; label: string } {
+  const slot = Math.max(0, Math.round(y / QUARTER_PX)); // snap to nearest 15-min
+  const totalMin = slot * 15;
+  const hour = Math.min(23, Math.floor(totalMin / 60));
+  const minute = totalMin % 60;
+  const timeStr = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+  const topPx = slot * QUARTER_PX;
+  const ampm = hour < 12 ? "am" : "pm";
+  const h12 = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
+  const label = `${h12}:${String(minute).padStart(2, "0")} ${ampm}`;
+  return { timeStr, topPx, label };
+}
+
+/* ─── Priority colors for task blocks ─── */
+const PRIORITY_COLORS: Record<string, string> = {
+  p1: "#f87171", p2: "#fb923c", p3: "#a78bfa", p4: "#71717a",
+};
+
+/* ─── Calendar day column with 30-min snap drop ─── */
+function CalendarDayColumn({ day, selectedDate, events, tasks, updateTask }: {
+  day: Date;
+  selectedDate: Date;
+  events: GoogleEvent[];
+  tasks: Doc<"tasks">[];
+  updateTask: ReturnType<typeof useMutation<typeof api.tasks.update>>;
+}) {
+  const [isOver, setIsOver] = useState(false);
+  const [dropIndicator, setDropIndicator] = useState<{ topPx: number; label: string } | null>(null);
+  const dragCounter = useRef(0);
+  const columnRef = useRef<HTMLDivElement>(null);
+  const isSelected = isSameDay(day, selectedDate);
+  const dayStr = format(day, "yyyy-MM-dd");
+
+  const dayEvents = events.filter((e) => {
+    if (!e.start.dateTime) return false;
+    return isSameDay(parseISO(e.start.dateTime), day);
+  });
+
+  // Tasks with time that belong to this day
+  const dayTasks = useMemo(() => {
+    return tasks.filter((t) => {
+      if (t.status === "done") return false;
+      const dateStr = t.dueDate || t.scheduledDate;
+      if (!dateStr) return false;
+      if (!isSameDay(parseISO(dateStr), day)) return false;
+      // Must have a time to show on the grid
+      const time = (t as Record<string, unknown>).dueTime as string | undefined || t.scheduledStartTime;
+      return !!time;
+    });
+  }, [tasks, day]);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    const rect = columnRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const scrollTop = columnRef.current?.closest("[class*='overflow-y']")?.scrollTop || 0;
+    const y = e.clientY - rect.top + scrollTop;
+    const { topPx, label } = yToSnappedTime(y);
+    setDropIndicator({ topPx, label });
+  }, []);
+
+  const handleDrop = useCallback(async (e: React.DragEvent) => {
+    e.preventDefault();
+    dragCounter.current = 0;
+    setIsOver(false);
+    setDropIndicator(null);
+    const taskId = e.dataTransfer.getData("text/plain");
+    if (!taskId) return;
+    const rect = columnRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const scrollTop = columnRef.current?.closest("[class*='overflow-y']")?.scrollTop || 0;
+    const y = e.clientY - rect.top + scrollTop;
+    const { timeStr } = yToSnappedTime(y);
+    await updateTask({ id: taskId as Parameters<typeof updateTask>[0]["id"], dueDate: dayStr, dueTime: timeStr });
+  }, [dayStr, updateTask]);
+
+  return (
+    <div ref={columnRef}
+      className={`relative flex-1 border-l ${isSelected ? "border-[#2a2a3a] bg-[#0f0f18]" : "border-[#1f1f28]"}`}
+      onDragEnter={(e) => { e.preventDefault(); dragCounter.current++; setIsOver(true); }}
+      onDragLeave={() => {
+        dragCounter.current--;
+        if (dragCounter.current <= 0) { dragCounter.current = 0; setIsOver(false); setDropIndicator(null); }
+      }}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+    >
+      {/* 15-min box drop indicator */}
+      {isOver && dropIndicator && (
+        <div
+          className="pointer-events-none absolute left-1 right-1 z-30 rounded-[10px] border-2 border-dashed border-[#a78bfa]/70 bg-[#a78bfa]/10"
+          style={{ top: dropIndicator.topPx, height: HALF_HOUR_PX }}
+        >
+          <span className="absolute right-1 top-1 rounded-[5px] bg-[#a78bfa] px-1.5 py-0.5 text-[10px] font-bold text-white shadow-[0_1px_0_0_rgba(0,0,0,0.3)]">
+            {dropIndicator.label}
+          </span>
+        </div>
+      )}
+
+      {/* 15-min grid lines: hour = solid, 30-min = dashed, 15-min = faint */}
+      {Array.from({ length: (END_HOUR - START_HOUR) * 4 }, (_, i) => (
+        <div key={i} className={
+          i % 4 === 0
+            ? "border-b border-[#1e1e28]"
+            : i % 2 === 0
+              ? "border-b border-dashed border-[#181820]"
+              : "border-b border-[#131318]"
+        } style={{ height: QUARTER_PX }} />
+      ))}
+
+      {/* Google Calendar events */}
+      {dayEvents.map((evt) => {
+        if (!evt.start.dateTime || !evt.end.dateTime) return null;
+        const start = parseISO(evt.start.dateTime);
+        const end = parseISO(evt.end.dateTime);
+        const startMin = (start.getHours() - START_HOUR) * 60 + start.getMinutes();
+        const duration = differenceInMinutes(end, start);
+        const top = (startMin / 60) * HOUR_HEIGHT;
+        const height = Math.max((duration / 60) * HOUR_HEIGHT, QUARTER_PX);
+        const color = evt.calendarColor || "#059669";
+        return (
+          <div key={evt.id}
+            className="absolute left-1 right-1 overflow-hidden rounded-[10px] border border-[#333340] bg-[#1a1a22] shadow-[0_2px_0_0_rgba(0,0,0,0.3),inset_0_1px_0_0_rgba(255,255,255,0.04)]"
+            style={{ top, height }}
+          >
+            <div className="flex h-full items-center gap-2.5 px-3">
+              <span className="size-[10px] shrink-0 rounded-full" style={{ backgroundColor: color }} />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[13px] font-semibold text-white">{evt.summary || "(No title)"}</p>
+                {height >= 44 && (
+                  <p className="text-[11px] font-medium text-[#a1a1aa]">
+                    {format(start, "h:mm")} – {format(end, "h:mm a")}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })}
+
+      {/* Tasks on the time grid — draggable */}
+      {dayTasks.map((task) => {
+        const time = (task as Record<string, unknown>).dueTime as string | undefined || task.scheduledStartTime || "09:00";
+        const [h, m] = time.split(":").map(Number);
+        const startMin = (h - START_HOUR) * 60 + m;
+        const top = (startMin / 60) * HOUR_HEIGHT;
+        let blockHeight = HALF_HOUR_PX;
+        if (task.scheduledStartTime && task.scheduledEndTime) {
+          const [sh, sm] = task.scheduledStartTime.split(":").map(Number);
+          const [eh, em] = task.scheduledEndTime.split(":").map(Number);
+          const dur = (eh * 60 + em) - (sh * 60 + sm);
+          if (dur > 0) blockHeight = (dur / 60) * HOUR_HEIGHT;
+        }
+        const color = PRIORITY_COLORS[task.priority] || PRIORITY_COLORS.p4;
+        const fmtH = h === 0 ? 12 : h > 12 ? h - 12 : h;
+        const ampm = h < 12 ? "am" : "pm";
+
+        return (
+          <div key={task._id}
+            draggable
+            onDragStart={(e) => {
+              e.dataTransfer.setData("text/plain", task._id);
+              e.dataTransfer.effectAllowed = "move";
+            }}
+            className="absolute left-1 right-1 cursor-grab overflow-hidden rounded-[10px] border border-[#333340] bg-[#1a1a22] shadow-[0_2px_0_0_rgba(0,0,0,0.3),inset_0_1px_0_0_rgba(255,255,255,0.04)] active:cursor-grabbing"
+            style={{ top, height: Math.max(blockHeight, QUARTER_PX) }}
+          >
+            <div className="flex h-full items-center gap-2.5 px-3">
+              <span
+                className="flex size-[14px] shrink-0 items-center justify-center rounded-full"
+                style={{ border: `2px solid ${color}` }}
+              />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[13px] font-semibold text-white">{task.title}</p>
+                {blockHeight >= 44 && (
+                  <p className="text-[11px] font-medium text-[#a1a1aa]">
+                    {fmtH}:{String(m).padStart(2, "0")} {ampm}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })}
+
+      {isToday(day) && <CurrentTimeLine />}
+    </div>
+  );
+}
+
+function CurrentTimeLine() {
+  const [top, setTop] = useState(0);
+  useEffect(() => {
+    function update() {
+      const now = new Date();
+      setTop(((now.getHours() - START_HOUR) * 60 + now.getMinutes()) / 60 * HOUR_HEIGHT);
+    }
+    update();
+    const id = setInterval(update, 60000);
+    return () => clearInterval(id);
+  }, []);
+  return (
+    <div className="pointer-events-none absolute left-0 right-0 z-20" style={{ top }}>
+      <div className="flex items-center">
+        <div className="size-2 rounded-full bg-[#7c3aed]" />
+        <div className="h-[2px] flex-1 bg-[#7c3aed]" />
+      </div>
+    </div>
+  );
+}
+
+function calcDuration(tasks: Doc<"tasks">[]): string {
+  let totalMin = 0;
+  for (const t of tasks) {
+    if (t.scheduledStartTime && t.scheduledEndTime) {
+      const [sh, sm] = t.scheduledStartTime.split(":").map(Number);
+      const [eh, em] = t.scheduledEndTime.split(":").map(Number);
+      totalMin += eh * 60 + em - (sh * 60 + sm);
+    }
+  }
+  if (totalMin <= 0) return "";
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  if (h > 0 && m > 0) return `${h}h ${m}m`;
+  return h > 0 ? `${h}h` : `${m}m`;
+}

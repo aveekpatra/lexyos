@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:developers.google.com)",
+      "WebFetch(domain:www.builder.io)",
+      "WebFetch(domain:www.eleken.co)",
+      "WebFetch(domain:www.figma.com)",
+      "Bash(python3:*)",
+      "Bash(npx next:*)",
+      "Bash(npm install:*)",
+      "Bash(node:*)",
+      "WebFetch(domain:docs.convex.dev)",
+      "WebFetch(domain:stack.convex.dev)",
+      "Bash(tasklist:*)",
+      "WebFetch(domain:github.com)",
+      "Bash(npm uninstall:*)"
+    ]
+  }
+}
