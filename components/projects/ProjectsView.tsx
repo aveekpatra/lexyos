@@ -409,13 +409,16 @@ function ProjectBoard({ project }: { project: Doc<"projects"> }) {
   );
 }
 
-/* ─── GTD Column ─── */
+/* ─── GTD Column with drag-drop ─── */
 function GTDColumn({ column, tasks, projectId, isLast, isAdding, onStartAdd, onStopAdd }: {
   column: (typeof GTD_COLUMNS)[number]; tasks: Doc<"tasks">[]; projectId: Id<"projects">;
   isLast: boolean; isAdding: boolean; onStartAdd: () => void; onStopAdd: () => void;
 }) {
   const createTask = useMutation(api.tasks.create);
+  const updateTask = useMutation(api.tasks.update);
   const [newTitle, setNewTitle] = useState("");
+  const [isOver, setIsOver] = useState(false);
+  const dragCounter = useRef(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -430,8 +433,36 @@ function GTDColumn({ column, tasks, projectId, isLast, isAdding, onStartAdd, onS
     inputRef.current?.focus();
   }
 
+  const handleDrop = useCallback(async (e: React.DragEvent) => {
+    e.preventDefault();
+    dragCounter.current = 0;
+    setIsOver(false);
+    const taskId = e.dataTransfer.getData("text/plain");
+    if (!taskId) return;
+    // Skip if task already in this column
+    if (tasks.some((t) => t._id === taskId)) return;
+    // Map column id to task status
+    const newStatus = column.id === "planned" ? "todo" as const : column.id;
+    await updateTask({
+      id: taskId as Id<"tasks">,
+      status: newStatus,
+      ...(newStatus === "done" ? { completedAt: Date.now() } : {}),
+    } as Parameters<typeof updateTask>[0]);
+  }, [column.id, tasks, updateTask]);
+
   return (
-    <div className={`flex min-w-[260px] flex-1 flex-col ${!isLast ? "border-r border-dashed border-[#3a3a48]" : ""}`}>
+    <div
+      className={`relative flex min-w-[260px] flex-1 flex-col ${!isLast ? "border-r border-dashed border-[#3a3a48]" : ""}`}
+      onDragEnter={(e) => { e.preventDefault(); dragCounter.current++; setIsOver(true); }}
+      onDragLeave={() => { dragCounter.current--; if (dragCounter.current <= 0) { dragCounter.current = 0; setIsOver(false); } }}
+      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
+      onDrop={handleDrop}
+    >
+      {/* Drop indicator */}
+      {isOver && (
+        <div className="pointer-events-none absolute inset-2 z-20 rounded-xl border-2 border-dashed border-[#a78bfa]/60 bg-[#a78bfa]/5" />
+      )}
+
       <div className="flex items-center gap-2 px-5 pb-3 pt-4">
         <span className="text-[15px] font-bold text-[#f4f4f5]">{column.label}</span>
         <span className="text-[13px] font-medium text-[#71717a]">{tasks.length}</span>

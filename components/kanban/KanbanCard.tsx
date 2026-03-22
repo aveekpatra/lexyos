@@ -8,9 +8,12 @@ import type { Doc, Id } from "@/convex/_generated/dataModel";
 import {
   ContextMenu, ContextMenuTrigger, ContextMenuPopup,
 } from "@/components/ui/context-menu";
-import { Menu, MenuTrigger, MenuPopup, MenuItem, MenuSeparator } from "@/components/ui/menu";
-import { Calendar } from "@/components/ui/calendar";
-import { Popover, PopoverTrigger, PopoverPopup } from "@/components/ui/popover";
+import { Menu, MenuTrigger, MenuPopup, MenuItem, MenuSeparator, MenuSub, MenuSubTrigger, MenuSubPopup } from "@/components/ui/menu";
+import {
+  DatePickerPopover, TimePickerPopover, DurationPickerPopover, ProjectPickerPopover,
+  TaskChip, formatDuration, formatTime12, computeDuration,
+} from "@/components/tasks/TaskPropertyPopovers";
+
 import {
   Dialog, DialogPopup, DialogHeader, DialogTitle, DialogPanel, DialogFooter,
 } from "@/components/ui/dialog";
@@ -56,16 +59,15 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue }: KanbanCar
     else if (isToday(d)) dateColor = "#fb923c";
   }
 
-  const duration =
-    task.scheduledStartTime && task.scheduledEndTime
-      ? fmtDuration(task.scheduledStartTime, task.scheduledEndTime)
-      : null;
+  const durationMins = computeDuration(task.scheduledStartTime, task.scheduledEndTime);
+  const duration = durationMins ? formatDuration(durationMins) : null;
 
   const handleDragStart = useCallback((e: React.DragEvent) => {
     e.dataTransfer.setData("text/plain", task._id);
+    e.dataTransfer.setData("application/source-date", dateStr || "");
     e.dataTransfer.effectAllowed = "move";
     setIsDragging(true);
-  }, [task._id]);
+  }, [task._id, dateStr]);
 
   const handleDragEnd = useCallback(() => {
     setIsDragging(false);
@@ -111,64 +113,193 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue }: KanbanCar
             {task.title}
           </span>
 
-          {/* Meta */}
-          <div className="flex shrink-0 items-center gap-1.5 text-[11px]" onClick={(e) => e.stopPropagation()} onContextMenu={(e) => e.stopPropagation()}>
+          {/* Meta chips — each opens its Akiflow-style popover */}
+          <div className="flex shrink-0 items-center gap-1.5" draggable={false} onClick={(e) => e.stopPropagation()} onContextMenu={(e) => e.stopPropagation()}>
             {typeof (task as Record<string, unknown>).dueTime === "string" && (
-              <span className="rounded-[5px] border border-[#2a2a36] bg-[#131318] px-1.5 py-0.5 font-medium text-[#a1a1aa] shadow-[0_1px_0_0_rgba(0,0,0,0.4),inset_0_1px_0_0_rgba(255,255,255,0.04)]">
-                {fmtTime((task as Record<string, unknown>).dueTime as string)}
-              </span>
+              <TimePickerPopover
+                value={(task as Record<string, unknown>).dueTime as string}
+                onChange={(time) => updateTask({ id: task._id, ...(time ? { dueTime: time } : { clearDueTime: true }) })}
+              >
+                <TaskChip active>{formatTime12((task as Record<string, unknown>).dueTime as string)}</TaskChip>
+              </TimePickerPopover>
             )}
-            <TaskDateChip
-              taskId={task._id}
-              dueDate={task.dueDate}
-              dateColor={dateColor}
-            />
+            <DatePickerPopover
+              value={task.dueDate}
+              onChange={(date) => updateTask({ id: task._id, ...(date ? { dueDate: date } : { clearDueDate: true }) })}
+            >
+              <TaskChip active={!!dateStr} className={dateStr ? "" : "opacity-0 group-hover:opacity-100"}>
+                <span style={dateStr ? { color: dateColor } : undefined}>
+                  {dateStr ? format(parseISO(dateStr), "MMM d") : "Date"}
+                </span>
+              </TaskChip>
+            </DatePickerPopover>
             {duration && (
-              <span className="rounded-[5px] border border-[#2a2a36] bg-[#131318] px-1.5 py-0.5 font-medium text-[#a1a1aa] shadow-[0_1px_0_0_rgba(0,0,0,0.4),inset_0_1px_0_0_rgba(255,255,255,0.04)]">
-                {duration}
-              </span>
+              <DurationPickerPopover
+                value={durationMins}
+                onChange={(mins) => {
+                  if (mins === undefined) {
+                    updateTask({ id: task._id, clearScheduledStartTime: true, clearScheduledEndTime: true });
+                  } else {
+                    const start = task.scheduledStartTime || "09:00";
+                    const [sh, sm] = start.split(":").map(Number);
+                    const endMins = sh * 60 + sm + mins;
+                    const eh = Math.floor(endMins / 60) % 24;
+                    const em = endMins % 60;
+                    updateTask({
+                      id: task._id,
+                      scheduledStartTime: start,
+                      scheduledEndTime: `${String(eh).padStart(2, "0")}:${String(em).padStart(2, "0")}`,
+                    });
+                  }
+                }}
+              >
+                <TaskChip active>{duration}</TaskChip>
+              </DurationPickerPopover>
             )}
             {project && (
-              <span className="max-w-[60px] truncate rounded-[5px] border border-[#2a2a36] bg-[#131318] px-1.5 py-0.5 font-semibold shadow-[0_1px_0_0_rgba(0,0,0,0.4),inset_0_1px_0_0_rgba(255,255,255,0.04)]" style={{ color: project.color }}>
-                {project.name}
-              </span>
+              <ProjectPickerPopover
+                value={task.projectId}
+                onChange={(pid) => updateTask({ id: task._id, ...(pid ? { projectId: pid } : { clearProjectId: true }) })}
+              >
+                <TaskChip active className="max-w-[70px] truncate">
+                  <span style={{ color: project.color }}>{project.name}</span>
+                </TaskChip>
+              </ProjectPickerPopover>
             )}
           </div>
         </ContextMenuTrigger>
 
-        {/* Right-click menu */}
-        <ContextMenuPopup>
-          <MenuItem onClick={() => setEditOpen(true)}>Edit</MenuItem>
-          <MenuSeparator />
-          {(["p1", "p2", "p3", "p4"] as const).map((p) => (
-            <MenuItem key={p} onClick={() => updateTask({ id: task._id, priority: p })}>
-              <span className="size-2.5 rounded-full" style={{ backgroundColor: PRIORITY_COLORS[p] }} />
-              {PRIORITY_LABELS[p]}
-              {task.priority === p && <span className="ml-auto text-[10px] text-[#71717a]">✓</span>}
-            </MenuItem>
-          ))}
-          <MenuSeparator />
-          {projects && projects.length > 0 && (
-            <>
-              <MenuItem onClick={() => updateTask({ id: task._id, clearProjectId: true })}>
-                No project
-                {!task.projectId && <span className="ml-auto text-[10px] text-[#71717a]">✓</span>}
-              </MenuItem>
-              {projects.map((p) => (
-                <MenuItem key={p._id} onClick={() => updateTask({ id: task._id, projectId: p._id })}>
-                  <span className="size-2 rounded-full" style={{ backgroundColor: p.color }} />
-                  {p.name}
-                  {task.projectId === p._id && <span className="ml-auto text-[10px] text-[#71717a]">✓</span>}
+        {/* Right-click menu — Akiflow style */}
+        <ContextMenuPopup className="w-[220px] rounded-xl border border-[#2a2a36] bg-[#131318] p-1.5 shadow-[0_8px_32px_rgba(0,0,0,0.5)]">
+          <MenuItem onClick={() => setEditOpen(true)} className="rounded-lg px-3 py-2 text-sm text-[#d4d4d8] hover:bg-[#1f1f28]">
+            Edit task
+          </MenuItem>
+          <MenuSeparator className="my-1 border-[#1f1f28]" />
+
+          {/* ── Priority submenu ── */}
+          <MenuSub>
+            <MenuSubTrigger className="rounded-lg px-3 py-2 text-sm text-[#d4d4d8] hover:bg-[#1f1f28]">
+              <span className="flex items-center gap-2.5">
+                <span className="size-2.5 rounded-full" style={{ backgroundColor: color }} />
+                Priority
+              </span>
+            </MenuSubTrigger>
+            <MenuSubPopup className="w-[180px] rounded-xl border border-[#2a2a36] bg-[#131318] p-1.5 shadow-[0_8px_32px_rgba(0,0,0,0.5)]">
+              {(["p1", "p2", "p3", "p4"] as const).map((p) => (
+                <MenuItem
+                  key={p}
+                  onClick={() => updateTask({ id: task._id, priority: p })}
+                  className={`rounded-lg px-3 py-2 text-sm text-[#d4d4d8] hover:bg-[#1f1f28] ${task.priority === p ? "bg-[#1f1f28]" : ""}`}
+                >
+                  <span className="flex items-center gap-2.5">
+                    <span className="size-2.5 rounded-full" style={{ backgroundColor: PRIORITY_COLORS[p] }} />
+                    {PRIORITY_LABELS[p]}
+                  </span>
+                  {task.priority === p && <span className="ml-auto text-[10px] text-[#71717a]">✓</span>}
                 </MenuItem>
               ))}
-              <MenuSeparator />
-            </>
+            </MenuSubPopup>
+          </MenuSub>
+
+          {/* ── Date submenu ── */}
+          <MenuSub>
+            <MenuSubTrigger className="rounded-lg px-3 py-2 text-sm text-[#d4d4d8] hover:bg-[#1f1f28]">
+              <span className="flex items-center gap-2.5">
+                <span className="text-[#71717a]">📅</span>
+                {dateStr ? format(parseISO(dateStr), "MMM d") : "Set date"}
+              </span>
+            </MenuSubTrigger>
+            <MenuSubPopup className="w-[240px] rounded-xl border border-[#2a2a36] bg-[#131318] p-1.5 shadow-[0_8px_32px_rgba(0,0,0,0.5)]">
+              {[
+                { label: "Today", date: format(new Date(), "yyyy-MM-dd") },
+                { label: "Tomorrow", date: format(new Date(Date.now() + 86400000), "yyyy-MM-dd") },
+              ].map((opt) => (
+                <MenuItem
+                  key={opt.label}
+                  onClick={() => updateTask({ id: task._id, dueDate: opt.date })}
+                  className="rounded-lg px-3 py-2 text-sm text-[#d4d4d8] hover:bg-[#1f1f28]"
+                >
+                  {opt.label}
+                </MenuItem>
+              ))}
+              {dateStr && (
+                <>
+                  <MenuSeparator className="my-1 border-[#1f1f28]" />
+                  <MenuItem
+                    onClick={() => updateTask({ id: task._id, clearDueDate: true })}
+                    className="rounded-lg px-3 py-2 text-sm text-[#ef4444] hover:bg-[#1f1f28]"
+                  >
+                    Remove date
+                  </MenuItem>
+                </>
+              )}
+            </MenuSubPopup>
+          </MenuSub>
+
+          {/* ── Project submenu ── */}
+          {projects && projects.length > 0 && (
+            <MenuSub>
+              <MenuSubTrigger className="rounded-lg px-3 py-2 text-sm text-[#d4d4d8] hover:bg-[#1f1f28]">
+                <span className="flex items-center gap-2.5">
+                  {project ? (
+                    <span className="size-2.5 rounded-full" style={{ backgroundColor: project.color }} />
+                  ) : (
+                    <span className="text-[#71717a]">📁</span>
+                  )}
+                  {project ? project.name : "Project"}
+                </span>
+              </MenuSubTrigger>
+              <MenuSubPopup className="w-[200px] rounded-xl border border-[#2a2a36] bg-[#131318] p-1.5 shadow-[0_8px_32px_rgba(0,0,0,0.5)]">
+                <MenuItem
+                  onClick={() => updateTask({ id: task._id, clearProjectId: true })}
+                  className={`rounded-lg px-3 py-2 text-sm text-[#d4d4d8] hover:bg-[#1f1f28] ${!task.projectId ? "bg-[#1f1f28]" : ""}`}
+                >
+                  No project
+                  {!task.projectId && <span className="ml-auto text-[10px] text-[#71717a]">✓</span>}
+                </MenuItem>
+                {projects.map((p) => (
+                  <MenuItem
+                    key={p._id}
+                    onClick={() => updateTask({ id: task._id, projectId: p._id })}
+                    className={`rounded-lg px-3 py-2 text-sm text-[#d4d4d8] hover:bg-[#1f1f28] ${task.projectId === p._id ? "bg-[#1f1f28]" : ""}`}
+                  >
+                    <span className="flex items-center gap-2.5">
+                      <span className="size-2.5 rounded-full" style={{ backgroundColor: p.color }} />
+                      {p.name}
+                    </span>
+                    {task.projectId === p._id && <span className="ml-auto text-[10px] text-[#71717a]">✓</span>}
+                  </MenuItem>
+                ))}
+                {task.projectId && (
+                  <>
+                    <MenuSeparator className="my-1 border-[#1f1f28]" />
+                    <MenuItem
+                      onClick={() => updateTask({ id: task._id, clearProjectId: true })}
+                      className="rounded-lg px-3 py-2 text-sm text-[#ef4444] hover:bg-[#1f1f28]"
+                    >
+                      Remove project
+                    </MenuItem>
+                  </>
+                )}
+              </MenuSubPopup>
+            </MenuSub>
           )}
-          <MenuItem onClick={() => toggleComplete({ id: task._id })}>
+
+          <MenuSeparator className="my-1 border-[#1f1f28]" />
+
+          <MenuItem
+            onClick={() => toggleComplete({ id: task._id })}
+            className="rounded-lg px-3 py-2 text-sm text-[#d4d4d8] hover:bg-[#1f1f28]"
+          >
             {isDone ? "Mark incomplete" : "Mark done"}
           </MenuItem>
-          <MenuSeparator />
-          <MenuItem variant="destructive" onClick={() => removeTask({ id: task._id })}>
+
+          <MenuSeparator className="my-1 border-[#1f1f28]" />
+
+          <MenuItem
+            onClick={() => removeTask({ id: task._id })}
+            className="rounded-lg px-3 py-2 text-sm text-[#ef4444] hover:bg-[#1f1f28]"
+          >
             <HugeiconsIcon icon={Delete01Icon} size={14} />
             Delete
           </MenuItem>
@@ -183,53 +314,6 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue }: KanbanCar
 
 export default KanbanCard;
 
-/* ─── Date chip ─── */
-function TaskDateChip({ taskId, dueDate, dateColor }: {
-  taskId: Id<"tasks">; dueDate?: string; dateColor: string;
-}) {
-  const updateTask = useMutation(api.tasks.update);
-
-  return (
-    <Popover>
-      <PopoverTrigger
-        render={
-          <button
-            className={`flex items-center gap-1 rounded-[5px] border px-1.5 py-0.5 text-[11px] font-medium transition-colors ${
-              dueDate
-                ? "border-[#2a2a36] bg-[#131318] shadow-[0_1px_0_0_rgba(0,0,0,0.4),inset_0_1px_0_0_rgba(255,255,255,0.04)] hover:border-[#3a3a48]"
-                : "border-[#2a2a36] bg-[#131318] text-[#52525b] shadow-[0_1px_0_0_rgba(0,0,0,0.4),inset_0_1px_0_0_rgba(255,255,255,0.04)] hover:border-[#3a3a48] hover:text-[#71717a]"
-            }`}
-            style={dueDate ? { color: dateColor } : undefined}
-          />
-        }
-      >
-        {dueDate ? format(parseISO(dueDate), "MMM d") : "Set date"}
-      </PopoverTrigger>
-      <PopoverPopup sideOffset={4} className="p-0">
-        <Calendar
-          mode="single"
-          selected={dueDate ? parseISO(dueDate) : undefined}
-          onSelect={(date) => {
-            updateTask({
-              id: taskId,
-              dueDate: date ? format(date, "yyyy-MM-dd") : undefined,
-            });
-          }}
-        />
-        {dueDate && (
-          <div className="border-t px-3 py-2">
-            <button
-              onClick={() => updateTask({ id: taskId, dueDate: undefined })}
-              className="text-[11px] text-[#ef4444] hover:underline"
-            >
-              Clear date
-            </button>
-          </div>
-        )}
-      </PopoverPopup>
-    </Popover>
-  );
-}
 
 /* ─── Unified Task Dialog (create + edit) ─── */
 const RECURRENCE_OPTIONS = [
@@ -267,7 +351,8 @@ export function TaskEditDialog({ task, open, onOpenChange, defaultDueDate }: {
   const [saving, setSaving] = useState(false);
 
   const color = PRIORITY_COLORS[priority] || PRIORITY_COLORS.p4;
-  const duration = startTime && endTime ? fmtDuration(startTime, endTime) : null;
+  const durationMinutes = computeDuration(startTime, endTime);
+  const duration = durationMinutes ? formatDuration(durationMinutes) : null;
   const selectedProject = projects?.find((p) => p._id === projectId);
   const isDone = task?.status === "done";
   const recLabel = RECURRENCE_OPTIONS.find((r) => r.value === recurrence)?.label || "Repeat";
@@ -349,8 +434,16 @@ export function TaskEditDialog({ task, open, onOpenChange, defaultDueDate }: {
           <div className="flex flex-col gap-4">
             {/* Chip bar */}
             <div className="flex flex-wrap items-center gap-2">
-              <DateButton value={dueDate} onChange={setDueDate} />
-              <TimeButton value={dueTime} onChange={setDueTime} label="Time" />
+              <DatePickerPopover value={dueDate || undefined} onChange={(d) => setDueDate(d || "")}>
+                <button className={dueDate ? chipClass : chipEmptyClass}>
+                  {dueDate ? format(parseISO(dueDate), "MMM d, yyyy") : "Date"}
+                </button>
+              </DatePickerPopover>
+              <TimePickerPopover value={dueTime || undefined} onChange={(t) => setDueTime(t || "")}>
+                <button className={dueTime ? chipClass : chipEmptyClass}>
+                  {dueTime ? formatTime12(dueTime) : "Time"}
+                </button>
+              </TimePickerPopover>
               {duration && <span className={chipClass}>{duration}</span>}
 
               {/* Priority */}
@@ -425,39 +518,38 @@ export function TaskEditDialog({ task, open, onOpenChange, defaultDueDate }: {
 
             {/* Schedule */}
             <div className="flex items-center gap-2">
-              <TimeButton value={startTime} onChange={setStartTime} label="Start" />
+              <TimePickerPopover value={startTime || undefined} onChange={(t) => setStartTime(t || "")}>
+                <button className={startTime ? chipClass : chipEmptyClass}>
+                  {startTime ? formatTime12(startTime) : "Start"}
+                </button>
+              </TimePickerPopover>
               {startTime && (
                 <>
                   <span className="text-muted-foreground">→</span>
-                  <TimeButton value={endTime} onChange={setEndTime} label="End" />
+                  <TimePickerPopover value={endTime || undefined} onChange={(t) => setEndTime(t || "")}>
+                    <button className={endTime ? chipClass : chipEmptyClass}>
+                      {endTime ? formatTime12(endTime) : "End"}
+                    </button>
+                  </TimePickerPopover>
                 </>
               )}
             </div>
 
             {/* Project */}
             <div className="flex items-center gap-2">
-              <Menu>
-                <MenuTrigger
-                  render={
-                    selectedProject
-                      ? <button className={chipClass}><span className="size-2 rounded-full" style={{ backgroundColor: selectedProject.color }} />{selectedProject.name}</button>
-                      : <button className={chipEmptyClass}>Project</button>
-                  }
-                />
-                <MenuPopup>
-                  <MenuItem onClick={() => setProjectId("")}>
-                    None
-                    {!projectId && <span className="ml-auto text-xs text-muted-foreground">✓</span>}
-                  </MenuItem>
-                  {projects?.map((p) => (
-                    <MenuItem key={p._id} onClick={() => setProjectId(p._id)}>
-                      <span className="size-2 rounded-full" style={{ backgroundColor: p.color }} />
-                      {p.name}
-                      {projectId === p._id && <span className="ml-auto text-xs text-muted-foreground">✓</span>}
-                    </MenuItem>
-                  ))}
-                </MenuPopup>
-              </Menu>
+              <ProjectPickerPopover
+                value={projectId ? (projectId as Id<"projects">) : undefined}
+                onChange={(pid) => setProjectId(pid || "")}
+              >
+                {selectedProject ? (
+                  <button className={chipClass}>
+                    <span className="size-2 rounded-full" style={{ backgroundColor: selectedProject.color }} />
+                    {selectedProject.name}
+                  </button>
+                ) : (
+                  <button className={chipEmptyClass}>Project</button>
+                )}
+              </ProjectPickerPopover>
             </div>
           </div>
         </DialogPanel>
@@ -473,92 +565,3 @@ export function TaskEditDialog({ task, open, onOpenChange, defaultDueDate }: {
   );
 }
 
-/* ─── Date button with calendar popover ─── */
-function DateButton({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  const chip = "inline-flex h-7 items-center gap-1.5 rounded-md border border-input bg-secondary px-2.5 text-xs font-medium text-secondary-foreground transition-colors hover:bg-accent hover:text-accent-foreground";
-  const chipEmpty = "inline-flex h-7 items-center gap-1.5 rounded-md border border-dashed border-input px-2.5 text-xs text-muted-foreground transition-colors hover:border-ring hover:text-foreground";
-
-  return (
-    <Popover>
-      <PopoverTrigger render={<button className={value ? chip : chipEmpty} />}>
-        {value ? format(parseISO(value), "MMM d, yyyy") : "Date"}
-      </PopoverTrigger>
-      <PopoverPopup sideOffset={4} className="p-0">
-        <Calendar
-          mode="single"
-          selected={value ? parseISO(value) : undefined}
-          onSelect={(d) => onChange(d ? format(d, "yyyy-MM-dd") : "")}
-        />
-        {value && (
-          <div className="border-t px-3 py-2">
-            <button onClick={() => onChange("")} className="text-xs text-destructive-foreground hover:underline">Clear</button>
-          </div>
-        )}
-      </PopoverPopup>
-    </Popover>
-  );
-}
-
-/* ─── Time picker — clickable grid of times ─── */
-const TIMES = Array.from({ length: 48 }, (_, i) => {
-  const h = Math.floor(i / 2);
-  const m = i % 2 === 0 ? "00" : "30";
-  const value = `${String(h).padStart(2, "0")}:${m}`;
-  const ampm = h === 0 ? "12" : h > 12 ? String(h - 12) : String(h);
-  const suffix = h < 12 ? "am" : "pm";
-  const label = `${ampm}:${m} ${suffix}`;
-  return { value, label };
-});
-
-function TimeButton({ value, onChange, label }: { value: string; onChange: (v: string) => void; label: string }) {
-  const chip = "inline-flex h-7 items-center gap-1.5 rounded-md border border-input bg-secondary px-2.5 text-xs font-medium text-secondary-foreground transition-colors hover:bg-accent hover:text-accent-foreground";
-  const chipEmpty = "inline-flex h-7 items-center gap-1.5 rounded-md border border-dashed border-input px-2.5 text-xs text-muted-foreground transition-colors hover:border-ring hover:text-foreground";
-
-  return (
-    <Popover>
-      <PopoverTrigger render={<button className={value ? chip : chipEmpty} />}>
-        {value ? fmtTime(value) : label}
-      </PopoverTrigger>
-      <PopoverPopup sideOffset={4} className="w-36 p-0">
-        <div className="max-h-56 overflow-y-auto py-1">
-          {TIMES.map((t) => (
-            <button
-              key={t.value}
-              onClick={() => onChange(t.value)}
-              className={`flex w-full px-3 py-1.5 text-left text-xs transition-colors ${
-                value === t.value
-                  ? "bg-accent font-semibold text-accent-foreground"
-                  : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
-        {value && (
-          <div className="border-t px-3 py-2">
-            <button onClick={() => onChange("")} className="text-xs text-destructive-foreground hover:underline">Clear</button>
-          </div>
-        )}
-      </PopoverPopup>
-    </Popover>
-  );
-}
-
-function fmtTime(time: string): string {
-  const [h, m] = time.split(":").map(Number);
-  const ampm = h < 12 ? "am" : "pm";
-  const hour = h === 0 ? 12 : h > 12 ? h - 12 : h;
-  return `${hour}:${String(m).padStart(2, "0")} ${ampm}`;
-}
-
-function fmtDuration(start: string, end: string): string {
-  const [sh, sm] = start.split(":").map(Number);
-  const [eh, em] = end.split(":").map(Number);
-  const m = eh * 60 + em - (sh * 60 + sm);
-  if (m <= 0) return "";
-  const h = Math.floor(m / 60);
-  const r = m % 60;
-  if (h > 0 && r > 0) return `${h}h ${r}m`;
-  return h > 0 ? `${h}h` : `${r}m`;
-}

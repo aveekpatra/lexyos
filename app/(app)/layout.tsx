@@ -1,6 +1,6 @@
 "use client";
 
-import { ReactNode, useState, useEffect } from "react";
+import { ReactNode, lazy, Suspense } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { UserButton } from "@clerk/nextjs";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -19,6 +19,8 @@ import {
   TooltipPopup,
 } from "@/components/ui/tooltip";
 
+const FloatingPill = lazy(() => import("@/components/command-bar/FloatingPill"));
+
 const NAV_ITEMS = [
   { icon: InboxIcon, label: "Inbox", href: "/timeline" },
   { icon: Calendar01Icon, label: "Planner", href: "/planner" },
@@ -28,18 +30,6 @@ const NAV_ITEMS = [
 export default function AppLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const [commandBarOpen, setCommandBarOpen] = useState(false);
-
-  useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
-      if ((e.ctrlKey || e.metaKey) && e.key === "k") {
-        e.preventDefault();
-        setCommandBarOpen(true);
-      }
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
 
   return (
     <div className="flex h-svh overflow-hidden">
@@ -63,11 +53,6 @@ export default function AppLayout({ children }: { children: ReactNode }) {
               onClick={() => router.push(item.href)}
             />
           ))}
-          <RailButton
-            icon={Search01Icon}
-            label="Search"
-            onClick={() => setCommandBarOpen(true)}
-          />
         </nav>
 
         <div className="flex-1" />
@@ -83,9 +68,10 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         {children}
       </main>
 
-      {commandBarOpen && (
-        <CommandBarLazy onClose={() => setCommandBarOpen(false)} />
-      )}
+      {/* Floating AI pill — always visible */}
+      <Suspense fallback={null}>
+        <FloatingPill />
+      </Suspense>
     </div>
   );
 }
@@ -120,18 +106,4 @@ function RailButton({
       <TooltipPopup side="right">{label}</TooltipPopup>
     </Tooltip>
   );
-}
-
-function CommandBarLazy({ onClose }: { onClose: () => void }) {
-  const [CommandBar, setCommandBar] =
-    useState<React.ComponentType<{ onClose: () => void }> | null>(null);
-
-  useEffect(() => {
-    import("@/components/command-bar/CommandBar")
-      .then((mod) => setCommandBar(() => mod.default))
-      .catch(console.error);
-  }, []);
-
-  if (!CommandBar) return null;
-  return <CommandBar onClose={onClose} />;
 }

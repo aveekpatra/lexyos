@@ -27,6 +27,7 @@ type Col = {
   shortcut: string;
   tasks: Doc<"tasks">[];
   overdueTasks: Doc<"tasks">[];
+  doneTasks: Doc<"tasks">[];
 };
 
 type SortBy = "priority" | "date" | "created" | "alpha";
@@ -41,6 +42,7 @@ export default function KanbanBoard() {
   const projects = useQuery(api.projects.list, { status: "active" });
   const [view, setView] = useState<"overview" | "d" | "w" | "m">("overview");
   const [activeAdd, setActiveAdd] = useState<string | null>(null);
+  const [showDone, setShowDone] = useState(false);
   const [sortBy, setSortBy] = useState<SortBy>("priority");
   const [filterPriority, setFilterPriority] = useState<FilterPriority>(new Set(["p1", "p2", "p3", "p4"]));
   const [filterProject, setFilterProject] = useState<string | null>(null); // null = all
@@ -113,10 +115,10 @@ export default function KanbanBoard() {
       }
 
       return [
-        { id: "morning", title: "Morning", subtitle: "6am – 12pm", shortcut: "1", tasks: buckets.morning, overdueTasks: overdue },
-        { id: "afternoon", title: "Afternoon", subtitle: "12pm – 5pm", shortcut: "2", tasks: buckets.afternoon, overdueTasks: [] },
-        { id: "evening", title: "Evening", subtitle: "5pm – 9pm", shortcut: "3", tasks: buckets.evening, overdueTasks: [] },
-        { id: "night", title: "Night", subtitle: "9pm – 6am", shortcut: "4", tasks: buckets.night, overdueTasks: [] },
+        { id: "morning", title: "Morning", subtitle: "6am – 12pm", shortcut: "1", tasks: buckets.morning, overdueTasks: overdue, doneTasks: [] },
+        { id: "afternoon", title: "Afternoon", subtitle: "12pm – 5pm", shortcut: "2", tasks: buckets.afternoon, overdueTasks: [], doneTasks: [] },
+        { id: "evening", title: "Evening", subtitle: "5pm – 9pm", shortcut: "3", tasks: buckets.evening, overdueTasks: [], doneTasks: [] },
+        { id: "night", title: "Night", subtitle: "9pm – 6am", shortcut: "4", tasks: buckets.night, overdueTasks: [], doneTasks: [] },
       ] as Col[];
     }
 
@@ -141,6 +143,7 @@ export default function KanbanBoard() {
             const ds = t.dueDate || t.scheduledDate;
             return ds && isBefore(parseISO(ds), today) && !isToday(parseISO(ds));
           }) : [],
+          doneTasks: [],
         });
       }
       return cols;
@@ -169,6 +172,7 @@ export default function KanbanBoard() {
             const ds = t.dueDate || t.scheduledDate;
             return ds && isBefore(parseISO(ds), today) && !isToday(parseISO(ds));
           }) : [],
+          doneTasks: [],
         });
       }
       return cols;
@@ -199,10 +203,10 @@ export default function KanbanBoard() {
     }
 
     return [
-      { id: "today", title: "Today", subtitle: format(now, "MMM d"), shortcut: "1", tasks: todayTasks, overdueTasks: overdue },
-      { id: "this-week", title: "This Week", subtitle: `${format(weekStart, "d")}-${format(weekEnd, "d MMM")}`, shortcut: "2", tasks: thisWeekTasks, overdueTasks: [] },
-      { id: "next-week", title: "Next Week", subtitle: `${format(nextWeekStart, "d")}-${format(nextWeekEnd, "d MMM")}`, shortcut: "3", tasks: nextWeekTasks, overdueTasks: [] },
-      { id: "this-month", title: "This Month", subtitle: format(monthEnd, "MMM yyyy"), shortcut: "4", tasks: thisMonthTasks, overdueTasks: [] },
+      { id: "today", title: "Today", subtitle: format(now, "MMM d"), shortcut: "1", tasks: todayTasks, overdueTasks: overdue, doneTasks: [] },
+      { id: "this-week", title: "This Week", subtitle: `${format(weekStart, "d")}-${format(weekEnd, "d MMM")}`, shortcut: "2", tasks: thisWeekTasks, overdueTasks: [], doneTasks: [] },
+      { id: "next-week", title: "Next Week", subtitle: `${format(nextWeekStart, "d")}-${format(nextWeekEnd, "d MMM")}`, shortcut: "3", tasks: nextWeekTasks, overdueTasks: [], doneTasks: [] },
+      { id: "this-month", title: "This Month", subtitle: format(monthEnd, "MMM yyyy"), shortcut: "4", tasks: thisMonthTasks, overdueTasks: [], doneTasks: [] },
     ] as Col[];
   }, [tasks, view]);
 
@@ -375,6 +379,19 @@ export default function KanbanBoard() {
               )}
             </MenuPopup>
           </Menu>
+
+          {/* Show done toggle */}
+          <button
+            onClick={() => setShowDone(!showDone)}
+            className={`inline-flex h-7 items-center gap-1.5 rounded-[10px] border bg-[#131318] px-2.5 text-xs font-medium shadow-[0_2px_0_0_rgba(0,0,0,0.4),inset_0_1px_0_0_rgba(255,255,255,0.04)] transition-colors hover:border-[#3a3a4a] hover:text-white ${
+              showDone ? "border-[#a78bfa]/30 text-[#a78bfa]" : "border-[#2a2a36] text-[#a1a1aa]"
+            }`}
+          >
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path d="M2 6l3 3 5-5" />
+            </svg>
+            <span>Done</span>
+          </button>
         </div>
       </div>
 
@@ -396,6 +413,8 @@ export default function KanbanBoard() {
             onStopAdd={() => setActiveAdd(null)}
             applySort={apply}
             view={view}
+            showDone={showDone}
+            allTasks={tasks || []}
           />
         ))}
       </div>
@@ -409,11 +428,13 @@ const QUARTER_START_TIMES: Record<string, string> = {
 };
 
 /* ─── Column ─── */
-function UpcomingColumn({ column, isLast, isAdding, onStartAdd, onStopAdd, applySort, view }: {
+function UpcomingColumn({ column, isLast, isAdding, onStartAdd, onStopAdd, applySort, view, showDone, allTasks }: {
   column: Col; isLast: boolean; isAdding: boolean;
   onStartAdd: () => void; onStopAdd: () => void;
   applySort: (list: Doc<"tasks">[]) => Doc<"tasks">[];
   view: string;
+  showDone: boolean;
+  allTasks: Doc<"tasks">[];
 }) {
   const createTask = useMutation(api.tasks.create);
   const updateTask = useMutation(api.tasks.update);
@@ -448,6 +469,45 @@ function UpcomingColumn({ column, isLast, isAdding, onStartAdd, onStopAdd, apply
     }
     return format(now, "yyyy-MM-dd");
   }, [column.id]);
+
+  // Done tasks for this column — tasks matching this column's date range that are done
+  const doneTasks = useMemo(() => {
+    if (!showDone) return [];
+    const now = new Date();
+    const today = startOfDay(now);
+    const ws = startOfWeek(now, { weekStartsOn: 1 });
+    const we = endOfWeek(now, { weekStartsOn: 1 });
+    const nws = addWeeks(ws, 1);
+    const nwe = addWeeks(we, 1);
+    const me = endOfMonth(now);
+
+    return allTasks.filter((t) => {
+      if (t.status !== "done") return false;
+      const ds = t.dueDate || t.scheduledDate;
+      if (!ds) return false;
+      const d = parseISO(ds);
+
+      // Specific day columns — exact day match
+      if (column.id.startsWith("day-") || column.id.startsWith("mday-") || column.id === "today") {
+        return isSameDay(d, parseISO(defaultDueDate));
+      }
+      // Range columns — same logic as active task bucketing
+      if (column.id === "this-week") {
+        return isWithinInterval(d, { start: today, end: we }) && !isToday(d);
+      }
+      if (column.id === "next-week") {
+        return isWithinInterval(d, { start: nws, end: nwe });
+      }
+      if (column.id === "this-month") {
+        return isWithinInterval(d, { start: nwe, end: me });
+      }
+      // Day-view quarters — today only
+      if (["morning", "afternoon", "evening", "night"].includes(column.id)) {
+        return isSameDay(d, today);
+      }
+      return false;
+    });
+  }, [showDone, allTasks, column.id, defaultDueDate]);
 
   const handleQuickAdd = useCallback(async () => {
     if (!newTitle.trim()) return;
@@ -608,7 +668,22 @@ function UpcomingColumn({ column, isLast, isAdding, onStartAdd, onStopAdd, apply
           </div>
         )}
 
-        {totalTasks === 0 && (
+        {/* Done tasks */}
+        {showDone && doneTasks.length > 0 && (
+          <div className="mt-4 border-t border-[#2a2a32] pt-3">
+            <div className="mb-2 flex items-center gap-2">
+              <span className="text-[12px] font-medium text-[#52525b]">Completed</span>
+              <span className="flex size-[16px] items-center justify-center rounded-full border border-[#3a3a48] text-[9px] font-medium text-[#52525b]">
+                {doneTasks.length}
+              </span>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              {doneTasks.map((t) => <KanbanCard key={t._id} task={t} />)}
+            </div>
+          </div>
+        )}
+
+        {totalTasks === 0 && !showDone && (
           <div className="mt-auto flex items-center gap-2 pb-1">
             <span className="text-[13px] tracking-wide text-[#52525b]">No tasks planned yet</span>
             <span className="flex size-[18px] items-center justify-center rounded-[5px] border border-[#3a3a48] bg-[#1a1a22] text-[10px] font-bold text-[#606068] shadow-[0_2px_0_0_rgba(0,0,0,0.4),inset_0_1px_0_0_rgba(255,255,255,0.04)]">0</span>
