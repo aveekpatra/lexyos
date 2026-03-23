@@ -5,17 +5,19 @@ import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Doc } from "@/convex/_generated/dataModel";
 import {
-  getCalendarEvents,
-  type GoogleEvent,
+  getCalendarList,
+  type GoogleCalendar,
 } from "@/app/actions/calendar";
+import { fetchGoogleEventsForSync } from "@/app/actions/calendarSync";
 import KanbanCard, { TaskEditDialog } from "@/components/kanban/KanbanCard";
+import { isGoogleCalEvent } from "@/lib/task-utils";
 import { useResizablePanel } from "@/hooks/use-resizable-panel";
 import { ResizeHandle } from "@/components/ResizeHandle";
 import { Kbd } from "@/components/ui/kbd";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverTrigger, PopoverPopup } from "@/components/ui/popover";
 import {
-  Menu, MenuTrigger, MenuPopup, MenuItem,
+  Menu, MenuTrigger, MenuPopup, MenuItem, MenuCheckboxItem, MenuSeparator,
 } from "@/components/ui/menu";
 import { motion } from "motion/react";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -23,12 +25,15 @@ import {
   ArrowLeft01Icon,
   ArrowRight01Icon,
   ArrowLeftDoubleIcon,
+  Calendar03Icon,
+  LayoutAlignLeftIcon,
+  DashedLineCircleIcon,
 } from "@hugeicons/core-free-icons";
 import {
   format, startOfWeek, startOfMonth, endOfMonth, addDays, subDays,
   addWeeks, subWeeks, addMonths, subMonths, isToday,
   parseISO, isSameDay, isSameMonth, eachWeekOfInterval,
-  differenceInMinutes, startOfDay, isBefore, getDate, endOfWeek,
+  startOfDay, isBefore, getDate,
 } from "date-fns";
 
 const HOUR_HEIGHT = 96;
@@ -63,7 +68,30 @@ export default function PlannerView() {
   const createTask = useMutation(api.tasks.create);
   const updateTask = useMutation(api.tasks.update);
 
-  const [events, setEvents] = useState<GoogleEvent[]>([]);
+  const [calendarError, setCalendarError] = useState<string | null>(null);
+  const [calendarLoading, setCalendarLoading] = useState(false);
+  const [googleCalendars, setGoogleCalendars] = useState<GoogleCalendar[]>([]);
+  const bulkUpsert = useMutation(api.tasks.bulkUpsertFromGoogle);
+  const removeDeleted = useMutation(api.tasks.removeDeletedGoogleEvents);
+
+  const [hiddenCalendarIds, setHiddenCalendarIds] = useState<Set<string>>(new Set());
+
+  // Hydrate hidden calendars from localStorage after mount
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem("unifocus-hidden-calendars");
+      if (stored) setHiddenCalendarIds(new Set(JSON.parse(stored)));
+    } catch {}
+  }, []);
+  const [showTaskSidebar, setShowTaskSidebar] = useState(true);
+
+  // Hydrate sidebar visibility from localStorage after mount
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem("unifocus-planner-sidebar");
+      if (stored === "false") setShowTaskSidebar(false);
+    } catch {}
+  }, []);
   const [addingTask, setAddingTask] = useState(false);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [newTitle, setNewTitle] = useState("");
@@ -185,25 +213,78 @@ export default function PlannerView() {
     return () => grid.removeEventListener("scroll", onScroll);
   }, [calView]);
 
-  // Fetch calendar events with 7-day buffer in each direction (not for month)
+  // Fetch Google Calendar list once
   useEffect(() => {
-    async function load() {
+    getCalendarList().then(setGoogleCalendars).catch(() => {});
+  }, []);
+
+  // Persist hidden calendars
+  const toggleCalendar = useCallback((calId: string) => {
+    setHiddenCalendarIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(calId)) next.delete(calId); else next.add(calId);
+      try { localStorage.setItem("unifocus-hidden-calendars", JSON.stringify([...next])); } catch {}
+      return next;
+    });
+  }, []);
+
+  // Persist sidebar visibility
+  const toggleTaskSidebar = useCallback(() => {
+    setShowTaskSidebar((prev) => {
+      const next = !prev;
+      try { localStorage.setItem("unifocus-planner-sidebar", String(next)); } catch {}
+      return next;
+    });
+  }, []);
+
+  // Filter tasks: exclude google_calendar tasks from hidden calendars
+  const visibleTasks = useMemo(() => {
+    if (!tasks) return [];
+    if (hiddenCalendarIds.size === 0) return tasks;
+    return tasks.filter((t) => !t.googleCalendarId || !hiddenCalendarIds.has(t.googleCalendarId));
+  }, [tasks, hiddenCalendarIds]);
+
+  // Sync Google Calendar events → Convex (runs on view/anchor changes)
+  const lastSyncRef = useRef<string>("");
+  useEffect(() => {
+    async function sync() {
+      let timeMin: string, timeMax: string;
+      if (calView === "month") {
+        timeMin = startOfMonth(calAnchor).toISOString();
+        timeMax = addDays(endOfMonth(calAnchor), 1).toISOString();
+      } else if (visibleDays.length > 0) {
+        timeMin = subDays(visibleDays[0], 7).toISOString();
+        timeMax = addDays(visibleDays[visibleDays.length - 1], 8).toISOString();
+      } else return;
+
+      // Deduplicate — don't re-sync if the range hasn't changed
+      const syncKey = `${timeMin}|${timeMax}`;
+      if (syncKey === lastSyncRef.current) return;
+      lastSyncRef.current = syncKey;
+
+      setCalendarLoading(true);
+      setCalendarError(null);
       try {
-        let timeMin: string, timeMax: string;
-        if (calView === "month") {
-          timeMin = startOfMonth(calAnchor).toISOString();
-          timeMax = addDays(endOfMonth(calAnchor), 1).toISOString();
-        } else if (visibleDays.length > 0) {
-          // Buffer: 7 days before first visible, 7 days after last visible
-          timeMin = subDays(visibleDays[0], 7).toISOString();
-          timeMax = addDays(visibleDays[visibleDays.length - 1], 8).toISOString();
-        } else return;
-        const allEvents = await getCalendarEvents(timeMin, timeMax);
-        setEvents(allEvents);
-      } catch { /* Calendar not connected */ }
+        const userTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        const googleEvents = await fetchGoogleEventsForSync(timeMin, timeMax, userTz);
+        if (googleEvents.length > 0) {
+          await bulkUpsert({ events: googleEvents });
+        }
+        // Clean up events deleted from Google Calendar
+        const knownIds = googleEvents.map((e) => e.googleEventId);
+        const rangeStart = timeMin.slice(0, 10); // ISO date
+        const rangeEnd = timeMax.slice(0, 10);
+        await removeDeleted({ knownGoogleEventIds: knownIds, syncRangeStart: rangeStart, syncRangeEnd: rangeEnd });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Failed to sync calendar";
+        setCalendarError(msg);
+        console.error("Calendar sync error:", msg);
+      } finally {
+        setCalendarLoading(false);
+      }
     }
-    load();
-  }, [calAnchor, calView]);
+    sync();
+  }, [calAnchor, calView, bulkUpsert, removeDeleted]);
 
   // Scroll to current hour on mount and when switching views
   useEffect(() => {
@@ -217,15 +298,15 @@ export default function PlannerView() {
     return () => clearTimeout(timer);
   }, [calView]);
 
-  // Tasks for selected day
+  // Tasks for selected day (includes both local and google_calendar tasks)
   const dayTasks = useMemo(() => {
-    if (!tasks) return { overdue: [], day: [], done: [] };
+    if (!visibleTasks.length) return { overdue: [], day: [], done: [] };
     const overdue: Doc<"tasks">[] = [];
     const dayList: Doc<"tasks">[] = [];
     const done: Doc<"tasks">[] = [];
     const realToday = startOfDay(new Date());
     const viewingToday = isSameDay(selectedDate, new Date());
-    for (const t of tasks) {
+    for (const t of visibleTasks) {
       const d = t.dueDate || t.scheduledDate;
       if (!d) continue;
       const pd = parseISO(d);
@@ -233,15 +314,15 @@ export default function PlannerView() {
         if (isSameDay(pd, selectedDate)) done.push(t);
         continue;
       }
-      // Overdue = only when viewing today, based on real current date
-      if (viewingToday && isBefore(pd, realToday)) {
+      // Overdue = only local tasks when viewing today — calendar events from the past are not overdue
+      if (viewingToday && isBefore(pd, realToday) && !isGoogleCalEvent(t)) {
         overdue.push(t);
       } else if (isSameDay(pd, selectedDate)) {
         dayList.push(t);
       }
     }
     return { overdue, day: dayList, done };
-  }, [tasks, selectedDate]);
+  }, [visibleTasks, selectedDate]);
 
   async function handleAdd() {
     if (!newTitle.trim()) return;
@@ -290,8 +371,8 @@ export default function PlannerView() {
 
   return (
     <div className="flex flex-1 overflow-hidden">
-      {/* ── Left panel ── */}
-      <div
+      {/* ── Left panel (task sidebar) ── */}
+      {showTaskSidebar && <div
         className="relative flex shrink-0 flex-col border-r border-dashed border-[#3a3a48]"
         style={{ width: panelWidth }}
         onDragEnter={(e) => { e.preventDefault(); leftDragCounter.current++; setLeftDropOver(true); }}
@@ -304,7 +385,7 @@ export default function PlannerView() {
             className="pointer-events-none absolute inset-2 z-20 rounded-xl border-2 border-dashed border-[#a78bfa]/60 bg-[#a78bfa]/5" />
         )}
 
-        {/* Header with date picker */}
+        {/* Header with date picker + sidebar toggle */}
         <div className="flex items-center justify-between px-5 pb-3 pt-4">
           <Popover>
             <PopoverTrigger render={
@@ -323,6 +404,14 @@ export default function PlannerView() {
               </div>
             </PopoverPopup>
           </Popover>
+
+          <button
+            onClick={toggleTaskSidebar}
+            className={navBtn}
+            title="Hide sidebar"
+          >
+            <HugeiconsIcon icon={LayoutAlignLeftIcon} size={14} />
+          </button>
         </div>
 
         {/* Add task */}
@@ -366,15 +455,63 @@ export default function PlannerView() {
                 {overdueDuration && <span className="text-[11px] font-medium text-[#a1a1aa]">{overdueDuration}</span>}
               </div>
               <div className="flex flex-col gap-1.5">
-                {dayTasks.overdue.map((t) => <KanbanCard key={t._id} task={t} isOverdue />)}
+                {dayTasks.overdue.map((t) => <KanbanCard key={t._id} task={t} isOverdue context="sidebar" />)}
               </div>
             </div>
           )}
-          {dayTasks.day.length > 0 && (
-            <div className="flex flex-col gap-1.5">
-              {dayTasks.day.map((t) => <KanbanCard key={t._id} task={t} />)}
-            </div>
-          )}
+          {/* Unified task list sorted by time (includes local + google_calendar tasks) */}
+          {(() => {
+            const sorted = [...dayTasks.day].sort((a, b) => {
+              const timeA = (a as Record<string, unknown>).dueTime as string || a.scheduledStartTime || "99:99";
+              const timeB = (b as Record<string, unknown>).dueTime as string || b.scheduledStartTime || "99:99";
+              return timeA.localeCompare(timeB);
+            });
+
+            if (sorted.length === 0) return null;
+            return (
+              <div className="flex flex-col gap-1.5">
+                {sorted.map((t) => {
+                  if (t.source === "google_calendar") {
+                    const color = (t as Record<string, unknown>).calendarColor as string || "#059669";
+                    const startStr = t.scheduledStartTime || "";
+                    const endStr = t.scheduledEndTime || "";
+                    let timeStr = "";
+                    if (startStr && endStr) {
+                      const fmtTime = (ts: string) => {
+                        const [hh, mm] = ts.split(":").map(Number);
+                        const h12 = hh === 0 ? 12 : hh > 12 ? hh - 12 : hh;
+                        const ampm = hh < 12 ? "am" : "pm";
+                        return `${h12}:${String(mm).padStart(2, "0")}${ampm}`;
+                      };
+                      timeStr = `${fmtTime(startStr)} – ${fmtTime(endStr)}`;
+                    } else if (startStr) {
+                      const [hh, mm] = startStr.split(":").map(Number);
+                      const h12 = hh === 0 ? 12 : hh > 12 ? hh - 12 : hh;
+                      const ampm = hh < 12 ? "am" : "pm";
+                      timeStr = `${h12}:${String(mm).padStart(2, "0")}${ampm}`;
+                    } else if ((t as Record<string, unknown>).isAllDay) {
+                      timeStr = "All day";
+                    }
+                    return (
+                      <div key={t._id} className="flex items-center gap-2.5 rounded-[10px] border border-[#333340] bg-[#16161e] px-3 py-2.5 shadow-[0_2px_0_0_rgba(0,0,0,0.3),inset_0_1px_0_0_rgba(255,255,255,0.04)] transition-colors hover:border-[#4a4a58] hover:bg-[#1e1e28]">
+                        <HugeiconsIcon icon={DashedLineCircleIcon} size={16} style={{ color }} className="shrink-0" />
+                        <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-[#e4e4e7]">
+                          {t.title || "(No title)"}
+                        </span>
+                        {timeStr && (
+                          <span className="shrink-0 rounded-[6px] bg-[#1a1a22] px-2 py-0.5 text-[11px] font-medium text-[#a1a1aa] shadow-[0_1px_0_0_rgba(0,0,0,0.3),inset_0_1px_0_0_rgba(255,255,255,0.04)]">
+                            {timeStr}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  }
+                  return <KanbanCard key={t._id} task={t} context="sidebar" />;
+                })}
+              </div>
+            );
+          })()}
+
           {totalTasks === 0 && !showDone && (
             <div className="mt-auto flex items-center gap-2 pb-2">
               <span className="text-[12px] tracking-wide text-[#52525b]">No tasks planned yet</span>
@@ -400,16 +537,16 @@ export default function PlannerView() {
               </button>
               {showDone && (
                 <div className="flex flex-col gap-1.5">
-                  {dayTasks.done.map((t) => <KanbanCard key={t._id} task={t} />)}
+                  {dayTasks.done.map((t) => <KanbanCard key={t._id} task={t} context="sidebar" />)}
                 </div>
               )}
             </div>
           )}
         </div>
 
-      </div>
+      </div>}
 
-      <ResizeHandle onMouseDown={handleResize} />
+      {showTaskSidebar && <ResizeHandle onMouseDown={handleResize} />}
 
       {/* ── Right panel: Calendar ── */}
       <div className="flex flex-1 flex-col overflow-hidden">
@@ -459,8 +596,72 @@ export default function PlannerView() {
             <button onClick={navForward} className={navBtn}>
               <HugeiconsIcon icon={ArrowRight01Icon} size={14} />
             </button>
+
+            {/* Divider */}
+            <div className="mx-1 h-5 w-px bg-[#2a2a36]" />
+
+            {/* Calendar picker */}
+            <Menu>
+              <MenuTrigger render={<button className={navBtn} />}>
+                <HugeiconsIcon icon={Calendar03Icon} size={14} />
+              </MenuTrigger>
+              <MenuPopup>
+                {googleCalendars.length === 0 ? (
+                  <MenuItem className="pointer-events-none text-xs text-muted-foreground">No calendars found</MenuItem>
+                ) : (
+                  googleCalendars.map((cal) => (
+                    <MenuCheckboxItem
+                      key={cal.id}
+                      checked={!hiddenCalendarIds.has(cal.id)}
+                      onCheckedChange={() => toggleCalendar(cal.id)}
+                    >
+                      <span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: cal.backgroundColor }} />
+                      <span className="truncate">{cal.summary}</span>
+                    </MenuCheckboxItem>
+                  ))
+                )}
+                {hiddenCalendarIds.size > 0 && (
+                  <>
+                    <MenuSeparator />
+                    <MenuItem onClick={() => {
+                      setHiddenCalendarIds(new Set());
+                      try { localStorage.removeItem("unifocus-hidden-calendars"); } catch {}
+                    }}>
+                      Show all calendars
+                    </MenuItem>
+                  </>
+                )}
+              </MenuPopup>
+            </Menu>
+
+            {/* Sidebar toggle — only show when sidebar is hidden */}
+            {!showTaskSidebar && (
+              <button
+                onClick={toggleTaskSidebar}
+                className={`${navBtn} border-[#a78bfa]/30 text-[#a78bfa]`}
+                title="Show task sidebar"
+              >
+                <HugeiconsIcon icon={LayoutAlignLeftIcon} size={14} />
+              </button>
+            )}
           </div>
         </div>
+
+        {/* Calendar status */}
+        {calendarError && (
+          <div className="flex items-center gap-2 border-b border-[#2a2a32] bg-[#1a1018] px-5 py-2">
+            <span className="text-[12px] text-[#f87171]">⚠ {calendarError}</span>
+            <button onClick={() => setCalendarError(null)} className="text-[11px] text-[#71717a] hover:text-white">dismiss</button>
+          </div>
+        )}
+        {calendarLoading && !calendarError && (
+          <div className="flex items-center gap-2 border-b border-[#2a2a32] px-5 py-1.5">
+            <div className="h-0.5 w-20 overflow-hidden rounded-full bg-[#1f1f28]">
+              <div className="h-full w-8 animate-[shimmer_1s_ease-in-out_infinite] rounded-full bg-[#a78bfa]/60" />
+            </div>
+            <span className="text-[11px] text-[#52525b]">Loading calendar...</span>
+          </div>
+        )}
 
         {/* Calendar body */}
         <div ref={calBodyRef} className="flex flex-1 flex-col overflow-hidden">
@@ -470,8 +671,7 @@ export default function PlannerView() {
                 anchor={calAnchor}
                 selectedDate={selectedDate}
                 onSelectDate={setSelectedDate}
-                events={events}
-                tasks={tasks || []}
+                tasks={visibleTasks}
                 updateTask={updateTask}
               />
             </div>
@@ -538,8 +738,7 @@ export default function PlannerView() {
                           <CalendarDayColumn
                             day={day}
                             selectedDate={selectedDate}
-                            events={events}
-                            tasks={tasks || []}
+                            tasks={visibleTasks}
                             updateTask={updateTask}
                           />
                         </div>
@@ -566,18 +765,18 @@ export default function PlannerView() {
 }
 
 /* ─── Month Grid (Google Calendar style) with drop support ─── */
-function MonthGrid({ anchor, selectedDate, onSelectDate, events, tasks, updateTask }: {
+function MonthGrid({ anchor, selectedDate, onSelectDate, tasks, updateTask }: {
   anchor: Date;
   selectedDate: Date;
   onSelectDate: (d: Date) => void;
-  events: GoogleEvent[];
   tasks: Doc<"tasks">[];
   updateTask: ReturnType<typeof useMutation<typeof api.tasks.update>>;
 }) {
   const mStart = startOfMonth(anchor);
   const mEnd = endOfMonth(anchor);
   const weeks = eachWeekOfInterval({ start: mStart, end: mEnd }, { weekStartsOn: 1 });
-  const activeTasks = tasks.filter((t) => t.status !== "done");
+  // Show ALL tasks on calendar including done (done tasks get visual styling)
+  const activeTasks = tasks;
 
   return (
     <div className="flex flex-1 flex-col">
@@ -595,7 +794,6 @@ function MonthGrid({ anchor, selectedDate, onSelectDate, events, tasks, updateTa
               anchor={anchor}
               selectedDate={selectedDate}
               onSelectDate={onSelectDate}
-              events={events}
               activeTasks={activeTasks}
               updateTask={updateTask}
             />
@@ -606,10 +804,9 @@ function MonthGrid({ anchor, selectedDate, onSelectDate, events, tasks, updateTa
   );
 }
 
-function MonthDayCell({ day, anchor, selectedDate, onSelectDate, events, activeTasks, updateTask }: {
+function MonthDayCell({ day, anchor, selectedDate, onSelectDate, activeTasks, updateTask }: {
   day: Date; anchor: Date; selectedDate: Date;
   onSelectDate: (d: Date) => void;
-  events: GoogleEvent[];
   activeTasks: Doc<"tasks">[];
   updateTask: ReturnType<typeof useMutation<typeof api.tasks.update>>;
 }) {
@@ -624,11 +821,8 @@ function MonthDayCell({ day, anchor, selectedDate, onSelectDate, events, activeT
     const d = t.dueDate || t.scheduledDate;
     return d && isSameDay(parseISO(d), day);
   });
-  const dayEvents = events.filter((e) => {
-    if (!e.start.dateTime && !e.start.date) return false;
-    const eDate = e.start.dateTime ? parseISO(e.start.dateTime) : parseISO(e.start.date!);
-    return isSameDay(eDate, day);
-  });
+  const calendarTasks = dayTasks.filter((t) => t.source === "google_calendar");
+  const localTasks = dayTasks.filter((t) => t.source !== "google_calendar");
 
   const handleDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault();
@@ -658,22 +852,28 @@ function MonthDayCell({ day, anchor, selectedDate, onSelectDate, events, activeT
       }`}>
         {format(day, "d")}
       </span>
-      {dayEvents.slice(0, 2).map((evt) => (
-        <div key={evt.id} className="truncate rounded-[3px] px-1 py-px text-[10px] font-medium text-white"
-          style={{ backgroundColor: evt.calendarColor || "#059669" }}>
-          {evt.summary || "(No title)"}
-        </div>
-      ))}
-      {dayTasks.slice(0, 2).map((t) => (
-        <div key={t._id} className="flex items-center gap-1 truncate px-1 py-px text-[10px]">
-          <span className="size-1.5 shrink-0 rounded-full" style={{
-            backgroundColor: { p1: "#f87171", p2: "#fb923c", p3: "#a78bfa", p4: "#a1a1aa" }[t.priority]
-          }} />
-          <span className="truncate text-[#d4d4d8]">{t.title}</span>
-        </div>
-      ))}
-      {(dayEvents.length + dayTasks.length > 4) && (
-        <span className="px-1 text-[9px] text-[#71717a]">+{dayEvents.length + dayTasks.length - 4} more</span>
+      {calendarTasks.slice(0, 2).map((t) => {
+        const done = t.status === "done";
+        return (
+          <div key={t._id} className={`truncate rounded-[3px] px-1 py-px text-[10px] font-medium ${done ? "opacity-70 line-through" : "text-white"}`}
+            style={{ backgroundColor: (t as Record<string, unknown>).calendarColor as string || "#059669" }}>
+            {t.title || "(No title)"}
+          </div>
+        );
+      })}
+      {localTasks.slice(0, 2).map((t) => {
+        const done = t.status === "done";
+        return (
+          <div key={t._id} className="flex items-center gap-1 truncate px-1 py-px text-[10px]">
+            <span className="size-1.5 shrink-0 rounded-full" style={{
+              backgroundColor: done ? "#52525b" : { p1: "#f87171", p2: "#fb923c", p3: "#a78bfa", p4: "#a1a1aa" }[t.priority]
+            }} />
+            <span className={`truncate ${done ? "text-[#71717a] line-through" : "text-[#d4d4d8]"}`}>{t.title}</span>
+          </div>
+        );
+      })}
+      {dayTasks.length > 4 && (
+        <span className="px-1 text-[9px] text-[#71717a]">+{dayTasks.length - 4} more</span>
       )}
     </div>
   );
@@ -701,10 +901,9 @@ const PRIORITY_COLORS: Record<string, string> = {
 };
 
 /* ─── Calendar day column with 30-min snap drop ─── */
-function CalendarDayColumn({ day, selectedDate, events, tasks, updateTask }: {
+function CalendarDayColumn({ day, selectedDate, tasks, updateTask }: {
   day: Date;
   selectedDate: Date;
-  events: GoogleEvent[];
   tasks: Doc<"tasks">[];
   updateTask: ReturnType<typeof useMutation<typeof api.tasks.update>>;
 }) {
@@ -715,23 +914,17 @@ function CalendarDayColumn({ day, selectedDate, events, tasks, updateTask }: {
   const isSelected = isSameDay(day, selectedDate);
   const dayStr = format(day, "yyyy-MM-dd");
 
-  const dayEvents = events.filter((e) => {
-    if (!e.start.dateTime) return false;
-    return isSameDay(parseISO(e.start.dateTime), day);
-  });
-
-  // Tasks with time that belong to this day
-  const dayTasks = useMemo(() => {
+  // All tasks with scheduled time that belong to this day (including done)
+  const dayScheduledTasks = useMemo(() => {
     return tasks.filter((t) => {
-      if (t.status === "done") return false;
       const dateStr = t.dueDate || t.scheduledDate;
       if (!dateStr) return false;
       if (!isSameDay(parseISO(dateStr), day)) return false;
-      // Must have a time to show on the grid
-      const time = (t as Record<string, unknown>).dueTime as string | undefined || t.scheduledStartTime;
-      return !!time;
+      return !!t.scheduledStartTime && !!t.scheduledEndTime;
     });
   }, [tasks, day]);
+
+  // All tasks rendered uniformly through ResizableTaskBlock (with overlap detection)
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -758,18 +951,29 @@ function CalendarDayColumn({ day, selectedDate, events, tasks, updateTask }: {
     const sourceDate = e.dataTransfer.getData("application/source-date");
     const isSameDayDrop = sourceDate === dayStr;
 
+    // Calculate drop time from cursor position
+    const rect = columnRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const y = e.clientY - rect.top;
+    const { timeStr } = yToSnappedTime(y);
+
     if (isSameDayDrop) {
-      // Same day → reposition: update the time to where the cursor landed
-      const rect = columnRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      const y = e.clientY - rect.top;
-      const { timeStr } = yToSnappedTime(y);
       await updateTask({ id: taskId as Parameters<typeof updateTask>[0]["id"], dueTime: timeStr });
     } else {
-      // Cross-day → move: update the date, keep the original time
-      await updateTask({ id: taskId as Parameters<typeof updateTask>[0]["id"], dueDate: dayStr });
+      await updateTask({ id: taskId as Parameters<typeof updateTask>[0]["id"], dueDate: dayStr, dueTime: timeStr });
     }
-  }, [dayStr, updateTask]);
+
+    // Sync to Google Calendar if the task has a linked event
+    const droppedTask = tasks?.find((t) => t._id === taskId);
+    if (droppedTask) {
+      try {
+        const { syncTaskUpdateToGoogle } = await import("@/lib/google-sync");
+        await syncTaskUpdateToGoogle(droppedTask, { dueDate: dayStr, dueTime: timeStr });
+      } catch (err) {
+        console.warn("Google Calendar sync failed:", err);
+      }
+    }
+  }, [dayStr, updateTask, tasks]);
 
   return (
     <div ref={columnRef}
@@ -805,40 +1009,53 @@ function CalendarDayColumn({ day, selectedDate, events, tasks, updateTask }: {
         } style={{ height: QUARTER_PX }} />
       ))}
 
-      {/* Google Calendar events */}
-      {dayEvents.map((evt) => {
-        if (!evt.start.dateTime || !evt.end.dateTime) return null;
-        const start = parseISO(evt.start.dateTime);
-        const end = parseISO(evt.end.dateTime);
-        const startMin = (start.getHours() - START_HOUR) * 60 + start.getMinutes();
-        const duration = differenceInMinutes(end, start);
-        const top = (startMin / 60) * HOUR_HEIGHT;
-        const height = Math.max((duration / 60) * HOUR_HEIGHT, QUARTER_PX);
-        const color = evt.calendarColor || "#059669";
-        return (
-          <div key={evt.id}
-            className="absolute left-1 right-1 overflow-hidden rounded-[10px] border border-[#333340] bg-[#1a1a22] shadow-[0_2px_0_0_rgba(0,0,0,0.3),inset_0_1px_0_0_rgba(255,255,255,0.04)]"
-            style={{ top, height }}
-          >
-            <div className="flex h-full items-center gap-2.5 px-3">
-              <span className="size-[10px] shrink-0 rounded-full" style={{ backgroundColor: color }} />
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-[13px] font-semibold text-white">{evt.summary || "(No title)"}</p>
-                {height >= 44 && (
-                  <p className="text-[11px] font-medium text-[#a1a1aa]">
-                    {format(start, "h:mm")} – {format(end, "h:mm a")}
-                  </p>
-                )}
-              </div>
-            </div>
-          </div>
-        );
-      })}
+      {/* All tasks — unified with overlap detection */}
+      {(() => {
+        type TaskLayout = { task: Doc<"tasks">; startMin: number; endMin: number; col: number; totalCols: number };
+        const parsed: TaskLayout[] = [];
+        for (const t of dayScheduledTasks) {
+          if (!t.scheduledStartTime || !t.scheduledEndTime) continue;
+          const [sh, sm] = t.scheduledStartTime.split(":").map(Number);
+          const [eh, em] = t.scheduledEndTime.split(":").map(Number);
+          const sMin = (sh - START_HOUR) * 60 + sm;
+          const eMin = (eh - START_HOUR) * 60 + em;
+          if (eMin - sMin <= 0) continue;
+          parsed.push({ task: t, startMin: sMin, endMin: eMin, col: 0, totalCols: 1 });
+        }
+        parsed.sort((a, b) => a.startMin - b.startMin || (b.endMin - b.startMin) - (a.endMin - a.startMin));
 
-      {/* Tasks on the time grid — draggable + resizable */}
-      {dayTasks.map((task) => (
-        <ResizableTaskBlock key={task._id} task={task} dayStr={dayStr} updateTask={updateTask} />
-      ))}
+        // Assign overlap columns
+        const cols: TaskLayout[][] = [];
+        for (const item of parsed) {
+          let placed = false;
+          for (let c = 0; c < cols.length; c++) {
+            const last = cols[c][cols[c].length - 1];
+            if (last.endMin <= item.startMin) { item.col = c; cols[c].push(item); placed = true; break; }
+          }
+          if (!placed) { item.col = cols.length; cols.push([item]); }
+        }
+        for (const item of parsed) {
+          const overlapping = parsed.filter((o) => o.startMin < item.endMin && o.endMin > item.startMin);
+          item.totalCols = Math.max(...overlapping.map((o) => o.col + 1));
+        }
+
+        return parsed.map(({ task, col, totalCols }) => {
+          const widthPct = 100 / totalCols;
+          const leftPct = col * widthPct;
+          return (
+            <ResizableTaskBlock
+              key={task._id}
+              task={task}
+              dayStr={dayStr}
+              updateTask={updateTask}
+              style={{
+                left: `calc(${leftPct}% + 4px)`,
+                width: `calc(${widthPct}% - 8px)`,
+              }}
+            />
+          );
+        });
+      })()}
 
       {isToday(day) && <CurrentTimeLine />}
     </div>
@@ -846,11 +1063,14 @@ function CalendarDayColumn({ day, selectedDate, events, tasks, updateTask }: {
 }
 
 /* ─── Resizable + draggable task block on calendar grid ─── */
-function ResizableTaskBlock({ task, dayStr, updateTask }: {
+function ResizableTaskBlock({ task, dayStr, updateTask, style: overrideStyle }: {
   task: Doc<"tasks">;
   dayStr: string;
   updateTask: ReturnType<typeof useMutation<typeof api.tasks.update>>;
+  style?: React.CSSProperties;
 }) {
+  const isCalendarSource = task.source === "google_calendar";
+  const calColor = (task as Record<string, unknown>).calendarColor as string | undefined;
   const MIN_BLOCK_HEIGHT = QUARTER_PX * 2; // 30 min minimum
   const time = (task as Record<string, unknown>).dueTime as string | undefined || task.scheduledStartTime || "09:00";
   const [h, m] = time.split(":").map(Number);
@@ -920,12 +1140,21 @@ function ResizableTaskBlock({ task, dayStr, updateTask }: {
         scheduledStartTime: startTimeStr,
         scheduledEndTime: endTimeStr,
       });
+
+      // Sync resize to Google Calendar
+      try {
+        const { syncTaskUpdateToGoogle } = await import("@/lib/google-sync");
+        await syncTaskUpdateToGoogle(task, { scheduledStartTime: startTimeStr, scheduledEndTime: endTimeStr });
+      } catch (err) {
+        console.warn("Google Calendar resize sync failed:", err);
+      }
     };
 
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
-  }, [height, startMin, h, m, task._id, updateTask]);
+  }, [height, startMin, h, m, task._id, task.googleEventId, task.googleCalendarId, task.dueDate, task.scheduledDate, updateTask]);
 
+  const isDone = task.status === "done";
   const color = PRIORITY_COLORS[task.priority] || PRIORITY_COLORS.p4;
   const fmtH = h === 0 ? 12 : h > 12 ? h - 12 : h;
   const ampm = h < 12 ? "am" : "pm";
@@ -940,46 +1169,56 @@ function ResizableTaskBlock({ task, dayStr, updateTask }: {
 
   return (
     <div
-      draggable={!isResizing}
+      draggable={!isResizing && !isDone}
       onDragStart={(e) => {
-        if (isResizing) { e.preventDefault(); return; }
+        if (isResizing || isDone) { e.preventDefault(); return; }
         e.dataTransfer.setData("text/plain", task._id);
         e.dataTransfer.setData("application/source-date", dayStr);
         e.dataTransfer.effectAllowed = "move";
       }}
-      className={`group absolute left-1 right-1 overflow-hidden rounded-[10px] border border-[#333340] bg-[#1a1a22] shadow-[0_2px_0_0_rgba(0,0,0,0.3),inset_0_1px_0_0_rgba(255,255,255,0.04)] ${
-        isResizing ? "z-40 cursor-ns-resize border-[#a78bfa]/50 ring-1 ring-[#a78bfa]/30" : "cursor-grab active:cursor-grabbing"
+      className={`group absolute overflow-hidden rounded-[10px] border shadow-[0_2px_0_0_rgba(0,0,0,0.3),inset_0_1px_0_0_rgba(255,255,255,0.04)] ${
+        isDone
+          ? "border-[#2a2a32] bg-[#1a1a22] opacity-70"
+          : isResizing
+            ? "z-40 cursor-ns-resize border-[#a78bfa]/50 ring-1 ring-[#a78bfa]/30 bg-[#1a1a22]"
+            : "border-[#333340] bg-[#1a1a22] cursor-grab active:cursor-grabbing"
       }`}
-      style={{ top: topPx, height }}
+      style={{ top: topPx, height, ...(overrideStyle || { left: 4, right: 4 }) }}
     >
-      {/* Content — responsive to block height */}
-      <div className={`flex h-full flex-col px-2 ${height < 36 ? "flex-row items-center gap-1.5 py-0.5" : "justify-center gap-0.5 py-1"}`}>
+      {/* Content — top-left aligned, responsive to block height */}
+      <div className={`flex flex-col px-2 ${height < 36 ? "flex-row items-start gap-1.5 pt-0.5" : "gap-0.5 pt-1.5"}`}>
         <div className="flex min-w-0 items-center gap-1.5">
-          <span
-            className={`shrink-0 rounded-full ${height < 36 ? "size-[10px]" : "size-[14px]"}`}
-            style={{ border: `2px solid ${color}` }}
-          />
-          <p className={`min-w-0 truncate font-semibold text-white ${height < 36 ? "text-[11px]" : "text-[13px]"}`}>{task.title}</p>
+          {isCalendarSource ? (
+            <HugeiconsIcon icon={DashedLineCircleIcon} size={height < 36 ? 10 : 14} style={{ color: isDone ? "#71717a" : calColor || "#059669" }} className="shrink-0" />
+          ) : (
+            <span
+              className={`shrink-0 rounded-full ${height < 36 ? "size-[10px]" : "size-[14px]"}`}
+              style={{ border: `2px solid ${isDone ? "#71717a" : color}`, backgroundColor: isDone ? "#71717a" : "transparent" }}
+            />
+          )}
+          <p className={`min-w-0 truncate font-semibold ${isDone ? "text-[#71717a] line-through" : "text-white"} ${height < 36 ? "text-[11px]" : "text-[13px]"}`}>{task.title}</p>
         </div>
         {height >= 44 && (
-          <p className={`truncate font-medium text-[#a1a1aa] ${height < 36 ? "text-[9px]" : "text-[11px]"}`} style={{ paddingLeft: height < 36 ? 0 : 20 }}>
+          <p className={`truncate font-medium ${isDone ? "text-[#606068]" : "text-[#a1a1aa]"} ${height < 36 ? "text-[9px]" : "text-[11px]"}`} style={{ paddingLeft: height < 36 ? 0 : 20 }}>
             {fmtH}:{String(m).padStart(2, "0")} {ampm} – {endFmtH}:{String(endMin).padStart(2, "0")} {endAmpm}
           </p>
         )}
         {height < 44 && height >= 36 && (
-          <p className="truncate pl-5 text-[10px] font-medium text-[#71717a]">
+          <p className={`truncate pl-5 text-[10px] font-medium ${isDone ? "text-[#606068]" : "text-[#71717a]"}`}>
             {fmtH}:{String(m).padStart(2, "0")} {ampm}
           </p>
         )}
       </div>
 
-      {/* Bottom resize handle */}
-      <div
-        onMouseDown={handleResizeStart}
-        className="absolute bottom-0 left-0 right-0 z-30 flex h-2.5 cursor-ns-resize items-center justify-center opacity-0 transition-opacity group-hover:opacity-100"
-      >
-        <div className="h-[2px] w-8 rounded-full bg-[#a1a1aa]/60" />
-      </div>
+      {/* Bottom resize handle — hidden for done tasks */}
+      {!isDone && (
+        <div
+          onMouseDown={handleResizeStart}
+          className="absolute bottom-0 left-0 right-0 z-30 flex h-2.5 cursor-ns-resize items-center justify-center opacity-0 transition-opacity group-hover:opacity-100"
+        >
+          <div className="h-[2px] w-8 rounded-full bg-[#a1a1aa]/60" />
+        </div>
+      )}
     </div>
   );
 }

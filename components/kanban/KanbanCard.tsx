@@ -21,12 +21,19 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Delete01Icon } from "@hugeicons/core-free-icons";
+import {
+  Delete01Icon, DashedLineCircleIcon, Edit01Icon, Flag01Icon,
+  Calendar03Icon, Folder01Icon, GoogleIcon, CheckmarkCircle01Icon,
+  Cancel01Icon,
+} from "@hugeicons/core-free-icons";
 import { format, parseISO, isPast, isToday } from "date-fns";
+import { isGoogleCalEvent } from "@/lib/task-utils";
+import { syncTaskUpdateToGoogle, syncTaskCompletionToGoogle, syncTaskDeletionToGoogle, pushLocalTaskToGoogle } from "@/lib/google-sync";
 
 interface KanbanCardProps {
   task: Doc<"tasks">;
   isOverdue?: boolean;
+  context?: "kanban" | "sidebar"; // sidebar = planner sidebar (no date, duration on left)
 }
 
 const PRIORITY_COLORS: Record<string, string> = {
@@ -36,10 +43,31 @@ const PRIORITY_LABELS: Record<string, string> = {
   p1: "Urgent", p2: "High", p3: "Medium", p4: "Low",
 };
 
-const KanbanCard = React.memo(function KanbanCard({ task, isOverdue }: KanbanCardProps) {
-  const toggleComplete = useMutation(api.tasks.toggleComplete);
+const KanbanCard = React.memo(function KanbanCard({ task, isOverdue, context = "kanban" }: KanbanCardProps) {
+  const isSidebar = context === "sidebar";
+  const toggleCompleteMut = useMutation(api.tasks.toggleComplete);
   const updateTask = useMutation(api.tasks.update);
-  const removeTask = useMutation(api.tasks.remove);
+  const removeTaskMut = useMutation(api.tasks.remove);
+
+  // Toggle complete + sync to Google Calendar
+  const toggleComplete = useCallback(async (args: { id: typeof task._id }) => {
+    const wasDone = task.status === "done";
+    await toggleCompleteMut(args);
+    try { await syncTaskCompletionToGoogle(task, !wasDone); } catch (err) { console.warn("Google sync failed:", err); }
+  }, [toggleCompleteMut, task]);
+
+  // Delete task + sync to Google Calendar
+  const removeTask = useCallback(async (args: { id: typeof task._id }) => {
+    await removeTaskMut(args);
+    try { await syncTaskDeletionToGoogle(task); } catch (err) { console.warn("Google sync failed:", err); }
+  }, [removeTaskMut, task]);
+
+  // Update task + sync changes to Google Calendar
+  const syncUpdateTask = useCallback(async (args: Parameters<typeof updateTask>[0]) => {
+    await updateTask(args);
+    try { await syncTaskUpdateToGoogle(task, args as Record<string, unknown>); } catch (err) { console.warn("Google sync failed:", err); }
+  }, [updateTask, task]);
+
   const projects = useQuery(api.projects.list, { status: "active" });
   const project = useQuery(
     api.projects.getById,
@@ -49,6 +77,8 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue }: KanbanCar
   const [isDragging, setIsDragging] = useState(false);
 
   const isDone = task.status === "done";
+  const isCalendarSource = isGoogleCalEvent(task);
+  const calColor = (task as Record<string, unknown>).calendarColor as string | undefined;
   const color = PRIORITY_COLORS[task.priority] || PRIORITY_COLORS.p4;
   const dateStr = task.dueDate || task.scheduledDate;
 
@@ -88,22 +118,32 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue }: KanbanCar
               : "border border-[#333340] bg-[#1a1a22] shadow-[0_2px_0_0_rgba(0,0,0,0.3),inset_0_1px_0_0_rgba(255,255,255,0.04)] hover:bg-[#222230]"
           }`}
         >
-          {/* Priority circle */}
-          <button
-            onClick={(e) => { e.stopPropagation(); toggleComplete({ id: task._id }); }}
-            onContextMenu={(e) => e.stopPropagation()}
-            className="flex size-[16px] shrink-0 items-center justify-center rounded-full transition-colors"
-            style={{
-              border: `2px solid ${isDone ? "#71717a" : color}`,
-              backgroundColor: isDone ? "#71717a" : "transparent",
-            }}
-          >
-            {isDone && (
-              <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
-                <path d="M1.5 4L3.2 5.7L6.5 2.3" stroke="#1a1a22" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            )}
-          </button>
+          {/* Priority circle or calendar icon */}
+          {isCalendarSource ? (
+            <button
+              onClick={(e) => { e.stopPropagation(); toggleComplete({ id: task._id }); }}
+              onContextMenu={(e) => e.stopPropagation()}
+              className="flex shrink-0 items-center justify-center"
+            >
+              <HugeiconsIcon icon={DashedLineCircleIcon} size={16} style={{ color: isDone ? "#71717a" : calColor || "#059669" }} />
+            </button>
+          ) : (
+            <button
+              onClick={(e) => { e.stopPropagation(); toggleComplete({ id: task._id }); }}
+              onContextMenu={(e) => e.stopPropagation()}
+              className="flex size-[16px] shrink-0 items-center justify-center rounded-full transition-colors"
+              style={{
+                border: `2px solid ${isDone ? "#71717a" : color}`,
+                backgroundColor: isDone ? "#71717a" : "transparent",
+              }}
+            >
+              {isDone && (
+                <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
+                  <path d="M1.5 4L3.2 5.7L6.5 2.3" stroke="#1a1a22" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              )}
+            </button>
+          )}
 
           {/* Title — click to edit */}
           <span
@@ -115,37 +155,20 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue }: KanbanCar
 
           {/* Meta chips — each opens its Akiflow-style popover */}
           <div className="flex shrink-0 items-center gap-1.5" draggable={false} onClick={(e) => e.stopPropagation()} onContextMenu={(e) => e.stopPropagation()}>
-            {typeof (task as Record<string, unknown>).dueTime === "string" && (
-              <TimePickerPopover
-                value={(task as Record<string, unknown>).dueTime as string}
-                onChange={(time) => updateTask({ id: task._id, ...(time ? { dueTime: time } : { clearDueTime: true }) })}
-              >
-                <TaskChip active>{formatTime12((task as Record<string, unknown>).dueTime as string)}</TaskChip>
-              </TimePickerPopover>
-            )}
-            <DatePickerPopover
-              value={task.dueDate}
-              onChange={(date) => updateTask({ id: task._id, ...(date ? { dueDate: date } : { clearDueDate: true }) })}
-            >
-              <TaskChip active={!!dateStr} className={dateStr ? "" : "opacity-0 group-hover:opacity-100"}>
-                <span style={dateStr ? { color: dateColor } : undefined}>
-                  {dateStr ? format(parseISO(dateStr), "MMM d") : "Date"}
-                </span>
-              </TaskChip>
-            </DatePickerPopover>
-            {duration && (
+            {/* Sidebar: duration first (left side) */}
+            {isSidebar && duration && (
               <DurationPickerPopover
                 value={durationMins}
                 onChange={(mins) => {
                   if (mins === undefined) {
-                    updateTask({ id: task._id, clearScheduledStartTime: true, clearScheduledEndTime: true });
+                    syncUpdateTask({ id: task._id, clearScheduledStartTime: true, clearScheduledEndTime: true });
                   } else {
                     const start = task.scheduledStartTime || "09:00";
                     const [sh, sm] = start.split(":").map(Number);
                     const endMins = sh * 60 + sm + mins;
                     const eh = Math.floor(endMins / 60) % 24;
                     const em = endMins % 60;
-                    updateTask({
+                    syncUpdateTask({
                       id: task._id,
                       scheduledStartTime: start,
                       scheduledEndTime: `${String(eh).padStart(2, "0")}:${String(em).padStart(2, "0")}`,
@@ -156,10 +179,47 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue }: KanbanCar
                 <TaskChip active>{duration}</TaskChip>
               </DurationPickerPopover>
             )}
-            {project && (
+            {/* Sidebar: time with end time */}
+            {isSidebar && typeof (task as Record<string, unknown>).dueTime === "string" && (
+              <TimePickerPopover
+                value={(task as Record<string, unknown>).dueTime as string}
+                onChange={(time) => syncUpdateTask({ id: task._id, ...(time ? { dueTime: time } : { clearDueTime: true }) })}
+              >
+                <TaskChip active>
+                  {formatTime12((task as Record<string, unknown>).dueTime as string)}
+                  {task.scheduledEndTime && ` – ${formatTime12(task.scheduledEndTime)}`}
+                </TaskChip>
+              </TimePickerPopover>
+            )}
+            {/* Kanban: start time only (no end time, no duration) */}
+            {!isSidebar && typeof (task as Record<string, unknown>).dueTime === "string" && (
+              <TimePickerPopover
+                value={(task as Record<string, unknown>).dueTime as string}
+                onChange={(time) => syncUpdateTask({ id: task._id, ...(time ? { dueTime: time } : { clearDueTime: true }) })}
+              >
+                <TaskChip active>
+                  {formatTime12((task as Record<string, unknown>).dueTime as string)}
+                </TaskChip>
+              </TimePickerPopover>
+            )}
+            {/* Date chip — only in kanban view */}
+            {!isSidebar && (
+              <DatePickerPopover
+                value={task.dueDate}
+                onChange={(date) => syncUpdateTask({ id: task._id, ...(date ? { dueDate: date } : { clearDueDate: true }) })}
+              >
+                <TaskChip active={!!dateStr} className={dateStr ? "" : "opacity-0 group-hover:opacity-100"}>
+                  <span style={dateStr ? { color: dateColor } : undefined}>
+                    {dateStr ? format(parseISO(dateStr), "MMM d") : "Date"}
+                  </span>
+                </TaskChip>
+              </DatePickerPopover>
+            )}
+            {/* Project chip — sidebar only, kanban uses right-click */}
+            {isSidebar && project && (
               <ProjectPickerPopover
                 value={task.projectId}
-                onChange={(pid) => updateTask({ id: task._id, ...(pid ? { projectId: pid } : { clearProjectId: true }) })}
+                onChange={(pid) => syncUpdateTask({ id: task._id, ...(pid ? { projectId: pid } : { clearProjectId: true }) })}
               >
                 <TaskChip active className="max-w-[70px] truncate">
                   <span style={{ color: project.color }}>{project.name}</span>
@@ -172,7 +232,10 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue }: KanbanCar
         {/* Right-click menu — Akiflow style */}
         <ContextMenuPopup className="w-[220px] rounded-xl border border-[#2a2a36] bg-[#131318] p-1.5 shadow-[0_8px_32px_rgba(0,0,0,0.5)]">
           <MenuItem onClick={() => setEditOpen(true)} className="rounded-lg px-3 py-2 text-sm text-[#d4d4d8] hover:bg-[#1f1f28]">
-            Edit task
+            <span className="flex items-center gap-2.5">
+              <HugeiconsIcon icon={Edit01Icon} size={14} className="text-[#71717a]" />
+              Edit
+            </span>
           </MenuItem>
           <MenuSeparator className="my-1 border-[#1f1f28]" />
 
@@ -188,7 +251,7 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue }: KanbanCar
               {(["p1", "p2", "p3", "p4"] as const).map((p) => (
                 <MenuItem
                   key={p}
-                  onClick={() => updateTask({ id: task._id, priority: p })}
+                  onClick={() => syncUpdateTask({ id: task._id, priority: p })}
                   className={`rounded-lg px-3 py-2 text-sm text-[#d4d4d8] hover:bg-[#1f1f28] ${task.priority === p ? "bg-[#1f1f28]" : ""}`}
                 >
                   <span className="flex items-center gap-2.5">
@@ -205,7 +268,7 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue }: KanbanCar
           <MenuSub>
             <MenuSubTrigger className="rounded-lg px-3 py-2 text-sm text-[#d4d4d8] hover:bg-[#1f1f28]">
               <span className="flex items-center gap-2.5">
-                <span className="text-[#71717a]">📅</span>
+                <HugeiconsIcon icon={Calendar03Icon} size={14} className="text-[#71717a]" />
                 {dateStr ? format(parseISO(dateStr), "MMM d") : "Set date"}
               </span>
             </MenuSubTrigger>
@@ -216,7 +279,7 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue }: KanbanCar
               ].map((opt) => (
                 <MenuItem
                   key={opt.label}
-                  onClick={() => updateTask({ id: task._id, dueDate: opt.date })}
+                  onClick={() => syncUpdateTask({ id: task._id, dueDate: opt.date })}
                   className="rounded-lg px-3 py-2 text-sm text-[#d4d4d8] hover:bg-[#1f1f28]"
                 >
                   {opt.label}
@@ -226,7 +289,7 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue }: KanbanCar
                 <>
                   <MenuSeparator className="my-1 border-[#1f1f28]" />
                   <MenuItem
-                    onClick={() => updateTask({ id: task._id, clearDueDate: true })}
+                    onClick={() => syncUpdateTask({ id: task._id, clearDueDate: true })}
                     className="rounded-lg px-3 py-2 text-sm text-[#ef4444] hover:bg-[#1f1f28]"
                   >
                     Remove date
@@ -244,14 +307,14 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue }: KanbanCar
                   {project ? (
                     <span className="size-2.5 rounded-full" style={{ backgroundColor: project.color }} />
                   ) : (
-                    <span className="text-[#71717a]">📁</span>
+                    <HugeiconsIcon icon={Folder01Icon} size={14} className="text-[#71717a]" />
                   )}
                   {project ? project.name : "Project"}
                 </span>
               </MenuSubTrigger>
               <MenuSubPopup className="w-[200px] rounded-xl border border-[#2a2a36] bg-[#131318] p-1.5 shadow-[0_8px_32px_rgba(0,0,0,0.5)]">
                 <MenuItem
-                  onClick={() => updateTask({ id: task._id, clearProjectId: true })}
+                  onClick={() => syncUpdateTask({ id: task._id, clearProjectId: true })}
                   className={`rounded-lg px-3 py-2 text-sm text-[#d4d4d8] hover:bg-[#1f1f28] ${!task.projectId ? "bg-[#1f1f28]" : ""}`}
                 >
                   No project
@@ -260,7 +323,7 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue }: KanbanCar
                 {projects.map((p) => (
                   <MenuItem
                     key={p._id}
-                    onClick={() => updateTask({ id: task._id, projectId: p._id })}
+                    onClick={() => syncUpdateTask({ id: task._id, projectId: p._id })}
                     className={`rounded-lg px-3 py-2 text-sm text-[#d4d4d8] hover:bg-[#1f1f28] ${task.projectId === p._id ? "bg-[#1f1f28]" : ""}`}
                   >
                     <span className="flex items-center gap-2.5">
@@ -274,7 +337,7 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue }: KanbanCar
                   <>
                     <MenuSeparator className="my-1 border-[#1f1f28]" />
                     <MenuItem
-                      onClick={() => updateTask({ id: task._id, clearProjectId: true })}
+                      onClick={() => syncUpdateTask({ id: task._id, clearProjectId: true })}
                       className="rounded-lg px-3 py-2 text-sm text-[#ef4444] hover:bg-[#1f1f28]"
                     >
                       Remove project
@@ -288,10 +351,32 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue }: KanbanCar
           <MenuSeparator className="my-1 border-[#1f1f28]" />
 
           <MenuItem
+            onClick={async () => {
+              try {
+                const result = await pushLocalTaskToGoogle(task);
+                if (result) {
+                  await updateTask({ id: task._id, googleEventId: result.googleEventId, googleCalendarId: result.googleCalendarId });
+                }
+              } catch (err) {
+                console.error("Failed to push to Google Calendar:", err);
+              }
+            }}
+            className="rounded-lg px-3 py-2 text-sm text-[#d4d4d8] hover:bg-[#1f1f28]"
+          >
+            <span className="flex items-center gap-2.5">
+              <HugeiconsIcon icon={GoogleIcon} size={14} className="text-[#71717a]" />
+              Push to Google Calendar
+            </span>
+          </MenuItem>
+
+          <MenuItem
             onClick={() => toggleComplete({ id: task._id })}
             className="rounded-lg px-3 py-2 text-sm text-[#d4d4d8] hover:bg-[#1f1f28]"
           >
-            {isDone ? "Mark incomplete" : "Mark done"}
+            <span className="flex items-center gap-2.5">
+              <HugeiconsIcon icon={isDone ? Cancel01Icon : CheckmarkCircle01Icon} size={14} className="text-[#71717a]" />
+              {isDone ? "Mark incomplete" : "Mark done"}
+            </span>
           </MenuItem>
 
           <MenuSeparator className="my-1 border-[#1f1f28]" />
@@ -300,8 +385,10 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue }: KanbanCar
             onClick={() => removeTask({ id: task._id })}
             className="rounded-lg px-3 py-2 text-sm text-[#ef4444] hover:bg-[#1f1f28]"
           >
-            <HugeiconsIcon icon={Delete01Icon} size={14} />
-            Delete
+            <span className="flex items-center gap-2.5">
+              <HugeiconsIcon icon={Delete01Icon} size={14} />
+              Delete
+            </span>
           </MenuItem>
         </ContextMenuPopup>
       </ContextMenu>
@@ -333,9 +420,17 @@ export function TaskEditDialog({ task, open, onOpenChange, defaultDueDate }: {
   defaultDueDate?: string;
 }) {
   const createTask = useMutation(api.tasks.create);
-  const updateTask = useMutation(api.tasks.update);
+  const updateTaskMut = useMutation(api.tasks.update);
   const toggleComplete = useMutation(api.tasks.toggleComplete);
   const projects = useQuery(api.projects.list, { status: "active" });
+
+  // Update task + sync to Google Calendar (uses centralized utility)
+  const syncUpdateTask = useCallback(async (args: Parameters<typeof updateTaskMut>[0]) => {
+    await updateTaskMut(args);
+    if (task) {
+      try { await syncTaskUpdateToGoogle(task, args as Record<string, unknown>); } catch (err) { console.warn("Google sync failed:", err); }
+    }
+  }, [updateTaskMut, task]);
 
   const isCreate = !task;
 
@@ -400,11 +495,10 @@ export function TaskEditDialog({ task, open, onOpenChange, defaultDueDate }: {
           recurrence: recurrence || undefined,
         });
       } else {
-        await updateTask({
+        await syncUpdateTask({
           id: task._id,
           title: title.trim(),
           priority,
-          // Set or clear each field explicitly
           ...(notes ? { description: notes } : { clearDescription: true }),
           ...(dueDate ? { dueDate } : { clearDueDate: true }),
           ...(dueTime ? { dueTime } : { clearDueTime: true }),
@@ -414,6 +508,7 @@ export function TaskEditDialog({ task, open, onOpenChange, defaultDueDate }: {
           ...(recurrence ? { recurrence } : { clearRecurrence: true }),
         });
       }
+
       onOpenChange(false);
     } finally {
       setSaving(false);
@@ -435,14 +530,14 @@ export function TaskEditDialog({ task, open, onOpenChange, defaultDueDate }: {
             {/* Chip bar */}
             <div className="flex flex-wrap items-center gap-2">
               <DatePickerPopover value={dueDate || undefined} onChange={(d) => setDueDate(d || "")}>
-                <button className={dueDate ? chipClass : chipEmptyClass}>
+                <span className={dueDate ? chipClass : chipEmptyClass}>
                   {dueDate ? format(parseISO(dueDate), "MMM d, yyyy") : "Date"}
-                </button>
+                </span>
               </DatePickerPopover>
               <TimePickerPopover value={dueTime || undefined} onChange={(t) => setDueTime(t || "")}>
-                <button className={dueTime ? chipClass : chipEmptyClass}>
+                <span className={dueTime ? chipClass : chipEmptyClass}>
                   {dueTime ? formatTime12(dueTime) : "Time"}
-                </button>
+                </span>
               </TimePickerPopover>
               {duration && <span className={chipClass}>{duration}</span>}
 

@@ -73,6 +73,11 @@ export interface GoogleEvent {
   htmlLink?: string;
   calendarId?: string;
   calendarColor?: string;
+  updated?: string;
+  extendedProperties?: {
+    private?: Record<string, string>;
+    shared?: Record<string, string>;
+  };
 }
 
 export async function getCalendarList(): Promise<GoogleCalendar[]> {
@@ -132,6 +137,10 @@ export interface CreateEventInput {
   start: { dateTime: string; timeZone: string };
   end: { dateTime: string; timeZone: string };
   calendarId?: string;
+  extendedProperties?: {
+    private?: Record<string, string>;
+    shared?: Record<string, string>;
+  };
 }
 
 export async function createCalendarEvent(

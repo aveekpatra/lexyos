@@ -28,6 +28,17 @@ export default defineSchema({
     recurrence: v.optional(v.string()), // "daily" | "weekdays" | "weekly" | "biweekly" | "monthly" | "yearly" | ""
     labels: v.optional(v.array(v.string())),
     parentTaskId: v.optional(v.id("tasks")),
+    googleEventId: v.optional(v.string()),       // linked Google Calendar event ID
+    googleCalendarId: v.optional(v.string()),     // which calendar it's on (default "primary")
+    // Calendar-sourced task fields
+    source: v.optional(v.union(v.literal("local"), v.literal("google_calendar"))),
+    location: v.optional(v.string()),
+    isAllDay: v.optional(v.boolean()),
+    calendarColor: v.optional(v.string()),
+    htmlLink: v.optional(v.string()),
+    timeZone: v.optional(v.string()),
+    googleUpdatedAt: v.optional(v.string()),
+    lastSyncedAt: v.optional(v.number()),
     sortOrder: v.number(),
     completedAt: v.optional(v.number()),
     userId: v.string(),
@@ -38,7 +49,8 @@ export default defineSchema({
     .index("by_userId_and_scheduledDate", ["userId", "scheduledDate"])
     .index("by_userId_and_dueDate", ["userId", "dueDate"])
     .index("by_parentTaskId", ["parentTaskId"])
-    .index("by_userId_and_sectionId", ["userId", "sectionId"]),
+    .index("by_userId_and_sectionId", ["userId", "sectionId"])
+    .index("by_userId_and_googleEventId", ["userId", "googleEventId"]),
 
   projects: defineTable({
     name: v.string(),
@@ -70,6 +82,49 @@ export default defineSchema({
     sortOrder: v.number(),
     userId: v.string(),
   }).index("by_userId", ["userId"]),
+
+  calendarEvents: defineTable({
+    // Google Calendar event ID + calendar ID (together form the unique key)
+    googleEventId: v.string(),
+    googleCalendarId: v.string(),
+    // Core fields
+    summary: v.optional(v.string()),
+    description: v.optional(v.string()),
+    location: v.optional(v.string()),
+    // Time (either dateTime for timed events or date for all-day)
+    startDateTime: v.optional(v.string()), // ISO 8601
+    startDate: v.optional(v.string()),     // YYYY-MM-DD (all-day)
+    endDateTime: v.optional(v.string()),
+    endDate: v.optional(v.string()),
+    timeZone: v.optional(v.string()),
+    // Metadata
+    status: v.optional(v.string()),        // "confirmed" | "tentative" | "cancelled"
+    htmlLink: v.optional(v.string()),
+    colorId: v.optional(v.string()),
+    calendarColor: v.optional(v.string()), // inherited from the calendar
+    isAllDay: v.boolean(),
+    // If this event was created from a task, link it
+    linkedTaskId: v.optional(v.id("tasks")),
+    // Sync metadata
+    googleUpdatedAt: v.optional(v.string()), // Google's "updated" field
+    lastSyncedAt: v.number(),               // when we last synced this event
+    userId: v.string(),
+  })
+    .index("by_userId", ["userId"])
+    .index("by_userId_and_googleEventId", ["userId", "googleEventId"])
+    .index("by_userId_and_linkedTaskId", ["userId", "linkedTaskId"])
+    .index("by_userId_and_startDateTime", ["userId", "startDateTime"]),
+
+  calendarSyncState: defineTable({
+    googleCalendarId: v.string(),
+    calendarName: v.optional(v.string()),
+    calendarColor: v.optional(v.string()),
+    lastSyncedAt: v.number(),
+    syncToken: v.optional(v.string()), // Google's incremental sync token
+    userId: v.string(),
+  })
+    .index("by_userId", ["userId"])
+    .index("by_userId_and_calendarId", ["userId", "googleCalendarId"]),
 
   aiSettings: defineTable({
     apiKey: v.string(),

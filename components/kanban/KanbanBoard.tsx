@@ -7,18 +7,17 @@ import { api } from "@/convex/_generated/api";
 import type { Doc } from "@/convex/_generated/dataModel";
 import KanbanCard, { TaskEditDialog } from "./KanbanCard";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Kbd } from "@/components/ui/kbd";
 import {
   Menu, MenuTrigger, MenuPopup, MenuItem, MenuSeparator, MenuCheckboxItem,
 } from "@/components/ui/menu";
-import { Button } from "@/components/ui/button";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Add01Icon, FilterIcon, SortingAZ01Icon } from "@hugeicons/core-free-icons";
+import { FilterIcon, SortingAZ01Icon } from "@hugeicons/core-free-icons";
 import {
   format, isToday, startOfWeek, endOfWeek, addWeeks, addDays,
-  isWithinInterval, startOfMonth, endOfMonth, eachWeekOfInterval,
-  parseISO, isBefore, startOfDay, isSameDay,
+  isWithinInterval, startOfMonth, endOfMonth,
+  parseISO, isBefore, startOfDay, isSameDay, isSameMonth,
 } from "date-fns";
+import { isGoogleCalEvent, getOverdueTasks, getTasksForDate } from "@/lib/task-utils";
 
 type Col = {
   id: string;
@@ -90,22 +89,14 @@ export default function KanbanBoard() {
     const now = new Date();
     const today = startOfDay(now);
     const active = tasks.filter((t) => t.status !== "done");
+    const overdue = getOverdueTasks(tasks);
 
     if (view === "d") {
       // Day view — Morning / Afternoon / Evening / Night
-      const todayStr = format(now, "yyyy-MM-dd");
       const buckets: Record<string, Doc<"tasks">[]> = { morning: [], afternoon: [], evening: [], night: [] };
-      const overdue: Doc<"tasks">[] = [];
+      const todayActive = getTasksForDate(tasks, now);
 
-      for (const t of active) {
-        const dateStr = t.dueDate || t.scheduledDate;
-        if (!dateStr) continue;
-        if (isBefore(parseISO(dateStr), today) && !isToday(parseISO(dateStr))) {
-          overdue.push(t);
-          continue;
-        }
-        if (!isSameDay(parseISO(dateStr), now)) continue;
-
+      for (const t of todayActive) {
         const time = (t as Record<string, unknown>).dueTime as string || t.scheduledStartTime || "";
         const hour = time ? parseInt(time.split(":")[0], 10) : 9;
         if (hour >= 6 && hour < 12) buckets.morning.push(t);
@@ -125,57 +116,40 @@ export default function KanbanBoard() {
     if (view === "w") {
       // Week view — 7 days starting Monday
       const weekStart = startOfWeek(now, { weekStartsOn: 1 });
-      const cols: Col[] = [];
+      const todayIdx = Math.max(0, Math.floor((today.getTime() - weekStart.getTime()) / 86400000));
 
-      for (let i = 0; i < 7; i++) {
+      return Array.from({ length: 7 }, (_, i) => {
         const day = addDays(weekStart, i);
-        const dayTasks = active.filter((t) => {
-          const ds = t.dueDate || t.scheduledDate;
-          return ds && isSameDay(parseISO(ds), day);
-        });
-        cols.push({
+        return {
           id: `day-${i}`,
           title: format(day, "EEE"),
           subtitle: format(day, "MMM d"),
           shortcut: String(i + 1),
-          tasks: dayTasks,
-          overdueTasks: i === 0 ? active.filter((t) => {
-            const ds = t.dueDate || t.scheduledDate;
-            return ds && isBefore(parseISO(ds), today) && !isToday(parseISO(ds));
-          }) : [],
+          tasks: getTasksForDate(tasks, day),
+          overdueTasks: i === todayIdx ? overdue : [],
           doneTasks: [],
-        });
-      }
-      return cols;
+        } as Col;
+      });
     }
 
     if (view === "m") {
-      // Month view — every day of the month as a column, 4 visible at a time with scroll
+      // Month view — every day of the month
       const mStart = startOfMonth(now);
-      const mEnd = endOfMonth(now);
-      const daysInMonth = mEnd.getDate();
-      const cols: Col[] = [];
+      const daysInMonth = endOfMonth(now).getDate();
+      const todayDayIdx = isSameMonth(now, mStart) ? today.getDate() - 1 : -1;
 
-      for (let i = 0; i < daysInMonth; i++) {
+      return Array.from({ length: daysInMonth }, (_, i) => {
         const day = addDays(mStart, i);
-        const dayTasks = active.filter((t) => {
-          const ds = t.dueDate || t.scheduledDate;
-          return ds && isSameDay(parseISO(ds), day);
-        });
-        cols.push({
+        return {
           id: `mday-${i}`,
           title: format(day, "EEE"),
           subtitle: format(day, "MMM d"),
           shortcut: String(i + 1),
-          tasks: dayTasks,
-          overdueTasks: i === 0 ? active.filter((t) => {
-            const ds = t.dueDate || t.scheduledDate;
-            return ds && isBefore(parseISO(ds), today) && !isToday(parseISO(ds));
-          }) : [],
+          tasks: getTasksForDate(tasks, day),
+          overdueTasks: i === todayDayIdx ? overdue : [],
           doneTasks: [],
-        });
-      }
-      return cols;
+        } as Col;
+      });
     }
 
     // Overview — Today / This Week / Next Week / This Month
@@ -184,8 +158,8 @@ export default function KanbanBoard() {
     const nextWeekStart = addWeeks(weekStart, 1);
     const nextWeekEnd = addWeeks(weekEnd, 1);
     const monthEnd = endOfMonth(now);
+    const afterNextWeek = addDays(nextWeekEnd, 1);
 
-    const overdue: Doc<"tasks">[] = [];
     const todayTasks: Doc<"tasks">[] = [];
     const thisWeekTasks: Doc<"tasks">[] = [];
     const nextWeekTasks: Doc<"tasks">[] = [];
@@ -195,17 +169,18 @@ export default function KanbanBoard() {
       const ds = t.dueDate || t.scheduledDate;
       if (!ds) continue;
       const d = parseISO(ds);
-      if (isBefore(d, today) && !isToday(d)) overdue.push(t);
-      else if (isToday(d)) todayTasks.push(t);
-      else if (isWithinInterval(d, { start: today, end: weekEnd })) thisWeekTasks.push(t);
-      else if (isWithinInterval(d, { start: nextWeekStart, end: nextWeekEnd })) nextWeekTasks.push(t);
-      else if (isWithinInterval(d, { start: nextWeekEnd, end: monthEnd })) thisMonthTasks.push(t);
+
+      if (isBefore(d, today) && !isToday(d)) continue; // overdue handled by shared fn
+      if (isToday(d)) todayTasks.push(t);
+      else if (isBefore(d, addDays(weekEnd, 1)) && !isBefore(d, today)) thisWeekTasks.push(t);
+      else if (isBefore(d, addDays(nextWeekEnd, 1)) && !isBefore(d, nextWeekStart)) nextWeekTasks.push(t);
+      else if (isBefore(d, addDays(monthEnd, 1)) && !isBefore(d, afterNextWeek)) thisMonthTasks.push(t);
     }
 
     return [
       { id: "today", title: "Today", subtitle: format(now, "MMM d"), shortcut: "1", tasks: todayTasks, overdueTasks: overdue, doneTasks: [] },
-      { id: "this-week", title: "This Week", subtitle: `${format(weekStart, "d")}-${format(weekEnd, "d MMM")}`, shortcut: "2", tasks: thisWeekTasks, overdueTasks: [], doneTasks: [] },
-      { id: "next-week", title: "Next Week", subtitle: `${format(nextWeekStart, "d")}-${format(nextWeekEnd, "d MMM")}`, shortcut: "3", tasks: nextWeekTasks, overdueTasks: [], doneTasks: [] },
+      { id: "this-week", title: "This Week", subtitle: `${format(weekStart, "MMM d")} – ${format(weekEnd, "MMM d")}`, shortcut: "2", tasks: thisWeekTasks, overdueTasks: [], doneTasks: [] },
+      { id: "next-week", title: "Next Week", subtitle: `${format(nextWeekStart, "MMM d")} – ${format(nextWeekEnd, "MMM d")}`, shortcut: "3", tasks: nextWeekTasks, overdueTasks: [], doneTasks: [] },
       { id: "this-month", title: "This Month", subtitle: format(monthEnd, "MMM yyyy"), shortcut: "4", tasks: thisMonthTasks, overdueTasks: [], doneTasks: [] },
     ] as Col[];
   }, [tasks, view]);
@@ -581,6 +556,7 @@ function UpcomingColumn({ column, isLast, isAdding, onStartAdd, onStopAdd, apply
 
   const sortedTasks = applySort(column.tasks);
   const sortedOverdue = applySort(column.overdueTasks);
+
   const totalTasks = sortedTasks.length + sortedOverdue.length;
   const hasOverdue = sortedOverdue.length > 0;
 
@@ -662,9 +638,12 @@ function UpcomingColumn({ column, isLast, isAdding, onStartAdd, onStopAdd, apply
           </div>
         )}
 
+        {/* Tasks sorted by time */}
         {sortedTasks.length > 0 && (
           <div className="flex flex-col gap-1.5">
-            {sortedTasks.map((t) => <KanbanCard key={t._id} task={t} />)}
+            {sortedTasks.map((t) => (
+              <KanbanCard key={t._id} task={t} />
+            ))}
           </div>
         )}
 
