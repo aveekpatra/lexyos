@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useCallback, memo, useMemo } from "react";
 import { useVoiceChat } from "@/lib/ai/useVoiceChat";
 import { motion, AnimatePresence } from "motion/react";
 import { useChat } from "@ai-sdk/react";
-import { TextStreamChatTransport } from "ai";
+import { DefaultChatTransport } from "ai";
 import { Kbd } from "@/components/ui/kbd";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
@@ -35,7 +35,7 @@ const FloatingPill = memo(function FloatingPill() {
 
   const { messages, sendMessage, status, setMessages } = useChat({
     id: "unifocus-ai-chat",
-    transport: new TextStreamChatTransport({ api: "/api/ai/chat" }),
+    transport: new DefaultChatTransport({ api: "/api/ai/chat" }),
   });
 
   // Voice: fills the input box with transcript — user sends manually
@@ -155,7 +155,38 @@ const FloatingPill = memo(function FloatingPill() {
                           ? "max-w-[80%] rounded-br-md bg-[#a78bfa]/15 px-3.5 py-2 text-[#d4d4d8]"
                           : "flex-1 text-[#d4d4d8]"
                       }`}>
-                        {getMessageText(m)}
+                        {/* Show tool calls inline */}
+                        {m.parts?.map((part, i) => {
+                          if (part.type === "text") {
+                            return <span key={i}>{(part as { type: "text"; text: string }).text}</span>;
+                          }
+                          // v6 tool parts have type starting with "tool-"
+                          if (part.type.startsWith("tool-")) {
+                            const p = part as unknown as Record<string, unknown>;
+                            const toolName = (p.toolName as string) || "tool";
+                            const state = (p.state as string) || "call";
+                            const result = p.output ?? p.result;
+                            return (
+                              <div key={i} className="my-1 rounded-lg border border-[#2a2a36] bg-[#12121a] px-3 py-2 text-xs">
+                                <div className="flex items-center gap-2 text-[#a78bfa]">
+                                  <HugeiconsIcon icon={FlashIcon} size={12} />
+                                  <span className="font-medium">{toolName.replace(/_/g, " ")}</span>
+                                  {state === "result" ? (
+                                    <span className="ml-auto text-emerald-400">done</span>
+                                  ) : (
+                                    <span className="ml-auto text-[#71717a]">calling...</span>
+                                  )}
+                                </div>
+                                {state === "result" && result != null && (
+                                  <div className="mt-1.5 max-h-[80px] overflow-y-auto text-[#a1a1aa]">
+                                    {typeof result === "string" ? result : JSON.stringify(result, null, 2).slice(0, 300) as string}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          }
+                          return null;
+                        })}
                       </div>
                     </div>
                   ))}
