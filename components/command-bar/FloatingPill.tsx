@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback, memo } from "react";
-import { motion, AnimatePresence, LayoutGroup } from "motion/react";
+import { useState, useRef, useEffect, useCallback, memo, useMemo } from "react";
+import { useVoiceChat } from "@/lib/ai/useVoiceChat";
+import { motion, AnimatePresence } from "motion/react";
 import { useChat } from "@ai-sdk/react";
 import { TextStreamChatTransport } from "ai";
 import { Kbd } from "@/components/ui/kbd";
@@ -11,9 +12,8 @@ import {
   CalendarAdd01Icon,
   Calendar01Icon,
   CheckListIcon,
-  AiMagicIcon,
+  AppleIntelligenceIcon,
   Mic01Icon,
-  Cancel01Icon,
 } from "@hugeicons/core-free-icons";
 
 const SUGGESTIONS = [
@@ -23,56 +23,63 @@ const SUGGESTIONS = [
   { label: "Add task: Review pull requests", icon: CheckListIcon },
 ];
 
-const LAYOUT_TRANSITION = { duration: 0.35, ease: [0.32, 0.72, 0, 1] as const };
+
+// Module-level message persistence that survives component re-mounts
+let _persistedMessages: Array<{ id: string; role: string; parts: Array<{ type: string; text?: string }> }> = [];
 
 const FloatingPill = memo(function FloatingPill() {
-  const [expanded, setExpanded] = useState(false);
   const [input, setInput] = useState("");
-  const [listening, setListening] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const { messages, sendMessage, status, setMessages } = useChat({
+    id: "unifocus-ai-chat",
     transport: new TextStreamChatTransport({ api: "/api/ai/chat" }),
   });
 
+  // Voice: fills the input box with transcript — user sends manually
+  const fillInput = useCallback((text: string) => {
+    setInput(text);
+  }, []);
+  const { listening, transcript, toggleVoice } = useVoiceChat(fillInput);
+
+  // Restore persisted messages on mount
+  const restoredRef = useRef(false);
+  useEffect(() => {
+    if (!restoredRef.current && _persistedMessages.length > 0 && messages.length === 0) {
+      restoredRef.current = true;
+      setMessages(_persistedMessages as typeof messages);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Persist messages to module-level variable whenever they change
+  useEffect(() => {
+    if (messages.length > 0) {
+      _persistedMessages = messages as typeof _persistedMessages;
+    }
+  }, [messages]);
+
   const isLoading = status === "streaming" || status === "submitted";
 
-  // ⌘K to toggle
+  // ⌘K focuses the input
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === "k") { e.preventDefault(); setExpanded(true); }
+      if ((e.ctrlKey || e.metaKey) && e.key === "k") { e.preventDefault(); inputRef.current?.focus(); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
-
-  // Auto-focus input when expanded
-  useEffect(() => {
-    if (expanded) { const t = setTimeout(() => inputRef.current?.focus(), 100); return () => clearTimeout(t); }
-  }, [expanded]);
-
-  // Click outside to close
-  useEffect(() => {
-    if (!expanded) return;
-    const onClick = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) collapse();
-    };
-    const t = setTimeout(() => document.addEventListener("mousedown", onClick), 80);
-    return () => { clearTimeout(t); document.removeEventListener("mousedown", onClick); };
-  }, [expanded]);
 
   // Auto-scroll to latest message
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const collapse = useCallback(() => {
-    setExpanded(false);
+  const clearChat = useCallback(() => {
     setMessages([]);
+    _persistedMessages = [];
     setInput("");
-    setListening(false);
   }, [setMessages]);
 
   const handleSubmit = useCallback(() => {
@@ -85,42 +92,12 @@ const FloatingPill = memo(function FloatingPill() {
     sendMessage({ text });
   }, [sendMessage]);
 
-  const handleMic = useCallback(() => {
-    if (!("webkitSpeechRecognition" in window) && !("SpeechRecognition" in window)) return;
-    if (listening) { setListening(false); return; }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const recognition: any = new SR();
-    recognition.continuous = false;
-    recognition.interimResults = true;
-    recognition.lang = "en-US";
-    recognition.onstart = () => setListening(true);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    recognition.onresult = (event: any) => {
-      const transcript = Array.from(event.results as ArrayLike<{ 0: { transcript: string } }>)
-        .map((r) => r[0].transcript).join("");
-      setInput(transcript);
-    };
-    recognition.onend = () => {
-      setListening(false);
-      // Auto-submit after speech — read the latest input value
-      setTimeout(() => {
-        const currentInput = inputRef.current?.value;
-        if (currentInput?.trim()) {
-          sendMessage({ text: currentInput.trim() });
-          setInput("");
-        }
-      }, 100);
-    };
-    recognition.onerror = () => setListening(false);
-    recognition.start();
-  }, [listening, sendMessage]);
+  // No auto-speak — voice just fills the input box
 
-  // Get visible messages (only user + assistant with text parts)
+  // Get visible messages (user + assistant with any content)
   const visibleMessages = messages.filter((m) =>
     (m.role === "user" || m.role === "assistant") &&
-    m.parts?.some((p) => p.type === "text" && p.text)
+    m.parts?.length > 0
   );
   const hasMessages = visibleMessages.length > 0;
 
@@ -128,161 +105,143 @@ const FloatingPill = memo(function FloatingPill() {
   const getMessageText = (m: typeof messages[0]) =>
     m.parts?.filter((p) => p.type === "text").map((p) => (p as { type: "text"; text: string }).text).join("") || "";
 
-  const pillStyle = {
-    borderRadius: 9999,
-    background: "linear-gradient(180deg, rgba(40,40,55,0.85) 0%, rgba(15,15,20,0.9) 100%)",
-    boxShadow: [
-      "0 1px 0 0 rgba(255,255,255,0.08) inset",
-      "0 -1px 0 0 rgba(0,0,0,0.3) inset",
-      "0 4px 12px rgba(0,0,0,0.4)",
-      "0 12px 40px rgba(0,0,0,0.3)",
-    ].join(", "),
-  };
 
   const panelStyle = {
-    borderRadius: 16,
-    background: "linear-gradient(180deg, rgba(35,35,48,0.92) 0%, rgba(12,12,16,0.95) 100%)",
+    borderRadius: 24,
+    background: "linear-gradient(180deg, rgba(35,35,50,0.75) 0%, rgba(18,18,24,0.85) 100%)",
     boxShadow: [
-      "0 1px 0 0 rgba(255,255,255,0.07) inset",
-      "0 -1px 0 0 rgba(0,0,0,0.3) inset",
-      "0 8px 40px rgba(0,0,0,0.6)",
-      "0 0 30px rgba(167,139,250,0.08)",
+      "0 1px 0 0 rgba(255,255,255,0.1) inset",
+      "0 -1px 0 0 rgba(0,0,0,0.4) inset",
+      "0 8px 40px rgba(0,0,0,0.5)",
+      "0 0 30px rgba(167,139,250,0.06)",
+      "0 0 0 1px rgba(255,255,255,0.06)",
     ].join(", "),
   };
 
   return (
-    <div className="fixed bottom-5 left-1/2 z-50 -translate-x-1/2" ref={containerRef}>
-      <LayoutGroup>
-        <AnimatePresence mode="popLayout">
-          {!expanded ? (
-            <motion.button
-              key="pill"
-              layoutId="ai-command-container"
-              onClick={() => setExpanded(true)}
-              className="flex items-center gap-3 rounded-full border border-[#3a3a4a]/60 px-5 py-2.5 backdrop-blur-xl"
-              transition={LAYOUT_TRANSITION}
-              style={pillStyle}
-            >
-              <motion.div layout="position" className="flex items-center">
-                <HugeiconsIcon icon={AiMagicIcon} size={16} className="text-[#a78bfa]" />
-              </motion.div>
-              <motion.span layout="position" className="flex items-center text-sm leading-none text-[#71717a]">
-                Ask AI anything...
-              </motion.span>
-              <motion.div layout="position" className="flex items-center">
-                <Kbd>⌘K</Kbd>
-              </motion.div>
-            </motion.button>
-          ) : (
+    <div className="fixed bottom-5 left-1/2 z-50 w-[560px] -translate-x-1/2" ref={containerRef}>
+      <div
+        className="overflow-hidden rounded-3xl border border-white/[0.08] backdrop-blur-xl backdrop-saturate-150"
+        style={panelStyle}
+      >
+        {/* Messages area — slides up when messages exist */}
+        <AnimatePresence>
+          {hasMessages && (
             <motion.div
-              key="panel"
-              layoutId="ai-command-container"
-              className="w-[560px] overflow-hidden rounded-2xl border border-[#3a3a4a]/60 backdrop-blur-2xl"
-              transition={LAYOUT_TRANSITION}
-              style={panelStyle}
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
+              className="overflow-hidden"
             >
-              {/* Messages area */}
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ delay: 0.15, duration: 0.2 }}
-              >
-                <div className="max-h-[320px] overflow-y-auto">
-                  {/* Suggestions */}
-                  {!hasMessages && !isLoading && (
-                    <div className="px-4 py-3">
-                      <p className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-[#52525b]">
-                        <HugeiconsIcon icon={AiMagicIcon} size={12} className="text-[#a78bfa]" />
-                        Suggestions
-                      </p>
-                      <div className="flex flex-col gap-0.5">
-                        {SUGGESTIONS.map((s) => (
-                          <button
-                            key={s.label}
-                            onClick={() => submitSuggestion(s.label)}
-                            className="flex items-center gap-3 rounded-lg px-3 py-2 text-left text-sm text-[#a1a1aa] transition-colors hover:bg-[#1f1f28] hover:text-white"
-                          >
-                            <HugeiconsIcon icon={s.icon} size={15} className="shrink-0 text-[#71717a]" />
-                            {s.label}
-                          </button>
-                        ))}
+              <div className="max-h-[320px] overflow-y-auto">
+                <div className="flex flex-col gap-1 px-4 py-3">
+                  <button
+                    type="button"
+                    onClick={clearChat}
+                    className="mb-1 self-end rounded-md px-2 py-0.5 text-[11px] text-[#52525b] transition-colors hover:bg-[#1f1f28] hover:text-[#a1a1aa]"
+                  >
+                    New chat
+                  </button>
+                  {visibleMessages.map((m) => (
+                    <div key={m.id} className={`flex items-start gap-2.5 ${m.role === "user" ? "justify-end" : ""}`}>
+                      {m.role === "assistant" && (
+                        <div className="flex h-[21px] items-center">
+                          <HugeiconsIcon icon={AppleIntelligenceIcon} size={14} className="shrink-0 text-[#a78bfa]" />
+                        </div>
+                      )}
+                      <div className={`rounded-xl text-sm leading-[21px] ${
+                        m.role === "user"
+                          ? "max-w-[80%] rounded-br-md bg-[#a78bfa]/15 px-3.5 py-2 text-[#d4d4d8]"
+                          : "flex-1 text-[#d4d4d8]"
+                      }`}>
+                        {getMessageText(m)}
                       </div>
                     </div>
-                  )}
+                  ))}
 
-                  {/* Chat messages */}
-                  {hasMessages && (
-                    <div className="flex flex-col gap-1 px-4 py-3">
-                      {visibleMessages.map((m) => (
-                        <div key={m.id} className={`flex gap-3 ${m.role === "user" ? "justify-end" : ""}`}>
-                          {m.role === "assistant" && (
-                            <HugeiconsIcon icon={AiMagicIcon} size={14} className="mt-1 shrink-0 text-[#a78bfa]" />
-                          )}
-                          <div className={`rounded-xl px-3.5 py-2 text-sm leading-relaxed ${
-                            m.role === "user"
-                              ? "max-w-[80%] bg-[#a78bfa]/15 text-[#d4d4d8]"
-                              : "flex-1 text-[#d4d4d8]"
-                          }`}>
-                            {getMessageText(m)}
-                          </div>
-                        </div>
-                      ))}
-
-                      {isLoading && <LoadingDots />}
-                      <div ref={messagesEndRef} />
-                    </div>
-                  )}
+                  {isLoading && <LoadingDots />}
+                  <div ref={messagesEndRef} />
                 </div>
-              </motion.div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
-              {/* Input row */}
-              <div className="flex items-center gap-3 border-t border-[#1f1f28] px-4 py-3">
-                <motion.div layout="position" className="flex items-center">
-                  <HugeiconsIcon
-                    icon={AiMagicIcon}
-                    size={18}
-                    className={`shrink-0 text-[#a78bfa] ${isLoading ? "animate-spin" : ""}`}
-                  />
-                </motion.div>
-                <input
-                  ref={inputRef}
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && input.trim()) { e.preventDefault(); handleSubmit(); }
-                    if (e.key === "Escape") collapse();
-                  }}
-                  placeholder={listening ? "Listening..." : "Ask AI to manage your tasks, calendar, day..."}
-                  className="flex-1 bg-transparent text-sm text-white outline-none placeholder:text-[#52525b]"
-                />
-                <button
-                  type="button"
-                  onClick={handleMic}
-                  className={`relative flex size-8 items-center justify-center rounded-full transition-colors duration-150 ${
-                    listening ? "bg-[#a78bfa]/20 text-[#a78bfa]" : "text-[#52525b] hover:bg-[#1f1f28] hover:text-[#a1a1aa]"
-                  }`}
-                >
-                  {listening && (
+        {/* Voice listening indicator — just shows animated bars when mic is active */}
+        <AnimatePresence>
+          {listening && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.15 }}
+              className="overflow-hidden"
+            >
+              <div className={`flex items-center gap-3 px-4 py-2 ${hasMessages ? "border-t border-[#1f1f28]" : ""}`}>
+                <div className="flex items-center gap-[3px]">
+                  {[0, 1, 2, 3, 4].map((i) => (
                     <motion.div
-                      className="absolute inset-0 rounded-full border border-[#a78bfa]/40"
-                      animate={{ scale: [1, 1.5], opacity: [0.5, 0] }}
-                      transition={{ duration: 1.2, repeat: Infinity, ease: "easeOut" }}
+                      key={i}
+                      className="w-[3px] rounded-full bg-[#a78bfa]"
+                      animate={{ height: [4, 12 + Math.random() * 8, 4] }}
+                      transition={{ duration: 0.5 + i * 0.1, repeat: Infinity, ease: "easeInOut", delay: i * 0.08 }}
                     />
-                  )}
-                  <HugeiconsIcon icon={Mic01Icon} size={16} />
-                </button>
+                  ))}
+                </div>
+                <p className="flex-1 truncate text-sm text-[#a1a1aa]">
+                  Listening — speak now...
+                </p>
                 <button
                   type="button"
-                  onClick={collapse}
-                  className="flex size-7 items-center justify-center rounded-lg text-[#52525b] transition-colors duration-150 hover:bg-[#1f1f28] hover:text-[#a1a1aa]"
+                  onClick={toggleVoice}
+                  className="rounded-lg bg-[#a78bfa] px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-[#8b6fd4]"
                 >
-                  <HugeiconsIcon icon={Cancel01Icon} size={14} />
+                  Stop
                 </button>
               </div>
             </motion.div>
           )}
         </AnimatePresence>
-      </LayoutGroup>
+
+        {/* Input row — always visible */}
+        <div className={`flex items-center gap-3 px-4 py-3 ${hasMessages || listening ? "border-t border-[#1f1f28]" : ""}`}>
+          <HugeiconsIcon
+            icon={AppleIntelligenceIcon}
+            size={18}
+            className={`shrink-0 text-[#a78bfa] ${isLoading ? "animate-spin" : ""}`}
+          />
+          <input
+            ref={inputRef}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && input.trim()) { e.preventDefault(); handleSubmit(); }
+            }}
+            placeholder="Ask AI to manage your tasks, calendar, day..."
+            className="flex-1 bg-transparent text-sm text-white outline-none placeholder:text-[#52525b]"
+          />
+          <button
+            type="button"
+            onClick={toggleVoice}
+            className={`relative flex size-8 items-center justify-center rounded-full transition-colors duration-150 ${
+              listening
+                ? "bg-[#a78bfa]/20 text-[#a78bfa]"
+                : "text-[#52525b] hover:bg-[#1f1f28] hover:text-[#a1a1aa]"
+            }`}
+          >
+            {listening && (
+              <motion.div
+                className="absolute inset-0 rounded-full border border-[#a78bfa]/40"
+                animate={{ scale: [1, 1.5], opacity: [0.5, 0] }}
+                transition={{ duration: 1.2, repeat: Infinity, ease: "easeOut" }}
+              />
+            )}
+            <HugeiconsIcon icon={Mic01Icon} size={16} />
+          </button>
+          <Kbd>⌘K</Kbd>
+        </div>
+      </div>
     </div>
   );
 });
@@ -292,7 +251,7 @@ export default FloatingPill;
 function LoadingDots() {
   return (
     <div className="flex items-center gap-3 px-4 py-3">
-      <HugeiconsIcon icon={AiMagicIcon} size={14} className="shrink-0 text-[#a78bfa]" />
+      <HugeiconsIcon icon={AppleIntelligenceIcon} size={14} className="shrink-0 text-[#a78bfa]" />
       <div className="flex gap-1">
         {[0, 1, 2].map((i) => (
           <motion.div
