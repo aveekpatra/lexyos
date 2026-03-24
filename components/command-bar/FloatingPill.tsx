@@ -129,6 +129,7 @@ const FloatingPill = memo(function FloatingPill() {
   }, [sendMessage]);
 
   const hasMessages = messages.length > 0;
+  const [chatFolded, setChatFolded] = useState(false);
 
 
   const panelStyle = {
@@ -159,15 +160,40 @@ const FloatingPill = memo(function FloatingPill() {
               transition={{ duration: 0.2, ease: "easeOut" }}
               className="overflow-hidden"
             >
-              <div className="max-h-[320px] overflow-y-auto">
-                <div className="flex flex-col gap-1 px-4 py-3">
-                  <button
-                    type="button"
-                    onClick={clearChat}
-                    className="mb-1 self-end rounded-md px-2 py-0.5 text-[11px] text-[#52525b] transition-colors hover:bg-[#1f1f28] hover:text-[#a1a1aa]"
+              {/* Controls bar */}
+              <div className="flex items-center justify-between px-4 pt-2.5 pb-0">
+                <button
+                  type="button"
+                  onClick={() => setChatFolded((f) => !f)}
+                  className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-[#71717a] transition-colors hover:bg-[#1f1f28] hover:text-[#a1a1aa]"
+                >
+                  <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"
+                    className={`transition-transform ${chatFolded ? "" : "rotate-180"}`}>
+                    <path d="M2 6.5L5 3.5L8 6.5" />
+                  </svg>
+                  {chatFolded ? "Show chat" : "Hide chat"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { clearChat(); setChatFolded(false); }}
+                  className="rounded-md px-2 py-0.5 text-[11px] text-[#52525b] transition-colors hover:bg-[#1f1f28] hover:text-[#a1a1aa]"
+                >
+                  New chat
+                </button>
+              </div>
+
+              {/* Chat messages — foldable */}
+              <AnimatePresence>
+                {!chatFolded && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.15, ease: "easeOut" }}
+                    className="overflow-hidden"
                   >
-                    New chat
-                  </button>
+              <div className="max-h-[320px] overflow-y-auto">
+                <div className="flex flex-col gap-1 px-4 py-2">
                   {messages.map((m) => (
                     <div key={m.id} className={`flex items-start gap-2.5 ${m.role === "user" ? "justify-end" : ""}`}>
                       {m.role === "assistant" && (
@@ -204,6 +230,9 @@ const FloatingPill = memo(function FloatingPill() {
                   <div ref={messagesEndRef} />
                 </div>
               </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </motion.div>
           )}
         </AnimatePresence>

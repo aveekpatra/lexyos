@@ -1,6 +1,6 @@
 "use client";
 
-import { ReactNode, lazy, Suspense, useState, useCallback } from "react";
+import { ReactNode, useState, useCallback } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { UserButton } from "@clerk/nextjs";
 import { useMutation } from "convex/react";
@@ -22,7 +22,7 @@ import {
   TooltipPopup,
 } from "@/components/ui/tooltip";
 
-const FloatingPill = lazy(() => import("@/components/command-bar/FloatingPill"));
+import FloatingPill from "@/components/command-bar/FloatingPill";
 
 const NAV_ITEMS = [
   { icon: InboxIcon, label: "Inbox", href: "/timeline" },
@@ -74,10 +74,8 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         {children}
       </main>
 
-      {/* Floating AI pill — always visible */}
-      <Suspense fallback={null}>
-        <FloatingPill />
-      </Suspense>
+      {/* Floating AI pill — always visible, no lazy/suspense to prevent re-mount on nav */}
+      <FloatingPill />
     </div>
   );
 }
@@ -140,6 +138,12 @@ function SyncButton() {
         syncRangeStart: timeMin.slice(0, 10),
         syncRangeEnd: timeMax.slice(0, 10),
       });
+      // Also push unlinked local tasks to Google Calendar
+      try {
+        await fetch("/api/sync/push-all", { method: "POST" });
+      } catch (err) {
+        console.warn("Push-all failed:", err);
+      }
       setLastSync(new Date());
     } catch (err) {
       console.error("Manual sync failed:", err);

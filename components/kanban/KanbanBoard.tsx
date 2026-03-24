@@ -118,7 +118,7 @@ export default function KanbanBoard() {
     const overdue = getOverdueTasks(tasks);
 
     if (view === "d") {
-      // Day view — Morning / Afternoon / Evening / Night
+      // Day view — 4 columns (Morning/Afternoon/Evening/Night) with hour blocks inside
       const buckets: Record<string, Doc<"tasks">[]> = { morning: [], afternoon: [], evening: [], night: [] };
       const todayActive = getTasksForDate(tasks, now);
 
@@ -428,7 +428,7 @@ export default function KanbanBoard() {
       {/* Columns — week/month views scroll horizontally with hidden scrollbar */}
       <div
         ref={scrollContainerRef}
-        className={`flex flex-1 ${
+        className={`flex flex-1 overflow-hidden ${
           view === "w" || view === "m"
             ? "overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
             : ""
@@ -457,6 +457,76 @@ export default function KanbanBoard() {
 const QUARTER_START_TIMES: Record<string, string> = {
   morning: "06:00", afternoon: "12:00", evening: "17:00", night: "21:00",
 };
+
+const PERIOD_HOURS: Record<string, number[]> = {
+  morning: [6, 7, 8, 9, 10, 11],
+  afternoon: [12, 13, 14, 15, 16],
+  evening: [17, 18, 19, 20],
+  night: [21, 22, 23],
+};
+
+function formatHour(h: number): string {
+  if (h === 0) return "12 am";
+  if (h < 12) return `${h} am`;
+  if (h === 12) return "12 pm";
+  return `${h - 12} pm`;
+}
+
+/** Renders tasks grouped by hour blocks inside a day-view column */
+function DayViewHourBlocks({ tasks, columnId }: { tasks: Doc<"tasks">[]; columnId: string }) {
+  const hours = PERIOD_HOURS[columnId] || [];
+  const now = new Date();
+  const currentHour = now.getHours();
+
+  // Group tasks by hour
+  const tasksByHour = new Map<number, Doc<"tasks">[]>();
+  for (const h of hours) tasksByHour.set(h, []);
+
+  // Tasks without a matching hour go into the first hour
+  const unslotted: Doc<"tasks">[] = [];
+  for (const t of tasks) {
+    const time = (t as Record<string, unknown>).dueTime as string || t.scheduledStartTime || "";
+    const hour = time ? parseInt(time.split(":")[0], 10) : -1;
+    const bucket = tasksByHour.get(hour);
+    if (bucket) bucket.push(t);
+    else unslotted.push(t);
+  }
+  // Put unslotted into first hour
+  if (unslotted.length > 0 && hours.length > 0) {
+    const first = tasksByHour.get(hours[0])!;
+    first.push(...unslotted);
+  }
+
+  return (
+    <div className="flex flex-col">
+      {hours.map((h) => {
+        const hourTasks = tasksByHour.get(h) || [];
+        const isCurrentHour = h === currentHour;
+
+        return (
+          <div key={h} className="relative">
+            {/* Hour label with dashed line */}
+            <div className="flex items-center gap-2 py-1.5">
+              <span className={`shrink-0 text-[11px] font-medium tabular-nums ${isCurrentHour ? "text-[#a78bfa]" : "text-[#52525b]"}`}>
+                {formatHour(h)}
+              </span>
+              <div className={`h-px flex-1 ${isCurrentHour ? "border-t border-dashed border-[#a78bfa]/40" : "border-t border-dashed border-[#2a2a32]"}`} />
+            </div>
+
+            {/* Tasks in this hour */}
+            {hourTasks.length > 0 && (
+              <div className="flex flex-col gap-1.5 pb-1">
+                {hourTasks.map((t) => (
+                  <KanbanCard key={t._id} task={t} />
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 /* ─── Column ─── */
 function UpcomingColumn({ column, isLast, isAdding, onStartAdd, onStopAdd, applySort, view, showDone, allTasks }: {
@@ -542,7 +612,13 @@ function UpcomingColumn({ column, isLast, isAdding, onStartAdd, onStopAdd, apply
 
   const handleQuickAdd = useCallback(async () => {
     if (!newTitle.trim()) return;
-    const newTaskId = await createTask({ title: newTitle.trim(), dueDate: defaultDueDate, userDate: format(new Date(), "yyyy-MM-dd") });
+    const quarterTime = QUARTER_START_TIMES[column.id];
+    const newTaskId = await createTask({
+      title: newTitle.trim(),
+      dueDate: defaultDueDate,
+      userDate: format(new Date(), "yyyy-MM-dd"),
+      ...(quarterTime ? { dueTime: quarterTime } : {}),
+    });
     setNewTitle("");
     inputRef.current?.focus();
     // Auto-push to Google Calendar
@@ -630,7 +706,7 @@ function UpcomingColumn({ column, isLast, isAdding, onStartAdd, onStopAdd, apply
   return (
     <div
       data-column-id={column.id}
-      className={`relative flex flex-col ${widthClass} ${!isLast ? "border-r border-dashed border-[#3a3a48]" : ""}`}
+      className={`relative flex flex-col overflow-hidden ${widthClass} ${!isLast ? "border-r border-dashed border-[#3a3a48]" : ""}`}
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}
       onDragOver={handleDragOver}
@@ -688,7 +764,7 @@ function UpcomingColumn({ column, isLast, isAdding, onStartAdd, onStopAdd, apply
       </div>
 
       {/* Tasks */}
-      <div className="flex flex-1 flex-col overflow-y-auto px-5 pb-4">
+      <div className="flex flex-1 flex-col overflow-y-auto px-5 pb-4 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
         {hasOverdue && (
           <div className="mb-4">
             <div className="mb-2 flex items-center justify-between">
@@ -703,13 +779,17 @@ function UpcomingColumn({ column, isLast, isAdding, onStartAdd, onStopAdd, apply
           </div>
         )}
 
-        {/* Tasks sorted by time */}
+        {/* Tasks — grouped by hour in day view, flat otherwise */}
         {sortedTasks.length > 0 && (
-          <div className="flex flex-col gap-1.5">
-            {sortedTasks.map((t) => (
-              <KanbanCard key={t._id} task={t} />
-            ))}
-          </div>
+          view === "d" ? (
+            <DayViewHourBlocks tasks={sortedTasks} columnId={column.id} />
+          ) : (
+            <div className="flex flex-col gap-1.5">
+              {sortedTasks.map((t) => (
+                <KanbanCard key={t._id} task={t} />
+              ))}
+            </div>
+          )
         )}
 
         {/* Done tasks */}

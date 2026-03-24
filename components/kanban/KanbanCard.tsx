@@ -225,8 +225,8 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue, context = "
                 value={task.projectId}
                 onChange={(pid) => syncUpdateTask({ id: task._id, ...(pid ? { projectId: pid } : { clearProjectId: true }) })}
               >
-                <TaskChip active className="max-w-[80px] truncate">
-                  <span style={{ color: project.color }}>{project.name}</span>
+                <TaskChip active>
+                  <span style={{ color: project.color }} className="max-w-[160px] truncate">{project.name}</span>
                 </TaskChip>
               </ProjectPickerPopover>
             )}
