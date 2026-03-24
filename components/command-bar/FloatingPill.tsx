@@ -3,8 +3,6 @@
 import { useState, useRef, useEffect, useCallback, memo, useMemo } from "react";
 import { useVoiceChat } from "@/lib/ai/useVoiceChat";
 import { motion, AnimatePresence } from "motion/react";
-import { useChat } from "@ai-sdk/react";
-import { DefaultChatTransport } from "ai";
 import { Kbd } from "@/components/ui/kbd";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
@@ -24,43 +22,31 @@ const SUGGESTIONS = [
 ];
 
 
-// Module-level message persistence that survives component re-mounts
-let _persistedMessages: Array<{ id: string; role: string; parts: Array<{ type: string; text?: string }> }> = [];
+type ChatMsg = {
+  id: string;
+  role: "user" | "assistant";
+  text: string;
+  toolCalls?: Array<{ toolName: string; input: unknown; output: unknown }>;
+};
+
+// Module-level persistence
+let _persistedMessages: ChatMsg[] = [];
+let _msgCounter = 0;
 
 const FloatingPill = memo(function FloatingPill() {
   const [input, setInput] = useState("");
+  const [messages, setMessages] = useState<ChatMsg[]>(_persistedMessages);
+  const [isLoading, setIsLoading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const { messages, sendMessage, status, setMessages } = useChat({
-    id: "unifocus-ai-chat",
-    transport: new DefaultChatTransport({ api: "/api/ai/chat" }),
-  });
+  // Voice: fills the input box with transcript
+  const fillInput = useCallback((text: string) => { setInput(text); }, []);
+  const { listening, toggleVoice } = useVoiceChat(fillInput);
 
-  // Voice: fills the input box with transcript — user sends manually
-  const fillInput = useCallback((text: string) => {
-    setInput(text);
-  }, []);
-  const { listening, transcript, toggleVoice } = useVoiceChat(fillInput);
-
-  // Restore persisted messages on mount
-  const restoredRef = useRef(false);
-  useEffect(() => {
-    if (!restoredRef.current && _persistedMessages.length > 0 && messages.length === 0) {
-      restoredRef.current = true;
-      setMessages(_persistedMessages as typeof messages);
-    }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Persist messages to module-level variable whenever they change
-  useEffect(() => {
-    if (messages.length > 0) {
-      _persistedMessages = messages as typeof _persistedMessages;
-    }
-  }, [messages]);
-
-  const isLoading = status === "streaming" || status === "submitted";
+  // Persist messages
+  useEffect(() => { _persistedMessages = messages; }, [messages]);
 
   // ⌘K focuses the input
   useEffect(() => {
@@ -71,7 +57,7 @@ const FloatingPill = memo(function FloatingPill() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  // Auto-scroll to latest message
+  // Auto-scroll
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
@@ -80,30 +66,69 @@ const FloatingPill = memo(function FloatingPill() {
     setMessages([]);
     _persistedMessages = [];
     setInput("");
-  }, [setMessages]);
+  }, []);
+
+  const sendMessage = useCallback(async (text: string) => {
+    const userMsg: ChatMsg = { id: `msg-${++_msgCounter}`, role: "user", text };
+    const updatedMessages = [..._persistedMessages, userMsg];
+    setMessages(updatedMessages);
+    setIsLoading(true);
+
+    try {
+      const res = await fetch("/api/ai/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: updatedMessages.map((m) => ({
+            role: m.role,
+            parts: [{ type: "text", text: m.text }],
+          })),
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Unknown error" }));
+        const assistantMsg: ChatMsg = {
+          id: `msg-${++_msgCounter}`,
+          role: "assistant",
+          text: `Error: ${err.error || res.statusText}`,
+        };
+        setMessages((prev) => [...prev, assistantMsg]);
+        return;
+      }
+
+      const data = await res.json();
+      const assistantMsg: ChatMsg = {
+        id: `msg-${++_msgCounter}`,
+        role: "assistant",
+        text: data.text || "Done.",
+        toolCalls: data.toolCalls,
+      };
+      setMessages((prev) => [...prev, assistantMsg]);
+    } catch (err) {
+      const assistantMsg: ChatMsg = {
+        id: `msg-${++_msgCounter}`,
+        role: "assistant",
+        text: `Error: ${err instanceof Error ? err.message : "Network error"}`,
+      };
+      setMessages((prev) => [...prev, assistantMsg]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
   const handleSubmit = useCallback(() => {
     if (!input.trim() || isLoading) return;
-    sendMessage({ text: input.trim() });
+    const text = input.trim();
     setInput("");
+    sendMessage(text);
   }, [input, isLoading, sendMessage]);
 
   const submitSuggestion = useCallback((text: string) => {
-    sendMessage({ text });
+    sendMessage(text);
   }, [sendMessage]);
 
-  // No auto-speak — voice just fills the input box
-
-  // Get visible messages (user + assistant with any content)
-  const visibleMessages = messages.filter((m) =>
-    (m.role === "user" || m.role === "assistant") &&
-    m.parts?.length > 0
-  );
-  const hasMessages = visibleMessages.length > 0;
-
-  // Extract text from message parts
-  const getMessageText = (m: typeof messages[0]) =>
-    m.parts?.filter((p) => p.type === "text").map((p) => (p as { type: "text"; text: string }).text).join("") || "";
+  const hasMessages = messages.length > 0;
 
 
   const panelStyle = {
@@ -143,7 +168,7 @@ const FloatingPill = memo(function FloatingPill() {
                   >
                     New chat
                   </button>
-                  {visibleMessages.map((m) => (
+                  {messages.map((m) => (
                     <div key={m.id} className={`flex items-start gap-2.5 ${m.role === "user" ? "justify-end" : ""}`}>
                       {m.role === "assistant" && (
                         <div className="flex h-[21px] items-center">
@@ -155,38 +180,22 @@ const FloatingPill = memo(function FloatingPill() {
                           ? "max-w-[80%] rounded-br-md bg-[#a78bfa]/15 px-3.5 py-2 text-[#d4d4d8]"
                           : "flex-1 text-[#d4d4d8]"
                       }`}>
-                        {/* Show tool calls inline */}
-                        {m.parts?.map((part, i) => {
-                          if (part.type === "text") {
-                            return <span key={i}>{(part as { type: "text"; text: string }).text}</span>;
-                          }
-                          // v6 tool parts have type starting with "tool-"
-                          if (part.type.startsWith("tool-")) {
-                            const p = part as unknown as Record<string, unknown>;
-                            const toolName = (p.toolName as string) || "tool";
-                            const state = (p.state as string) || "call";
-                            const result = p.output ?? p.result;
-                            return (
-                              <div key={i} className="my-1 rounded-lg border border-[#2a2a36] bg-[#12121a] px-3 py-2 text-xs">
+                        {/* Tool calls */}
+                        {m.toolCalls && m.toolCalls.length > 0 && (
+                          <div className="mb-2 flex flex-col gap-1">
+                            {m.toolCalls.map((tc, i) => (
+                              <div key={i} className="rounded-lg border border-[#2a2a36] bg-[#12121a] px-3 py-2 text-xs">
                                 <div className="flex items-center gap-2 text-[#a78bfa]">
                                   <HugeiconsIcon icon={FlashIcon} size={12} />
-                                  <span className="font-medium">{toolName.replace(/_/g, " ")}</span>
-                                  {state === "result" ? (
-                                    <span className="ml-auto text-emerald-400">done</span>
-                                  ) : (
-                                    <span className="ml-auto text-[#71717a]">calling...</span>
-                                  )}
+                                  <span className="font-medium">{tc.toolName.replace(/_/g, " ")}</span>
+                                  <span className="ml-auto text-emerald-400">done</span>
                                 </div>
-                                {state === "result" && result != null && (
-                                  <div className="mt-1.5 max-h-[80px] overflow-y-auto text-[#a1a1aa]">
-                                    {typeof result === "string" ? result : JSON.stringify(result, null, 2).slice(0, 300) as string}
-                                  </div>
-                                )}
                               </div>
-                            );
-                          }
-                          return null;
-                        })}
+                            ))}
+                          </div>
+                        )}
+                        {/* Text */}
+                        {m.text}
                       </div>
                     </div>
                   ))}
