@@ -1,4 +1,4 @@
-import { streamText } from "ai";
+import { generateText, createUIMessageStream } from "ai";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { createTools } from "@/lib/ai/tools";
 import { auth } from "@clerk/nextjs/server";
@@ -55,7 +55,8 @@ export async function POST(req: Request) {
 
     // v6 useChat sends UIMessages with `parts` array — convert to CoreMessage format
     const uiMessages = body.messages || [];
-    const modelMessages = uiMessages
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const modelMessages: any[] = uiMessages
       .filter((m: Record<string, unknown>) => m.role === "user" || m.role === "assistant")
       .map((m: Record<string, unknown>) => {
         const text = Array.isArray(m.parts)
@@ -75,18 +76,80 @@ export async function POST(req: Request) {
     const model = openrouter(process.env.OPENROUTER_MODEL || "google/gemini-2.5-flash-preview");
     const tools = createTools(token);
 
-    const result = streamText({
-      model,
-      system: SYSTEM_PROMPT,
-      messages: modelMessages,
-      tools,
-      toolChoice: "auto",
+    // Manual multi-step tool loop with streaming via createUIMessageStream
+    const response = createUIMessageStream({
+      execute: async ({ writer }) => {
+        let messages = [...modelMessages];
+        const MAX_STEPS = 10;
+
+        for (let step = 0; step < MAX_STEPS; step++) {
+          const result = await generateText({
+            model,
+            system: SYSTEM_PROMPT,
+            messages,
+            tools,
+            toolChoice: "auto",
+          });
+
+          // If there are tool calls, execute them and add results to messages
+          if (result.toolCalls && result.toolCalls.length > 0) {
+            // Stream tool calls to client
+            for (const tc of result.toolCalls) {
+              writer.write({
+                type: "tool-input-start",
+                toolCallId: tc.toolCallId,
+                toolName: tc.toolName,
+              });
+              writer.write({
+                type: "tool-input-available",
+                toolCallId: tc.toolCallId,
+                toolName: tc.toolName,
+                input: tc.input,
+              });
+            }
+
+            // Stream tool results to client
+            for (const tr of result.toolResults) {
+              writer.write({
+                type: "tool-output-available",
+                toolCallId: tr.toolCallId,
+                output: tr.output as Record<string, unknown>,
+              });
+            }
+
+            // Add assistant message with tool calls + tool results to conversation
+            messages = [
+              ...messages,
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              ...(result.response.messages as any[]),
+            ];
+
+            // If there's also text in this step, stream it
+            if (result.text) {
+              writer.write({ type: "text-delta", delta: result.text, id: crypto.randomUUID() });
+              break; // Got text + tool calls, done
+            }
+
+            // Continue loop — model needs to generate text based on tool results
+            continue;
+          }
+
+          // No tool calls — just text response
+          if (result.text) {
+            writer.write({ type: "text-delta", delta: result.text, id: crypto.randomUUID() });
+          }
+          break; // Done
+        }
+      },
       onError: (err) => {
-        console.error("[AI Chat] Stream error:", err);
+        console.error("[AI Chat] Error:", err);
+        return err instanceof Error ? err.message : "An error occurred";
       },
     });
 
-    return result.toUIMessageStreamResponse();
+    return new Response(response, {
+      headers: { "Content-Type": "text/event-stream" },
+    });
   } catch (err) {
     console.error("AI chat error:", err);
     return new Response(
