@@ -113,6 +113,9 @@ export const create = mutation({
     parentTaskId: v.optional(v.id("tasks")),
     googleEventId: v.optional(v.string()),
     googleCalendarId: v.optional(v.string()),
+    // Client-provided local date (format: "YYYY-MM-DD") to avoid UTC drift on the server.
+    // Falls back to server UTC date if not provided.
+    userDate: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
@@ -125,12 +128,16 @@ export const create = mutation({
       .collect();
     const maxOrder = existing.reduce((max, t) => Math.max(max, t.sortOrder), 0);
 
+    // Default dueDate to today if not provided — tasks must always have a date.
+    // Prefer client-supplied userDate (local timezone) over server UTC date.
+    const today = args.userDate || new Date().toISOString().slice(0, 10);
+
     return await ctx.db.insert("tasks", {
       title: args.title,
       description: args.description,
       status: args.status ?? "todo",
       priority: args.priority ?? "p3",
-      dueDate: args.dueDate,
+      dueDate: args.dueDate || today,
       dueTime: args.dueTime,
       scheduledDate: args.scheduledDate,
       scheduledStartTime: args.scheduledStartTime,
@@ -182,6 +189,9 @@ export const update = mutation({
     clearSectionId: v.optional(v.boolean()),
     clearRecurrence: v.optional(v.boolean()),
     clearDescription: v.optional(v.boolean()),
+    // Client-provided local date (format: "YYYY-MM-DD") to avoid UTC drift on the server.
+    // Used by clearDueDate/clearScheduledDate handlers to reset to "today" in the user's timezone.
+    userDate: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
@@ -194,7 +204,7 @@ export const update = mutation({
 
     const { id, clearDueDate, clearDueTime, clearScheduledDate, clearScheduledStartTime,
       clearScheduledEndTime, clearProjectId, clearSectionId, clearRecurrence, clearDescription,
-      ...updates } = args;
+      userDate, ...updates } = args;
 
     // Build patch: include set values, apply clears
     const patch: Record<string, unknown> = {};
@@ -217,6 +227,8 @@ export const update = mutation({
         if (durMin > 0) {
           const [nsh, nsm] = newStart.split(":").map(Number);
           const endMin = nsh * 60 + nsm + durMin;
+          // NOTE: % 24 wraps the hour but does NOT advance the date.
+          // A 23:00 + 3h event shows end time as "02:00" on the same day.
           const endH = String(Math.floor(endMin / 60) % 24).padStart(2, "0");
           const endM = String(endMin % 60).padStart(2, "0");
           patch.scheduledEndTime = `${endH}:${endM}`;
@@ -228,9 +240,26 @@ export const update = mutation({
     if (patch.dueDate && !patch.scheduledDate) {
       patch.scheduledDate = patch.dueDate;
     }
-    if (clearDueDate) patch.dueDate = undefined;
+
+    // When status changes to "done", auto-set completedAt. When leaving "done", clear it.
+    if (patch.status === "done" && task.status !== "done") {
+      patch.completedAt = Date.now();
+    } else if (patch.status && patch.status !== "done" && task.status === "done") {
+      patch.completedAt = undefined;
+    }
+
+    // Clearing date resets to today — tasks must always have a date to stay visible.
+    // Prefer client-supplied userDate (local timezone) over server UTC date.
+    if (clearDueDate) {
+      const today = userDate || new Date().toISOString().slice(0, 10);
+      patch.dueDate = today;
+      patch.scheduledDate = today;
+    }
     if (clearDueTime) patch.dueTime = undefined;
-    if (clearScheduledDate) patch.scheduledDate = undefined;
+    if (clearScheduledDate) {
+      const today = userDate || new Date().toISOString().slice(0, 10);
+      patch.scheduledDate = today;
+    }
     if (clearScheduledStartTime) patch.scheduledStartTime = undefined;
     if (clearScheduledEndTime) patch.scheduledEndTime = undefined;
     if (clearProjectId) patch.projectId = undefined;
@@ -462,7 +491,7 @@ export const upsertFromGoogle = mutation({
       return await ctx.db.insert("tasks", {
         title: args.title,
         description: args.description,
-        status: "planned",
+        status: "todo",
         priority: "p4",
         dueDate: parsed.dueDate,
         dueTime: parsed.dueTime,
@@ -582,7 +611,7 @@ export const bulkUpsertFromGoogle = mutation({
         await ctx.db.insert("tasks", {
           title: event.title,
           description: event.description,
-          status: "planned",
+          status: "todo",
           priority: "p4",
           dueDate: parsed.dueDate,
           dueTime: parsed.dueTime,

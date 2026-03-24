@@ -18,6 +18,7 @@ import {
   parseISO, isBefore, startOfDay, isSameDay, isSameMonth,
 } from "date-fns";
 import { isGoogleCalEvent, getOverdueTasks, getTasksForDate } from "@/lib/task-utils";
+import { PRIORITY_COLORS, PRIORITY_LABELS } from "@/lib/constants";
 
 type Col = {
   id: string;
@@ -39,12 +40,37 @@ const SORT_LABELS: Record<SortBy, string> = {
 export default function KanbanBoard() {
   const tasks = useQuery(api.tasks.list, {});
   const projects = useQuery(api.projects.list, { status: "active" });
-  const [view, setView] = useState<"overview" | "d" | "w" | "m">("overview");
+  const [view, setViewRaw] = useState<"overview" | "d" | "w" | "m">(() => {
+    if (typeof window === "undefined") return "overview";
+    return (localStorage.getItem("unifocus:kanban:view") as "overview" | "d" | "w" | "m") || "overview";
+  });
+  const setView = useCallback((v: "overview" | "d" | "w" | "m") => {
+    setViewRaw(v);
+    try { localStorage.setItem("unifocus:kanban:view", v); } catch {}
+  }, []);
   const [activeAdd, setActiveAdd] = useState<string | null>(null);
-  const [showDone, setShowDone] = useState(false);
-  const [sortBy, setSortBy] = useState<SortBy>("priority");
+  const [showDone, setShowDoneRaw] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return localStorage.getItem("unifocus:kanban:showDone") === "true";
+  });
+  const setShowDone = useCallback((v: boolean | ((prev: boolean) => boolean)) => {
+    setShowDoneRaw((prev) => {
+      const next = typeof v === "function" ? v(prev) : v;
+      try { localStorage.setItem("unifocus:kanban:showDone", String(next)); } catch {}
+      return next;
+    });
+  }, []);
+  const [sortBy, setSortByRaw] = useState<SortBy>(() => {
+    if (typeof window === "undefined") return "priority";
+    return (localStorage.getItem("unifocus:kanban:sort") as SortBy) || "priority";
+  });
+  const setSortBy = useCallback((v: SortBy) => {
+    setSortByRaw(v);
+    try { localStorage.setItem("unifocus:kanban:sort", v); } catch {}
+  }, []);
   const [filterPriority, setFilterPriority] = useState<FilterPriority>(new Set(["p1", "p2", "p3", "p4"]));
   const [filterProject, setFilterProject] = useState<string | null>(null); // null = all
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   // Sort function
   const sortTasks = useCallback((list: Doc<"tasks">[]) => {
@@ -231,6 +257,35 @@ export default function KanbanBoard() {
     };
   }, [columns]);
 
+  // Auto-scroll to today's column in week/month views
+  useEffect(() => {
+    if ((view !== "w" && view !== "m") || !columns || !scrollContainerRef.current) return;
+    const todayStr = format(new Date(), "yyyy-MM-dd");
+    const todayIdx = columns.findIndex((col) => {
+      // For week view (day-N) or month view (mday-N), compute the date
+      if (col.id.startsWith("day-")) {
+        const i = parseInt(col.id.split("-")[1], 10);
+        const day = addDays(startOfWeek(new Date(), { weekStartsOn: 1 }), i);
+        return isSameDay(day, new Date());
+      }
+      if (col.id.startsWith("mday-")) {
+        const i = parseInt(col.id.split("-")[1], 10);
+        const day = addDays(startOfMonth(new Date()), i);
+        return isSameDay(day, new Date());
+      }
+      return false;
+    });
+    if (todayIdx < 0) return;
+    // Find the column element by data-column-id
+    const container = scrollContainerRef.current;
+    const colEl = container.querySelector(`[data-column-id="${columns[todayIdx].id}"]`);
+    if (colEl) {
+      setTimeout(() => {
+        colEl.scrollIntoView({ behavior: "smooth", inline: "start" });
+      }, 50);
+    }
+  }, [view, columns]);
+
   if (!columns) {
     return (
       <div className="flex-1 p-6">
@@ -319,8 +374,8 @@ export default function KanbanBoard() {
               <MenuItem className="text-xs font-semibold text-muted-foreground pointer-events-none">Priority</MenuItem>
               {(["p1", "p2", "p3", "p4"] as const).map((p) => (
                 <MenuCheckboxItem key={p} checked={filterPriority.has(p)} onCheckedChange={() => togglePriority(p)}>
-                  <span className="size-2.5 rounded-full" style={{ backgroundColor: { p1: "#f87171", p2: "#fb923c", p3: "#a78bfa", p4: "#a1a1aa" }[p] }} />
-                  {{ p1: "Urgent", p2: "High", p3: "Medium", p4: "Low" }[p]}
+                  <span className="size-2.5 rounded-full" style={{ backgroundColor: PRIORITY_COLORS[p] }} />
+                  {PRIORITY_LABELS[p]}
                 </MenuCheckboxItem>
               ))}
               {projects && projects.length > 0 && (
@@ -372,6 +427,7 @@ export default function KanbanBoard() {
 
       {/* Columns — week/month views scroll horizontally with hidden scrollbar */}
       <div
+        ref={scrollContainerRef}
         className={`flex flex-1 ${
           view === "w" || view === "m"
             ? "overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
@@ -486,10 +542,18 @@ function UpcomingColumn({ column, isLast, isAdding, onStartAdd, onStopAdd, apply
 
   const handleQuickAdd = useCallback(async () => {
     if (!newTitle.trim()) return;
-    await createTask({ title: newTitle.trim(), dueDate: defaultDueDate });
+    const newTaskId = await createTask({ title: newTitle.trim(), dueDate: defaultDueDate, userDate: format(new Date(), "yyyy-MM-dd") });
     setNewTitle("");
     inputRef.current?.focus();
-  }, [newTitle, defaultDueDate, createTask]);
+    // Auto-push to Google Calendar
+    if (newTaskId && defaultDueDate) {
+      try {
+        const { pushLocalTaskToGoogle } = await import("@/lib/google-sync");
+        const result = await pushLocalTaskToGoogle({ _id: newTaskId, title: newTitle.trim(), dueDate: defaultDueDate } as Doc<"tasks">);
+        if (result) await updateTask({ id: newTaskId, googleEventId: result.googleEventId, googleCalendarId: result.googleCalendarId } as Parameters<typeof updateTask>[0]);
+      } catch (err) { console.warn("Auto-push failed:", err); }
+    }
+  }, [newTitle, defaultDueDate, createTask, updateTask]);
 
   // ── Drop handlers ──
   const handleDragEnter = useCallback((e: React.DragEvent) => {
@@ -565,6 +629,7 @@ function UpcomingColumn({ column, isLast, isAdding, onStartAdd, onStopAdd, apply
 
   return (
     <div
+      data-column-id={column.id}
       className={`relative flex flex-col ${widthClass} ${!isLast ? "border-r border-dashed border-[#3a3a48]" : ""}`}
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}
@@ -664,7 +729,7 @@ function UpcomingColumn({ column, isLast, isAdding, onStartAdd, onStopAdd, apply
 
         {totalTasks === 0 && !showDone && (
           <div className="mt-auto flex items-center gap-2 pb-1">
-            <span className="text-[13px] tracking-wide text-[#52525b]">No tasks planned yet</span>
+            <span className="text-[12px] tracking-wide text-[#52525b]">No tasks</span>
             <span className="flex size-[18px] items-center justify-center rounded-[5px] border border-[#3a3a48] bg-[#1a1a22] text-[10px] font-bold text-[#606068] shadow-[0_2px_0_0_rgba(0,0,0,0.4),inset_0_1px_0_0_rgba(255,255,255,0.04)]">0</span>
           </div>
         )}

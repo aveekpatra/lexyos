@@ -5,14 +5,12 @@ import { motion } from "motion/react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Doc, Id } from "@/convex/_generated/dataModel";
-import {
-  ContextMenu, ContextMenuTrigger, ContextMenuPopup,
-} from "@/components/ui/context-menu";
-import { Menu, MenuTrigger, MenuPopup, MenuItem, MenuSeparator, MenuSub, MenuSubTrigger, MenuSubPopup } from "@/components/ui/menu";
+import { Menu, MenuTrigger, MenuPopup, MenuItem, MenuSeparator } from "@/components/ui/menu";
 import {
   DatePickerPopover, TimePickerPopover, DurationPickerPopover, ProjectPickerPopover,
   TaskChip, formatDuration, formatTime12, computeDuration,
 } from "@/components/tasks/TaskPropertyPopovers";
+import { TaskContextMenu } from "@/components/tasks/TaskContextMenu";
 
 import {
   Dialog, DialogPopup, DialogHeader, DialogTitle, DialogPanel, DialogFooter,
@@ -22,32 +20,23 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
-  Delete01Icon, DashedLineCircleIcon, Edit01Icon, Flag01Icon,
-  Calendar03Icon, Folder01Icon, GoogleIcon, CheckmarkCircle01Icon,
-  Cancel01Icon,
+  DashedLineCircleIcon,
 } from "@hugeicons/core-free-icons";
 import { format, parseISO, isPast, isToday } from "date-fns";
 import { isGoogleCalEvent } from "@/lib/task-utils";
-import { syncTaskUpdateToGoogle, syncTaskCompletionToGoogle, syncTaskDeletionToGoogle, pushLocalTaskToGoogle } from "@/lib/google-sync";
+import { syncTaskUpdateToGoogle, syncTaskCompletionToGoogle } from "@/lib/google-sync";
+import { PRIORITY_COLORS, PRIORITY_LABELS } from "@/lib/constants";
 
 interface KanbanCardProps {
   task: Doc<"tasks">;
   isOverdue?: boolean;
-  context?: "kanban" | "sidebar"; // sidebar = planner sidebar (no date, duration on left)
+  context?: "kanban" | "sidebar" | "project"; // sidebar = planner sidebar, project = inside project board (no project chip)
 }
-
-const PRIORITY_COLORS: Record<string, string> = {
-  p1: "#f87171", p2: "#fb923c", p3: "#a78bfa", p4: "#a1a1aa",
-};
-const PRIORITY_LABELS: Record<string, string> = {
-  p1: "Urgent", p2: "High", p3: "Medium", p4: "Low",
-};
 
 const KanbanCard = React.memo(function KanbanCard({ task, isOverdue, context = "kanban" }: KanbanCardProps) {
   const isSidebar = context === "sidebar";
   const toggleCompleteMut = useMutation(api.tasks.toggleComplete);
   const updateTask = useMutation(api.tasks.update);
-  const removeTaskMut = useMutation(api.tasks.remove);
 
   // Toggle complete + sync to Google Calendar
   const toggleComplete = useCallback(async (args: { id: typeof task._id }) => {
@@ -56,19 +45,21 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue, context = "
     try { await syncTaskCompletionToGoogle(task, !wasDone); } catch (err) { console.warn("Google sync failed:", err); }
   }, [toggleCompleteMut, task]);
 
-  // Delete task + sync to Google Calendar
-  const removeTask = useCallback(async (args: { id: typeof task._id }) => {
-    await removeTaskMut(args);
-    try { await syncTaskDeletionToGoogle(task); } catch (err) { console.warn("Google sync failed:", err); }
-  }, [removeTaskMut, task]);
-
-  // Update task + sync changes to Google Calendar
+  // Update task + sync changes to Google Calendar (auto-pushes if task gets a date)
   const syncUpdateTask = useCallback(async (args: Parameters<typeof updateTask>[0]) => {
     await updateTask(args);
-    try { await syncTaskUpdateToGoogle(task, args as Record<string, unknown>); } catch (err) { console.warn("Google sync failed:", err); }
+    try {
+      const result = await syncTaskUpdateToGoogle(task, args as Record<string, unknown>);
+      // If a new Google event was created (auto-push), store the IDs
+      if (result) {
+        await updateTask({ id: task._id, googleEventId: result.googleEventId, googleCalendarId: result.googleCalendarId });
+      }
+    } catch (err) { console.warn("Google sync failed:", err); }
   }, [updateTask, task]);
 
-  const projects = useQuery(api.projects.list, { status: "active" });
+  // TODO(perf): Every KanbanCard creates its own Convex subscription for projects.
+  // With many cards this is redundant — consider lifting these queries to a parent
+  // component and passing the data via props or context.
   const project = useQuery(
     api.projects.getById,
     task.projectId ? { id: task.projectId } : "skip"
@@ -103,27 +94,37 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue, context = "
     setIsDragging(false);
   }, []);
 
+  // Determine if any chips should be shown (to render the second row)
+  const hasDueTime = typeof (task as Record<string, unknown>).dueTime === "string";
+  const hasChips = !!(
+    (isSidebar && duration) ||
+    hasDueTime ||
+    !isSidebar || // date chip always shows in kanban
+    project
+  );
+
   return (
-    <>
-      <ContextMenu>
-        <ContextMenuTrigger
-          draggable
-          onDragStart={handleDragStart}
-          onDragEnd={handleDragEnd}
-          className={`group flex w-full cursor-grab items-center gap-3 rounded-[10px] px-3.5 py-2.5 transition-all active:cursor-grabbing ${
-            isDragging ? "opacity-40" : ""
-          } ${
-            isOverdue
-              ? "border border-[#4a2040] bg-[#1e1020] shadow-[0_2px_0_0_rgba(60,20,40,0.5),inset_0_1px_0_0_rgba(255,255,255,0.03)] hover:bg-[#281428]"
-              : "border border-[#333340] bg-[#1a1a22] shadow-[0_2px_0_0_rgba(0,0,0,0.3),inset_0_1px_0_0_rgba(255,255,255,0.04)] hover:bg-[#222230]"
-          }`}
-        >
+    <TaskContextMenu task={task}>
+      <div
+        draggable
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+        className={`group flex w-full cursor-grab flex-col gap-1.5 rounded-[10px] px-3.5 py-2.5 transition-all active:cursor-grabbing ${
+          isDragging ? "opacity-40" : ""
+        } ${
+          isOverdue
+            ? "border border-[#4a2040] bg-[#1e1020] shadow-[0_2px_0_0_rgba(60,20,40,0.5),inset_0_1px_0_0_rgba(255,255,255,0.03)] hover:bg-[#281428]"
+            : "border border-[#333340] bg-[#1a1a22] shadow-[0_2px_0_0_rgba(0,0,0,0.3),inset_0_1px_0_0_rgba(255,255,255,0.04)] hover:bg-[#222230]"
+        }`}
+      >
+        {/* Row 1: Priority circle + Title */}
+        <div className="flex min-w-0 items-start gap-2.5">
           {/* Priority circle or calendar icon */}
           {isCalendarSource ? (
             <button
               onClick={(e) => { e.stopPropagation(); toggleComplete({ id: task._id }); }}
               onContextMenu={(e) => e.stopPropagation()}
-              className="flex shrink-0 items-center justify-center"
+              className="mt-0.5 flex shrink-0 items-center justify-center"
             >
               <HugeiconsIcon icon={DashedLineCircleIcon} size={16} style={{ color: isDone ? "#71717a" : calColor || "#059669" }} />
             </button>
@@ -131,7 +132,7 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue, context = "
             <button
               onClick={(e) => { e.stopPropagation(); toggleComplete({ id: task._id }); }}
               onContextMenu={(e) => e.stopPropagation()}
-              className="flex size-[16px] shrink-0 items-center justify-center rounded-full transition-colors"
+              className="mt-0.5 flex size-[16px] shrink-0 items-center justify-center rounded-full transition-colors"
               style={{
                 border: `2px solid ${isDone ? "#71717a" : color}`,
                 backgroundColor: isDone ? "#71717a" : "transparent",
@@ -145,17 +146,20 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue, context = "
             </button>
           )}
 
-          {/* Title — click to edit */}
+          {/* Title — max 2 lines, click to edit */}
           <span
             onClick={(e) => { e.stopPropagation(); setEditOpen(true); }}
-            className={`flex-1 cursor-pointer truncate text-sm font-medium ${isDone ? "text-[#71717a] line-through" : "text-white"}`}
+            className={`min-w-0 flex-1 cursor-pointer text-sm font-medium leading-snug ${isDone ? "text-[#71717a] line-through" : "text-white"}`}
+            style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}
           >
             {task.title}
           </span>
+        </div>
 
-          {/* Meta chips — each opens its Akiflow-style popover */}
-          <div className="flex shrink-0 items-center gap-1.5" draggable={false} onClick={(e) => e.stopPropagation()} onContextMenu={(e) => e.stopPropagation()}>
-            {/* Sidebar: duration first (left side) */}
+        {/* Row 2: Meta chips */}
+        {hasChips && (
+          <div className="flex flex-wrap items-center gap-1.5 pl-[26px]" draggable={false} onClick={(e) => e.stopPropagation()} onContextMenu={(e) => e.stopPropagation()}>
+            {/* Sidebar: duration first */}
             {isSidebar && duration && (
               <DurationPickerPopover
                 value={durationMins}
@@ -191,7 +195,7 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue, context = "
                 </TaskChip>
               </TimePickerPopover>
             )}
-            {/* Kanban: start time only (no end time, no duration) */}
+            {/* Kanban: start time only */}
             {!isSidebar && typeof (task as Record<string, unknown>).dueTime === "string" && (
               <TimePickerPopover
                 value={(task as Record<string, unknown>).dueTime as string}
@@ -206,7 +210,7 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue, context = "
             {!isSidebar && (
               <DatePickerPopover
                 value={task.dueDate}
-                onChange={(date) => syncUpdateTask({ id: task._id, ...(date ? { dueDate: date } : { clearDueDate: true }) })}
+                onChange={(date) => syncUpdateTask({ id: task._id, ...(date ? { dueDate: date } : { clearDueDate: true, userDate: format(new Date(), "yyyy-MM-dd") }) })}
               >
                 <TaskChip active={!!dateStr} className={dateStr ? "" : "opacity-0 group-hover:opacity-100"}>
                   <span style={dateStr ? { color: dateColor } : undefined}>
@@ -215,187 +219,24 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue, context = "
                 </TaskChip>
               </DatePickerPopover>
             )}
-            {/* Project chip — sidebar only, kanban uses right-click */}
-            {isSidebar && project && (
+            {/* Project chip — all views except project board */}
+            {project && context !== "project" && (
               <ProjectPickerPopover
                 value={task.projectId}
                 onChange={(pid) => syncUpdateTask({ id: task._id, ...(pid ? { projectId: pid } : { clearProjectId: true }) })}
               >
-                <TaskChip active className="max-w-[70px] truncate">
+                <TaskChip active className="max-w-[80px] truncate">
                   <span style={{ color: project.color }}>{project.name}</span>
                 </TaskChip>
               </ProjectPickerPopover>
             )}
           </div>
-        </ContextMenuTrigger>
-
-        {/* Right-click menu — Akiflow style */}
-        <ContextMenuPopup className="w-[220px] rounded-xl border border-[#2a2a36] bg-[#131318] p-1.5 shadow-[0_8px_32px_rgba(0,0,0,0.5)]">
-          <MenuItem onClick={() => setEditOpen(true)} className="rounded-lg px-3 py-2 text-sm text-[#d4d4d8] hover:bg-[#1f1f28]">
-            <span className="flex items-center gap-2.5">
-              <HugeiconsIcon icon={Edit01Icon} size={14} className="text-[#71717a]" />
-              Edit
-            </span>
-          </MenuItem>
-          <MenuSeparator className="my-1 border-[#1f1f28]" />
-
-          {/* ── Priority submenu ── */}
-          <MenuSub>
-            <MenuSubTrigger className="rounded-lg px-3 py-2 text-sm text-[#d4d4d8] hover:bg-[#1f1f28]">
-              <span className="flex items-center gap-2.5">
-                <span className="size-2.5 rounded-full" style={{ backgroundColor: color }} />
-                Priority
-              </span>
-            </MenuSubTrigger>
-            <MenuSubPopup className="w-[180px] rounded-xl border border-[#2a2a36] bg-[#131318] p-1.5 shadow-[0_8px_32px_rgba(0,0,0,0.5)]">
-              {(["p1", "p2", "p3", "p4"] as const).map((p) => (
-                <MenuItem
-                  key={p}
-                  onClick={() => syncUpdateTask({ id: task._id, priority: p })}
-                  className={`rounded-lg px-3 py-2 text-sm text-[#d4d4d8] hover:bg-[#1f1f28] ${task.priority === p ? "bg-[#1f1f28]" : ""}`}
-                >
-                  <span className="flex items-center gap-2.5">
-                    <span className="size-2.5 rounded-full" style={{ backgroundColor: PRIORITY_COLORS[p] }} />
-                    {PRIORITY_LABELS[p]}
-                  </span>
-                  {task.priority === p && <span className="ml-auto text-[10px] text-[#71717a]">✓</span>}
-                </MenuItem>
-              ))}
-            </MenuSubPopup>
-          </MenuSub>
-
-          {/* ── Date submenu ── */}
-          <MenuSub>
-            <MenuSubTrigger className="rounded-lg px-3 py-2 text-sm text-[#d4d4d8] hover:bg-[#1f1f28]">
-              <span className="flex items-center gap-2.5">
-                <HugeiconsIcon icon={Calendar03Icon} size={14} className="text-[#71717a]" />
-                {dateStr ? format(parseISO(dateStr), "MMM d") : "Set date"}
-              </span>
-            </MenuSubTrigger>
-            <MenuSubPopup className="w-[240px] rounded-xl border border-[#2a2a36] bg-[#131318] p-1.5 shadow-[0_8px_32px_rgba(0,0,0,0.5)]">
-              {[
-                { label: "Today", date: format(new Date(), "yyyy-MM-dd") },
-                { label: "Tomorrow", date: format(new Date(Date.now() + 86400000), "yyyy-MM-dd") },
-              ].map((opt) => (
-                <MenuItem
-                  key={opt.label}
-                  onClick={() => syncUpdateTask({ id: task._id, dueDate: opt.date })}
-                  className="rounded-lg px-3 py-2 text-sm text-[#d4d4d8] hover:bg-[#1f1f28]"
-                >
-                  {opt.label}
-                </MenuItem>
-              ))}
-              {dateStr && (
-                <>
-                  <MenuSeparator className="my-1 border-[#1f1f28]" />
-                  <MenuItem
-                    onClick={() => syncUpdateTask({ id: task._id, clearDueDate: true })}
-                    className="rounded-lg px-3 py-2 text-sm text-[#ef4444] hover:bg-[#1f1f28]"
-                  >
-                    Remove date
-                  </MenuItem>
-                </>
-              )}
-            </MenuSubPopup>
-          </MenuSub>
-
-          {/* ── Project submenu ── */}
-          {projects && projects.length > 0 && (
-            <MenuSub>
-              <MenuSubTrigger className="rounded-lg px-3 py-2 text-sm text-[#d4d4d8] hover:bg-[#1f1f28]">
-                <span className="flex items-center gap-2.5">
-                  {project ? (
-                    <span className="size-2.5 rounded-full" style={{ backgroundColor: project.color }} />
-                  ) : (
-                    <HugeiconsIcon icon={Folder01Icon} size={14} className="text-[#71717a]" />
-                  )}
-                  {project ? project.name : "Project"}
-                </span>
-              </MenuSubTrigger>
-              <MenuSubPopup className="w-[200px] rounded-xl border border-[#2a2a36] bg-[#131318] p-1.5 shadow-[0_8px_32px_rgba(0,0,0,0.5)]">
-                <MenuItem
-                  onClick={() => syncUpdateTask({ id: task._id, clearProjectId: true })}
-                  className={`rounded-lg px-3 py-2 text-sm text-[#d4d4d8] hover:bg-[#1f1f28] ${!task.projectId ? "bg-[#1f1f28]" : ""}`}
-                >
-                  No project
-                  {!task.projectId && <span className="ml-auto text-[10px] text-[#71717a]">✓</span>}
-                </MenuItem>
-                {projects.map((p) => (
-                  <MenuItem
-                    key={p._id}
-                    onClick={() => syncUpdateTask({ id: task._id, projectId: p._id })}
-                    className={`rounded-lg px-3 py-2 text-sm text-[#d4d4d8] hover:bg-[#1f1f28] ${task.projectId === p._id ? "bg-[#1f1f28]" : ""}`}
-                  >
-                    <span className="flex items-center gap-2.5">
-                      <span className="size-2.5 rounded-full" style={{ backgroundColor: p.color }} />
-                      {p.name}
-                    </span>
-                    {task.projectId === p._id && <span className="ml-auto text-[10px] text-[#71717a]">✓</span>}
-                  </MenuItem>
-                ))}
-                {task.projectId && (
-                  <>
-                    <MenuSeparator className="my-1 border-[#1f1f28]" />
-                    <MenuItem
-                      onClick={() => syncUpdateTask({ id: task._id, clearProjectId: true })}
-                      className="rounded-lg px-3 py-2 text-sm text-[#ef4444] hover:bg-[#1f1f28]"
-                    >
-                      Remove project
-                    </MenuItem>
-                  </>
-                )}
-              </MenuSubPopup>
-            </MenuSub>
-          )}
-
-          <MenuSeparator className="my-1 border-[#1f1f28]" />
-
-          <MenuItem
-            onClick={async () => {
-              try {
-                const result = await pushLocalTaskToGoogle(task);
-                if (result) {
-                  await updateTask({ id: task._id, googleEventId: result.googleEventId, googleCalendarId: result.googleCalendarId });
-                }
-              } catch (err) {
-                console.error("Failed to push to Google Calendar:", err);
-              }
-            }}
-            className="rounded-lg px-3 py-2 text-sm text-[#d4d4d8] hover:bg-[#1f1f28]"
-          >
-            <span className="flex items-center gap-2.5">
-              <HugeiconsIcon icon={GoogleIcon} size={14} className="text-[#71717a]" />
-              Push to Google Calendar
-            </span>
-          </MenuItem>
-
-          <MenuItem
-            onClick={() => toggleComplete({ id: task._id })}
-            className="rounded-lg px-3 py-2 text-sm text-[#d4d4d8] hover:bg-[#1f1f28]"
-          >
-            <span className="flex items-center gap-2.5">
-              <HugeiconsIcon icon={isDone ? Cancel01Icon : CheckmarkCircle01Icon} size={14} className="text-[#71717a]" />
-              {isDone ? "Mark incomplete" : "Mark done"}
-            </span>
-          </MenuItem>
-
-          <MenuSeparator className="my-1 border-[#1f1f28]" />
-
-          <MenuItem
-            onClick={() => removeTask({ id: task._id })}
-            className="rounded-lg px-3 py-2 text-sm text-[#ef4444] hover:bg-[#1f1f28]"
-          >
-            <span className="flex items-center gap-2.5">
-              <HugeiconsIcon icon={Delete01Icon} size={14} />
-              Delete
-            </span>
-          </MenuItem>
-        </ContextMenuPopup>
-      </ContextMenu>
+        )}
+      </div>
 
       {/* Edit dialog */}
       <TaskEditDialog task={task} open={editOpen} onOpenChange={setEditOpen} />
-    </>
+    </TaskContextMenu>
   );
 });
 
@@ -428,7 +269,12 @@ export function TaskEditDialog({ task, open, onOpenChange, defaultDueDate }: {
   const syncUpdateTask = useCallback(async (args: Parameters<typeof updateTaskMut>[0]) => {
     await updateTaskMut(args);
     if (task) {
-      try { await syncTaskUpdateToGoogle(task, args as Record<string, unknown>); } catch (err) { console.warn("Google sync failed:", err); }
+      try {
+        const result = await syncTaskUpdateToGoogle(task, args as Record<string, unknown>);
+        if (result) {
+          await updateTaskMut({ id: task._id, googleEventId: result.googleEventId, googleCalendarId: result.googleCalendarId });
+        }
+      } catch (err) { console.warn("Google sync failed:", err); }
     }
   }, [updateTaskMut, task]);
 
@@ -483,7 +329,7 @@ export function TaskEditDialog({ task, open, onOpenChange, defaultDueDate }: {
     setSaving(true);
     try {
       if (isCreate) {
-        await createTask({
+        const newTaskId = await createTask({
           title: title.trim(),
           description: notes || undefined,
           priority,
@@ -493,14 +339,30 @@ export function TaskEditDialog({ task, open, onOpenChange, defaultDueDate }: {
           scheduledEndTime: endTime || undefined,
           projectId: projectId ? (projectId as Id<"projects">) : undefined,
           recurrence: recurrence || undefined,
+          userDate: format(new Date(), "yyyy-MM-dd"),
         });
+        // Auto-push to Google Calendar if the task has a date
+        if (dueDate && newTaskId) {
+          try {
+            const { pushLocalTaskToGoogle } = await import("@/lib/google-sync");
+            const fakeTask = {
+              _id: newTaskId, title: title.trim(), description: notes || undefined,
+              dueDate, dueTime: dueTime || undefined, scheduledStartTime: startTime || undefined,
+              scheduledEndTime: endTime || undefined,
+            } as Doc<"tasks">;
+            const result = await pushLocalTaskToGoogle(fakeTask);
+            if (result) {
+              await updateTaskMut({ id: newTaskId, googleEventId: result.googleEventId, googleCalendarId: result.googleCalendarId });
+            }
+          } catch (err) { console.warn("Auto-push failed:", err); }
+        }
       } else {
         await syncUpdateTask({
           id: task._id,
           title: title.trim(),
           priority,
           ...(notes ? { description: notes } : { clearDescription: true }),
-          ...(dueDate ? { dueDate } : { clearDueDate: true }),
+          ...(dueDate ? { dueDate } : { clearDueDate: true, userDate: format(new Date(), "yyyy-MM-dd") }),
           ...(dueTime ? { dueTime } : { clearDueTime: true }),
           ...(startTime ? { scheduledStartTime: startTime } : { clearScheduledStartTime: true }),
           ...(endTime ? { scheduledEndTime: endTime } : { clearScheduledEndTime: true }),
@@ -578,7 +440,13 @@ export function TaskEditDialog({ task, open, onOpenChange, defaultDueDate }: {
             <div className="flex items-start gap-3">
               {!isCreate && (
                 <button
-                  onClick={() => toggleComplete({ id: task._id })}
+                  onClick={async () => {
+                    const wasDone = task?.status === "done";
+                    await toggleComplete({ id: task!._id });
+                    if (task) {
+                      try { await syncTaskCompletionToGoogle(task, !wasDone); } catch (err) { console.warn("Google sync failed:", err); }
+                    }
+                  }}
                   className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full"
                   style={{
                     border: `2px solid ${isDone ? "var(--muted-foreground)" : color}`,

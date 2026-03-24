@@ -154,25 +154,42 @@ export async function pushTaskToGoogleCalendar(task: {
   timeZone?: string;
 }) {
   const tz = task.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const time = task.dueTime || "09:00";
-  const duration = task.durationMinutes || 60;
 
-  // Build ISO strings directly — no Date object math, no timezone shifting
-  // Google Calendar API handles timezone conversion when we pass timeZone
-  const startISO = `${task.dueDate}T${time}:00`;
-  const [h, m] = time.split(":").map(Number);
-  const endTotalMin = h * 60 + m + duration;
-  const endH = String(Math.floor(endTotalMin / 60) % 24).padStart(2, "0");
-  const endM = String(endTotalMin % 60).padStart(2, "0");
-  const endISO = `${task.dueDate}T${endH}:${endM}:00`;
+  let event: CreateEventInput;
 
-  const event: CreateEventInput = {
-    summary: task.title,
-    description: task.description,
-    start: { dateTime: startISO, timeZone: tz },
-    end: { dateTime: endISO, timeZone: tz },
-    calendarId: task.calendarId || "primary",
-  };
+  if (task.dueTime) {
+    // Timed event
+    const time = task.dueTime;
+    const duration = task.durationMinutes || 60;
+    const startISO = `${task.dueDate}T${time}:00`;
+    const [h, m] = time.split(":").map(Number);
+    const endTotalMin = h * 60 + m + duration;
+    // NOTE: % 24 wraps the hour but does NOT advance the date.
+    const endH = String(Math.floor(endTotalMin / 60) % 24).padStart(2, "0");
+    const endM = String(endTotalMin % 60).padStart(2, "0");
+    const endISO = `${task.dueDate}T${endH}:${endM}:00`;
+
+    event = {
+      summary: task.title,
+      description: task.description,
+      start: { dateTime: startISO, timeZone: tz },
+      end: { dateTime: endISO, timeZone: tz },
+      calendarId: task.calendarId || "primary",
+    };
+  } else {
+    // All-day event (no time specified)
+    const nextDay = new Date(task.dueDate + "T00:00:00");
+    nextDay.setDate(nextDay.getDate() + 1);
+    const endDate = nextDay.toISOString().slice(0, 10);
+
+    event = {
+      summary: task.title,
+      description: task.description,
+      start: { date: task.dueDate },
+      end: { date: endDate },
+      calendarId: task.calendarId || "primary",
+    };
+  }
 
   // Include Convex task ID in extended properties for round-trip identification
   if (task.id) {

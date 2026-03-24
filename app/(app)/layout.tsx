@@ -1,8 +1,10 @@
 "use client";
 
-import { ReactNode, lazy, Suspense } from "react";
+import { ReactNode, lazy, Suspense, useState, useCallback } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { UserButton } from "@clerk/nextjs";
+import { useMutation } from "convex/react";
+import { api } from "@/convex/_generated/api";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   InboxIcon,
@@ -12,6 +14,7 @@ import {
   Clock01Icon,
   HelpCircleIcon,
   Search01Icon,
+  Refresh01Icon,
 } from "@hugeicons/core-free-icons";
 import {
   Tooltip,
@@ -54,6 +57,9 @@ export default function AppLayout({ children }: { children: ReactNode }) {
             />
           ))}
         </nav>
+
+        <div className="my-2 h-px w-6 bg-[#1f1f28]" />
+        <SyncButton />
 
         <div className="flex-1" />
 
@@ -104,6 +110,70 @@ function RailButton({
         <HugeiconsIcon icon={icon} size={18} />
       </TooltipTrigger>
       <TooltipPopup side="right">{label}</TooltipPopup>
+    </Tooltip>
+  );
+}
+
+function SyncButton() {
+  const [syncing, setSyncing] = useState(false);
+  const [lastSync, setLastSync] = useState<Date | null>(null);
+  const bulkUpsert = useMutation(api.tasks.bulkUpsertFromGoogle);
+  const removeDeleted = useMutation(api.tasks.removeDeletedGoogleEvents);
+
+  const handleSync = useCallback(async () => {
+    if (syncing) return;
+    setSyncing(true);
+    try {
+      const { fetchGoogleEventsForSync } = await import("@/app/actions/calendarSync");
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      // Sync 30 days back and 60 days forward
+      const now = new Date();
+      const timeMin = new Date(now.getTime() - 30 * 86400000).toISOString();
+      const timeMax = new Date(now.getTime() + 60 * 86400000).toISOString();
+      const events = await fetchGoogleEventsForSync(timeMin, timeMax, tz);
+      if (events.length > 0) {
+        await bulkUpsert({ events });
+      }
+      const knownIds = events.map((e) => e.googleEventId);
+      await removeDeleted({
+        knownGoogleEventIds: knownIds,
+        syncRangeStart: timeMin.slice(0, 10),
+        syncRangeEnd: timeMax.slice(0, 10),
+      });
+      setLastSync(new Date());
+    } catch (err) {
+      console.error("Manual sync failed:", err);
+    } finally {
+      setSyncing(false);
+    }
+  }, [syncing, bulkUpsert, removeDeleted]);
+
+  const tooltipText = lastSync
+    ? `Last synced ${lastSync.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} — Click to sync`
+    : syncing ? "Syncing…" : "Sync with Google Calendar";
+
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            onClick={handleSync}
+            disabled={syncing}
+            className={`flex size-9 items-center justify-center rounded-lg transition-colors ${
+              syncing
+                ? "text-[#a78bfa]"
+                : "text-[#52525b] hover:bg-[#18181d] hover:text-[#a1a1aa]"
+            }`}
+          />
+        }
+      >
+        <HugeiconsIcon
+          icon={Refresh01Icon}
+          size={18}
+          className={syncing ? "animate-spin" : ""}
+        />
+      </TooltipTrigger>
+      <TooltipPopup side="right">{tooltipText}</TooltipPopup>
     </Tooltip>
   );
 }

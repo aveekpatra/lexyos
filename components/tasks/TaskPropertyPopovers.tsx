@@ -13,7 +13,7 @@ import {
   Delete02Icon,
 } from "@hugeicons/core-free-icons";
 import {
-  format, addDays, startOfWeek, endOfWeek, addWeeks, getWeek,
+  format, addDays, startOfWeek, endOfWeek, addWeeks, endOfMonth, getWeek,
 } from "date-fns";
 
 /* ────────────────────────────────────────────────────────
@@ -56,7 +56,9 @@ export const DatePickerPopover = memo(function DatePickerPopover({
   const nextWeekStart = addWeeks(weekStart, 1);
   const nextWeekEnd = addWeeks(weekEnd, 1);
 
-  const presets = useMemo(() => [
+  // No useMemo — values depend on `now` (current date) and are cheap to compute.
+  // A stale memo (empty deps) would show wrong dates after midnight.
+  const presets = [
     {
       label: "Today",
       detail: format(now, "EEE"),
@@ -82,10 +84,10 @@ export const DatePickerPopover = memo(function DatePickerPopover({
     {
       label: "This month",
       detail: format(now, "MMM"),
-      value: format(now, "yyyy-MM-dd"),
+      value: format(endOfMonth(now), "yyyy-MM-dd"),
       icon: Calendar01Icon,
     },
-  ], []);
+  ];
 
   const filtered = search.trim()
     ? presets.filter((p) => p.label.toLowerCase().includes(search.toLowerCase()))
@@ -315,7 +317,7 @@ export const ProjectPickerPopover = memo(function ProjectPickerPopover({
 
         {filtered.length > 0 && (
           <>
-            <div className={sectionClass}>Most used</div>
+            <div className={sectionClass}>Projects</div>
             <div className="p-1.5 pt-0">
               {filtered.map((project) => (
                 <button
@@ -397,15 +399,24 @@ export const TimePickerPopover = memo(function TimePickerPopover({
   useEffect(() => {
     if (open) {
       setTimeout(() => inputRef.current?.focus(), 50);
-      // Scroll to current value
-      if (value && listRef.current) {
-        setTimeout(() => {
+      // Scroll to current value, or to current hour if no value set
+      setTimeout(() => {
+        if (!listRef.current) return;
+        if (value) {
           const idx = TIME_PRESETS.findIndex((t) => t.value === value);
-          if (idx >= 0 && listRef.current) {
+          if (idx >= 0) {
             listRef.current.scrollTop = Math.max(0, idx * 36 - 72);
           }
-        }, 80);
-      }
+        } else {
+          // Scroll to current hour
+          const now = new Date();
+          const hh = now.getHours().toString().padStart(2, "0");
+          const idx = TIME_PRESETS.findIndex((t) => t.value === `${hh}:00`);
+          if (idx >= 0) {
+            listRef.current.scrollTop = Math.max(0, idx * 36 - 72);
+          }
+        }
+      }, 80);
     } else {
       setSearch("");
     }
@@ -510,7 +521,9 @@ export function computeDuration(start?: string, end?: string): number | undefine
   if (!start || !end) return undefined;
   const [sh, sm] = start.split(":").map(Number);
   const [eh, em] = end.split(":").map(Number);
-  const mins = (eh * 60 + em) - (sh * 60 + sm);
+  let mins = (eh * 60 + em) - (sh * 60 + sm);
+  // Handle midnight-crossing tasks (e.g., 23:00 to 01:00 = -1320 → +120)
+  if (mins < 0) mins += 1440;
   return mins > 0 ? mins : undefined;
 }
 

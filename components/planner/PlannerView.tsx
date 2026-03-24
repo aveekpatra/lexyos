@@ -10,7 +10,9 @@ import {
 } from "@/app/actions/calendar";
 import { fetchGoogleEventsForSync } from "@/app/actions/calendarSync";
 import KanbanCard, { TaskEditDialog } from "@/components/kanban/KanbanCard";
+import { TaskContextMenu } from "@/components/tasks/TaskContextMenu";
 import { isGoogleCalEvent } from "@/lib/task-utils";
+import { PRIORITY_COLORS } from "@/lib/constants";
 import { useResizablePanel } from "@/hooks/use-resizable-panel";
 import { ResizeHandle } from "@/components/ResizeHandle";
 import { Kbd } from "@/components/ui/kbd";
@@ -423,18 +425,18 @@ export default function PlannerView() {
         >
           {addingTask ? (
             <input ref={inputRef} value={newTitle} onChange={(e) => setNewTitle(e.target.value)}
-              placeholder="Enter = quick add, Tab = full editor"
+              placeholder="Enter = quick add, Tab = full editor, Esc = cancel"
               onKeyDown={(e) => {
                 if (e.key === "Enter") { e.preventDefault(); handleAdd(); }
                 if (e.key === "Tab") { e.preventDefault(); setAddingTask(false); setCreateDialogOpen(true); }
                 if (e.key === "Escape") setAddingTask(false);
               }}
               onBlur={() => { if (!newTitle.trim()) setAddingTask(false); }}
-              className="flex-1 bg-transparent text-[13px] text-white outline-none placeholder:text-[#71717a]"
+              className="flex-1 bg-transparent text-sm text-white outline-none placeholder:text-[#71717a]"
             />
           ) : (
             <>
-              <span className="flex items-center gap-2.5 text-[13px] text-[#a1a1aa]">
+              <span className="flex items-center gap-2.5 text-sm text-[#a1a1aa]">
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><circle cx="8" cy="8" r="6.5" /><path d="M8 5v6M5 8h6" /></svg>
                 Add new task
               </span>
@@ -449,8 +451,8 @@ export default function PlannerView() {
             <div className="mb-4">
               <div className="mb-2 flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <span className="text-[12px] font-bold text-[#ef4444]">Overdue</span>
-                  <span className="text-[12px] font-medium text-[#a1a1aa]">{dayTasks.overdue.length}</span>
+                  <span className="text-[13px] font-bold text-[#ef4444]">Overdue</span>
+                  <span className="text-[13px] font-medium text-[#a1a1aa]">{dayTasks.overdue.length}</span>
                 </div>
                 {overdueDuration && <span className="text-[11px] font-medium text-[#a1a1aa]">{overdueDuration}</span>}
               </div>
@@ -493,17 +495,35 @@ export default function PlannerView() {
                       timeStr = "All day";
                     }
                     return (
-                      <div key={t._id} className="flex items-center gap-2.5 rounded-[10px] border border-[#333340] bg-[#16161e] px-3 py-2.5 shadow-[0_2px_0_0_rgba(0,0,0,0.3),inset_0_1px_0_0_rgba(255,255,255,0.04)] transition-colors hover:border-[#4a4a58] hover:bg-[#1e1e28]">
-                        <HugeiconsIcon icon={DashedLineCircleIcon} size={16} style={{ color }} className="shrink-0" />
-                        <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-[#e4e4e7]">
-                          {t.title || "(No title)"}
-                        </span>
-                        {timeStr && (
-                          <span className="shrink-0 rounded-[6px] bg-[#1a1a22] px-2 py-0.5 text-[11px] font-medium text-[#a1a1aa] shadow-[0_1px_0_0_rgba(0,0,0,0.3),inset_0_1px_0_0_rgba(255,255,255,0.04)]">
-                            {timeStr}
-                          </span>
-                        )}
-                      </div>
+                      <TaskContextMenu key={t._id} task={t}>
+                        <div
+                          draggable
+                          onDragStart={(e) => {
+                            e.dataTransfer.setData("text/plain", t._id);
+                            e.dataTransfer.setData("application/source-date", t.dueDate || t.scheduledDate || "");
+                            e.dataTransfer.effectAllowed = "move";
+                          }}
+                          className="flex cursor-grab flex-col gap-1.5 rounded-[10px] border border-[#333340] bg-[#1a1a22] px-3 py-2.5 shadow-[0_2px_0_0_rgba(0,0,0,0.3),inset_0_1px_0_0_rgba(255,255,255,0.04)] transition-colors hover:border-[#4a4a58] hover:bg-[#1e1e28] active:cursor-grabbing">
+                          {/* Row 1: Icon + Title */}
+                          <div className="flex min-w-0 items-start gap-2.5">
+                            <HugeiconsIcon icon={DashedLineCircleIcon} size={16} style={{ color }} className="mt-0.5 shrink-0" />
+                            <span
+                              className="min-w-0 flex-1 text-sm font-medium leading-snug text-[#e4e4e7]"
+                              style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}
+                            >
+                              {t.title || "(No title)"}
+                            </span>
+                          </div>
+                          {/* Row 2: Time chip */}
+                          {timeStr && (
+                            <div className="pl-[26px]">
+                              <span className="inline-flex rounded-[6px] bg-[#1a1a22] px-2 py-0.5 text-[11px] font-medium text-[#a1a1aa] shadow-[0_1px_0_0_rgba(0,0,0,0.3),inset_0_1px_0_0_rgba(255,255,255,0.04)]">
+                                {timeStr}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      </TaskContextMenu>
                     );
                   }
                   return <KanbanCard key={t._id} task={t} context="sidebar" />;
@@ -514,8 +534,8 @@ export default function PlannerView() {
 
           {totalTasks === 0 && !showDone && (
             <div className="mt-auto flex items-center gap-2 pb-2">
-              <span className="text-[12px] tracking-wide text-[#52525b]">No tasks planned yet</span>
-              <span className="flex size-[18px] items-center justify-center rounded-full border border-[#3a3a48] text-[10px] font-medium text-[#52525b]">0</span>
+              <span className="text-[12px] tracking-wide text-[#52525b]">No tasks</span>
+              <span className="flex size-[18px] items-center justify-center rounded-[5px] border border-[#3a3a48] bg-[#1a1a22] text-[10px] font-bold text-[#606068] shadow-[0_2px_0_0_rgba(0,0,0,0.4),inset_0_1px_0_0_rgba(255,255,255,0.04)]">0</span>
             </div>
           )}
 
@@ -855,21 +875,25 @@ function MonthDayCell({ day, anchor, selectedDate, onSelectDate, activeTasks, up
       {calendarTasks.slice(0, 2).map((t) => {
         const done = t.status === "done";
         return (
-          <div key={t._id} className={`truncate rounded-[3px] px-1 py-px text-[10px] font-medium ${done ? "opacity-70 line-through" : "text-white"}`}
-            style={{ backgroundColor: (t as Record<string, unknown>).calendarColor as string || "#059669" }}>
-            {t.title || "(No title)"}
-          </div>
+          <TaskContextMenu key={t._id} task={t}>
+            <div className={`truncate rounded-[3px] px-1 py-px text-[10px] font-medium ${done ? "opacity-70 line-through" : "text-white"}`}
+              style={{ backgroundColor: (t as Record<string, unknown>).calendarColor as string || "#059669" }}>
+              {t.title || "(No title)"}
+            </div>
+          </TaskContextMenu>
         );
       })}
       {localTasks.slice(0, 2).map((t) => {
         const done = t.status === "done";
         return (
-          <div key={t._id} className="flex items-center gap-1 truncate px-1 py-px text-[10px]">
-            <span className="size-1.5 shrink-0 rounded-full" style={{
-              backgroundColor: done ? "#52525b" : { p1: "#f87171", p2: "#fb923c", p3: "#a78bfa", p4: "#a1a1aa" }[t.priority]
-            }} />
-            <span className={`truncate ${done ? "text-[#71717a] line-through" : "text-[#d4d4d8]"}`}>{t.title}</span>
-          </div>
+          <TaskContextMenu key={t._id} task={t}>
+            <div className="flex items-center gap-1 truncate px-1 py-px text-[10px]">
+              <span className="size-1.5 shrink-0 rounded-full" style={{
+                backgroundColor: done ? "#52525b" : PRIORITY_COLORS[t.priority]
+              }} />
+              <span className={`truncate ${done ? "text-[#71717a] line-through" : "text-[#d4d4d8]"}`}>{t.title}</span>
+            </div>
+          </TaskContextMenu>
         );
       })}
       {dayTasks.length > 4 && (
@@ -895,10 +919,7 @@ function yToSnappedTime(y: number): { timeStr: string; topPx: number; label: str
   return { timeStr, topPx, label };
 }
 
-/* ─── Priority colors for task blocks ─── */
-const PRIORITY_COLORS: Record<string, string> = {
-  p1: "#f87171", p2: "#fb923c", p3: "#a78bfa", p4: "#71717a",
-};
+/* ─── Priority colors imported from @/lib/constants ─── */
 
 /* ─── Calendar day column with 30-min snap drop ─── */
 function CalendarDayColumn({ day, selectedDate, tasks, updateTask }: {
@@ -1018,8 +1039,11 @@ function CalendarDayColumn({ day, selectedDate, tasks, updateTask }: {
           const [sh, sm] = t.scheduledStartTime.split(":").map(Number);
           const [eh, em] = t.scheduledEndTime.split(":").map(Number);
           const sMin = (sh - START_HOUR) * 60 + sm;
-          const eMin = (eh - START_HOUR) * 60 + em;
-          if (eMin - sMin <= 0) continue;
+          let eMin = (eh - START_HOUR) * 60 + em;
+          // Handle midnight-crossing tasks: treat end time as end-of-day (23:59) for display
+          if (eMin <= sMin) {
+            eMin = (23 - START_HOUR) * 60 + 59;
+          }
           parsed.push({ task: t, startMin: sMin, endMin: eMin, col: 0, totalCols: 1 });
         }
         parsed.sort((a, b) => a.startMin - b.startMin || (b.endMin - b.startMin) - (a.endMin - a.startMin));
@@ -1168,6 +1192,7 @@ function ResizableTaskBlock({ task, dayStr, updateTask, style: overrideStyle }: 
   const endAmpm = endHour < 12 ? "am" : "pm";
 
   return (
+    <TaskContextMenu task={task} className="absolute overflow-hidden" style={{ top: topPx, height, ...(overrideStyle || { left: 4, right: 4 }) }}>
     <div
       draggable={!isResizing && !isDone}
       onDragStart={(e) => {
@@ -1176,14 +1201,13 @@ function ResizableTaskBlock({ task, dayStr, updateTask, style: overrideStyle }: 
         e.dataTransfer.setData("application/source-date", dayStr);
         e.dataTransfer.effectAllowed = "move";
       }}
-      className={`group absolute overflow-hidden rounded-[10px] border shadow-[0_2px_0_0_rgba(0,0,0,0.3),inset_0_1px_0_0_rgba(255,255,255,0.04)] ${
+      className={`group h-full w-full overflow-hidden rounded-[10px] border shadow-[0_2px_0_0_rgba(0,0,0,0.3),inset_0_1px_0_0_rgba(255,255,255,0.04)] ${
         isDone
           ? "border-[#2a2a32] bg-[#1a1a22] opacity-70"
           : isResizing
             ? "z-40 cursor-ns-resize border-[#a78bfa]/50 ring-1 ring-[#a78bfa]/30 bg-[#1a1a22]"
             : "border-[#333340] bg-[#1a1a22] cursor-grab active:cursor-grabbing"
       }`}
-      style={{ top: topPx, height, ...(overrideStyle || { left: 4, right: 4 }) }}
     >
       {/* Content — top-left aligned, responsive to block height */}
       <div className={`flex flex-col px-2 ${height < 36 ? "flex-row items-start gap-1.5 pt-0.5" : "gap-0.5 pt-1.5"}`}>
@@ -1220,6 +1244,7 @@ function ResizableTaskBlock({ task, dayStr, updateTask, style: overrideStyle }: 
         </div>
       )}
     </div>
+    </TaskContextMenu>
   );
 }
 

@@ -86,11 +86,40 @@ export async function getCalendarList(): Promise<GoogleCalendar[]> {
   return data.items ?? [];
 }
 
+/**
+ * Fetch the Google Calendar color palette.
+ * Returns a map of colorId → hex color for both events and calendars.
+ * The API returns { event: { "1": { background, foreground }, ... }, calendar: { ... } }
+ */
+let cachedEventColors: Record<string, string> | null = null;
+
+async function getEventColorMap(): Promise<Record<string, string>> {
+  if (cachedEventColors) return cachedEventColors;
+  try {
+    const res = await googleFetch("/colors");
+    const data = await res.json();
+    const map: Record<string, string> = {};
+    if (data.event) {
+      for (const [id, val] of Object.entries(data.event)) {
+        map[id] = (val as { background: string }).background;
+      }
+    }
+    cachedEventColors = map;
+    return map;
+  } catch {
+    return {};
+  }
+}
+
 export async function getCalendarEvents(
   timeMin: string,
   timeMax: string
 ): Promise<GoogleEvent[]> {
-  const calendars = await getCalendarList();
+  // Fetch calendars and event color palette in parallel
+  const [calendars, eventColorMap] = await Promise.all([
+    getCalendarList(),
+    getEventColorMap(),
+  ]);
   const selectedCalendars = calendars.filter(
     (c) => c.selected !== false
   );
@@ -114,7 +143,10 @@ export async function getCalendarEvents(
         const events = (data.items ?? []).map((event: GoogleEvent) => ({
           ...event,
           calendarId: calendar.id,
-          calendarColor: calendar.backgroundColor,
+          // Event-level color overrides calendar color
+          calendarColor: event.colorId
+            ? (eventColorMap[event.colorId] || calendar.backgroundColor)
+            : calendar.backgroundColor,
         }));
         allEvents.push(...events);
       } catch {
@@ -134,8 +166,8 @@ export interface CreateEventInput {
   summary: string;
   description?: string;
   location?: string;
-  start: { dateTime: string; timeZone: string };
-  end: { dateTime: string; timeZone: string };
+  start: { dateTime?: string; timeZone?: string; date?: string };
+  end: { dateTime?: string; timeZone?: string; date?: string };
   calendarId?: string;
   extendedProperties?: {
     private?: Record<string, string>;

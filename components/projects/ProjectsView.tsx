@@ -4,7 +4,7 @@ import React, { useState, useMemo, useRef, useEffect, useCallback } from "react"
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Doc, Id } from "@/convex/_generated/dataModel";
-import KanbanCard from "@/components/kanban/KanbanCard";
+import KanbanCard, { TaskEditDialog } from "@/components/kanban/KanbanCard";
 import { useResizablePanel } from "@/hooks/use-resizable-panel";
 import { ResizeHandle } from "@/components/ResizeHandle";
 import { Input } from "@/components/ui/input";
@@ -30,6 +30,7 @@ import {
   ArrowRight01Icon, ArrowLeft01Icon,
 } from "@hugeicons/core-free-icons";
 import { format, parseISO } from "date-fns";
+import { PRIORITY_COLORS, PRIORITY_LABELS } from "@/lib/constants";
 
 const GTD_COLUMNS = [
   { id: "planned" as const, label: "Planned", shortcut: "P" },
@@ -44,22 +45,42 @@ const PROJECT_COLORS = [
   "#ec4899", "#71717a",
 ];
 
-const PRIORITY_LABELS: Record<string, string> = { p1: "Urgent", p2: "High", p3: "Medium", p4: "Low" };
-const PRIORITY_COLORS: Record<string, string> = { p1: "#f87171", p2: "#fb923c", p3: "#a78bfa", p4: "#a1a1aa" };
-
 export default function ProjectsView() {
-  const [showArchived, setShowArchived] = useState(false);
+  const [showArchived, setShowArchivedRaw] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return localStorage.getItem("unifocus:projects:showArchived") === "true";
+  });
+  const setShowArchived = useCallback((v: boolean | ((prev: boolean) => boolean)) => {
+    setShowArchivedRaw((prev) => {
+      const next = typeof v === "function" ? v(prev) : v;
+      try { localStorage.setItem("unifocus:projects:showArchived", String(next)); } catch {}
+      return next;
+    });
+  }, []);
   const activeProjects = useQuery(api.projects.list, { status: "active" });
   const archivedProjects = useQuery(api.projects.list, { status: "archived" });
   const projects = showArchived ? archivedProjects : activeProjects;
 
-  const [selectedProjectId, setSelectedProjectId] = useState<Id<"projects"> | null>(null);
+  const [selectedProjectId, setSelectedProjectIdRaw] = useState<Id<"projects"> | null>(null);
+  const setSelectedProjectId = useCallback((id: Id<"projects"> | null) => {
+    setSelectedProjectIdRaw(id);
+    try {
+      if (id) localStorage.setItem("unifocus:projects:lastProject", id);
+      else localStorage.removeItem("unifocus:projects:lastProject");
+    } catch {}
+  }, []);
   const [showCreate, setShowCreate] = useState(false);
   const { width: sidebarWidth, onMouseDown: handleResize } = useResizablePanel("projects-sidebar", 220);
 
+  // Hydrate selected project from localStorage, or fall back to first project
   useEffect(() => {
-    if (activeProjects && activeProjects.length > 0 && !selectedProjectId) {
-      setSelectedProjectId(activeProjects[0]._id);
+    if (!activeProjects || activeProjects.length === 0) return;
+    if (selectedProjectId) return; // already selected
+    const stored = localStorage.getItem("unifocus:projects:lastProject");
+    if (stored && activeProjects.some((p) => p._id === stored)) {
+      setSelectedProjectIdRaw(stored as Id<"projects">);
+    } else {
+      setSelectedProjectIdRaw(activeProjects[0]._id);
     }
   }, [activeProjects, selectedProjectId]);
 
@@ -287,7 +308,7 @@ function ArchivedProjectView({ project }: { project: Doc<"projects"> }) {
       <div className="flex-1 overflow-y-auto p-6">
         {tasks && tasks.length > 0 ? (
           <div className="flex max-w-lg flex-col gap-1.5">
-            {tasks.map((t) => <KanbanCard key={t._id} task={t} />)}
+            {tasks.map((t) => <KanbanCard key={t._id} task={t} context="project" />)}
           </div>
         ) : (
           <span className="text-[13px] text-[#52525b]">No tasks in this project.</span>
@@ -398,6 +419,7 @@ function ProjectBoard({ project }: { project: Doc<"projects"> }) {
           <GTDColumn
             key={col.id} column={col}
             tasks={(tasksByStatus.get(col.id) ?? []).sort((a, b) => a.sortOrder - b.sortOrder)}
+            allTasks={tasks || []}
             projectId={project._id} isLast={idx === GTD_COLUMNS.length - 1}
             isAdding={activeAddColumn === col.id}
             onStartAdd={() => setActiveAddColumn(col.id)}
@@ -410,14 +432,15 @@ function ProjectBoard({ project }: { project: Doc<"projects"> }) {
 }
 
 /* ─── GTD Column with drag-drop ─── */
-function GTDColumn({ column, tasks, projectId, isLast, isAdding, onStartAdd, onStopAdd }: {
-  column: (typeof GTD_COLUMNS)[number]; tasks: Doc<"tasks">[]; projectId: Id<"projects">;
-  isLast: boolean; isAdding: boolean; onStartAdd: () => void; onStopAdd: () => void;
+function GTDColumn({ column, tasks, allTasks, projectId, isLast, isAdding, onStartAdd, onStopAdd }: {
+  column: (typeof GTD_COLUMNS)[number]; tasks: Doc<"tasks">[]; allTasks: Doc<"tasks">[];
+  projectId: Id<"projects">; isLast: boolean; isAdding: boolean; onStartAdd: () => void; onStopAdd: () => void;
 }) {
   const createTask = useMutation(api.tasks.create);
   const updateTask = useMutation(api.tasks.update);
   const [newTitle, setNewTitle] = useState("");
   const [isOver, setIsOver] = useState(false);
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const dragCounter = useRef(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -446,9 +469,22 @@ function GTDColumn({ column, tasks, projectId, isLast, isAdding, onStartAdd, onS
     await updateTask({
       id: taskId as Id<"tasks">,
       status: newStatus,
-      ...(newStatus === "done" ? { completedAt: Date.now() } : {}),
     } as Parameters<typeof updateTask>[0]);
-  }, [column.id, tasks, updateTask]);
+    // Sync completion status to Google Calendar
+    const task = allTasks?.find((t) => t._id === taskId);
+    if (task?.googleEventId) {
+      try {
+        const { syncTaskCompletionToGoogle } = await import("@/lib/google-sync");
+        if (newStatus === "done") {
+          await syncTaskCompletionToGoogle(task, true);
+        } else if (task.status === "done") {
+          await syncTaskCompletionToGoogle(task, false);
+        }
+      } catch (err) {
+        console.warn("Google sync failed:", err);
+      }
+    }
+  }, [column.id, tasks, allTasks, updateTask]);
 
   return (
     <div
@@ -475,15 +511,15 @@ function GTDColumn({ column, tasks, projectId, isLast, isAdding, onStartAdd, onS
       >
         {isAdding ? (
           <input ref={inputRef} value={newTitle} onChange={(e) => setNewTitle(e.target.value)}
-            placeholder="Task name — Enter to add"
-            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleAdd(); } if (e.key === "Escape") onStopAdd(); }}
+            placeholder="Enter = quick add, Tab = full editor, Esc = cancel"
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleAdd(); } if (e.key === "Tab") { e.preventDefault(); onStopAdd(); setCreateDialogOpen(true); } if (e.key === "Escape") onStopAdd(); }}
             onBlur={() => { if (!newTitle.trim()) onStopAdd(); }}
-            className="flex-1 bg-transparent text-[13px] text-white outline-none placeholder:text-[#71717a]" />
+            className="flex-1 bg-transparent text-sm text-white outline-none placeholder:text-[#71717a]" />
         ) : (
           <>
-            <span className="flex items-center gap-2.5 text-[14px] text-[#a1a1aa]">
+            <span className="flex items-center gap-2.5 text-sm text-[#a1a1aa]">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><circle cx="8" cy="8" r="6.5" /><path d="M8 5v6M5 8h6" /></svg>
-              Add task
+              Add new task
             </span>
             <Kbd>{column.shortcut}</Kbd>
           </>
@@ -491,7 +527,7 @@ function GTDColumn({ column, tasks, projectId, isLast, isAdding, onStartAdd, onS
       </div>
       <div className="flex flex-1 flex-col overflow-y-auto px-5 pb-4">
         {tasks.length > 0 ? (
-          <div className="flex flex-col gap-1.5">{tasks.map((t) => <KanbanCard key={t._id} task={t} />)}</div>
+          <div className="flex flex-col gap-1.5">{tasks.map((t) => <KanbanCard key={t._id} task={t} context="project" />)}</div>
         ) : (
           <div className="mt-auto flex items-center gap-2 pb-2">
             <span className="text-[12px] tracking-wide text-[#52525b]">No tasks</span>
@@ -499,6 +535,7 @@ function GTDColumn({ column, tasks, projectId, isLast, isAdding, onStartAdd, onS
           </div>
         )}
       </div>
+      <TaskEditDialog open={createDialogOpen} onOpenChange={setCreateDialogOpen} defaultDueDate={undefined} />
     </div>
   );
 }
