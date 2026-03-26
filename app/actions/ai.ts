@@ -8,13 +8,27 @@ import {
   getCalendarEvents,
   createCalendarEvent,
   GoogleEvent,
-} from "./calendar";
+} from "@/lib/calendar-api";
+import {
+  archiveMessage,
+  archiveMessages,
+  trashMessage,
+  markAsRead,
+  markAsUnread,
+  markMessagesAsRead,
+  markMessagesAsUnread,
+  starMessage,
+  unstarMessage,
+  trashMessages,
+  sendMessage as gmailSendMessage,
+  createDraft as gmailCreateDraft,
+} from "@/lib/gmail-api";
 import { format, addDays, parseISO, startOfDay, endOfDay } from "date-fns";
 
 const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
 
 export interface AIAction {
-  type: "create_task" | "create_event" | "update_task" | "list_tasks" | "plan_day" | "find_slots" | "breakdown";
+  type: "create_task" | "create_event" | "update_task" | "list_tasks" | "plan_day" | "find_slots" | "breakdown" | "email_action" | "send_email" | "draft_email" | "list_emails";
   summary: string;
   details?: Record<string, unknown>;
 }
@@ -143,6 +157,140 @@ const AI_TOOLS: AITool[] = [
       required: ["date"],
     },
   },
+  // --- Email tools ---
+  {
+    name: "searchEmails",
+    description: "Search emails in the Convex cache by label, sender, subject, or unread status. Returns matching emails.",
+    parameters: {
+      type: "object",
+      properties: {
+        label: { type: "string", description: "Filter by label: INBOX, STARRED, SENT, DRAFT, TRASH, SPAM, or any custom label" },
+        unreadOnly: { type: "boolean", description: "If true, only return unread emails" },
+        query: { type: "string", description: "Search term to match against subject, sender name, or sender email" },
+        limit: { type: "number", description: "Max results to return (default 20)" },
+      },
+    },
+  },
+  {
+    name: "archiveEmails",
+    description: "Archive one or more emails (remove from INBOX). Provide Gmail message IDs.",
+    parameters: {
+      type: "object",
+      properties: {
+        messageIds: {
+          type: "array",
+          items: { type: "string" },
+          description: "Gmail message IDs to archive",
+        },
+      },
+      required: ["messageIds"],
+    },
+  },
+  {
+    name: "trashEmails",
+    description: "Move one or more emails to trash. Provide Gmail message IDs.",
+    parameters: {
+      type: "object",
+      properties: {
+        messageIds: {
+          type: "array",
+          items: { type: "string" },
+          description: "Gmail message IDs to trash",
+        },
+      },
+      required: ["messageIds"],
+    },
+  },
+  {
+    name: "markEmailsRead",
+    description: "Mark one or more emails as read. Provide Gmail message IDs.",
+    parameters: {
+      type: "object",
+      properties: {
+        messageIds: {
+          type: "array",
+          items: { type: "string" },
+          description: "Gmail message IDs to mark as read",
+        },
+      },
+      required: ["messageIds"],
+    },
+  },
+  {
+    name: "markEmailsUnread",
+    description: "Mark one or more emails as unread. Provide Gmail message IDs.",
+    parameters: {
+      type: "object",
+      properties: {
+        messageIds: {
+          type: "array",
+          items: { type: "string" },
+          description: "Gmail message IDs to mark as unread",
+        },
+      },
+      required: ["messageIds"],
+    },
+  },
+  {
+    name: "starEmails",
+    description: "Star one or more emails. Provide Gmail message IDs.",
+    parameters: {
+      type: "object",
+      properties: {
+        messageIds: {
+          type: "array",
+          items: { type: "string" },
+          description: "Gmail message IDs to star",
+        },
+      },
+      required: ["messageIds"],
+    },
+  },
+  {
+    name: "unstarEmails",
+    description: "Remove star from one or more emails. Provide Gmail message IDs.",
+    parameters: {
+      type: "object",
+      properties: {
+        messageIds: {
+          type: "array",
+          items: { type: "string" },
+          description: "Gmail message IDs to unstar",
+        },
+      },
+      required: ["messageIds"],
+    },
+  },
+  {
+    name: "sendEmail",
+    description: "Send a new email to one or more recipients.",
+    parameters: {
+      type: "object",
+      properties: {
+        to: { type: "string", description: "Recipient email address(es), comma-separated" },
+        subject: { type: "string", description: "Email subject line" },
+        body: { type: "string", description: "Email body (plain text)" },
+        cc: { type: "string", description: "CC recipients, comma-separated" },
+        bcc: { type: "string", description: "BCC recipients, comma-separated" },
+      },
+      required: ["to", "subject", "body"],
+    },
+  },
+  {
+    name: "draftEmail",
+    description: "Create a draft email (saved but not sent).",
+    parameters: {
+      type: "object",
+      properties: {
+        to: { type: "string", description: "Recipient email address(es), comma-separated" },
+        subject: { type: "string", description: "Email subject line" },
+        body: { type: "string", description: "Email body (plain text)" },
+        cc: { type: "string", description: "CC recipients, comma-separated" },
+        bcc: { type: "string", description: "BCC recipients, comma-separated" },
+      },
+      required: ["to", "subject", "body"],
+    },
+  },
 ];
 
 async function setConvexAuth(clerkToken: string) {
@@ -175,7 +323,11 @@ export async function processAICommand(
   const tasks = await convex.query(api.tasks.list, {});
   const pendingTasks = tasks.filter((t) => t.status !== "done");
 
-  const contextSummary = buildContext(now, todayEvents, pendingTasks);
+  // Get recent unread emails for context
+  const allEmails = await convex.query(api.emails.list, { labelFilter: "INBOX" });
+  const unreadEmails = allEmails.filter((e: { isUnread: boolean }) => e.isUnread);
+
+  const contextSummary = buildContext(now, todayEvents, pendingTasks, unreadEmails);
 
   const systemPrompt = `You are UniFocus AI, a productivity assistant. You help users manage their calendar, tasks, and schedule.
 
@@ -193,7 +345,11 @@ Instructions:
 - Default event duration is 1 hour if end time not specified.
 - Default task priority is p3 unless urgency is indicated.
 - Be concise in your responses.
-- When planning a day, consider existing events and suggest optimal task scheduling.`;
+- When planning a day, consider existing events and suggest optimal task scheduling.
+- For email operations, first use searchEmails to find the relevant messages, then use the action tools with the returned Gmail message IDs.
+- When the user says "archive all newsletters" or similar bulk operations, search first to find matching emails.
+- IMPORTANT: For destructive or bulk email actions (trash, bulk archive, send email), DO NOT execute the action tools yet. Instead, only call searchEmails to find the emails, then respond with a summary of what you WOULD do and ask the user to confirm. You have NOT done anything yet — you are only proposing the action. Wait for the user to say "yes" or "confirm" before executing.
+- When sending emails, compose professional and concise messages unless the user specifies a tone. Show the draft to the user and ask for confirmation before actually sending.`;
 
   // Call OpenRouter
   const result = await callOpenRouter({
@@ -240,7 +396,8 @@ async function getCalendarEventsForDay(date: string): Promise<GoogleEvent[]> {
 function buildContext(
   now: Date,
   events: GoogleEvent[],
-  tasks: Array<{ title: string; status: string; priority: string; dueDate?: string; scheduledDate?: string }>
+  tasks: Array<{ title: string; status: string; priority: string; dueDate?: string; scheduledDate?: string }>,
+  unreadEmails: Array<{ gmailMessageId: string; subject: string; fromName: string; fromEmail: string; snippet: string }>
 ): string {
   let ctx = "";
 
@@ -264,6 +421,15 @@ function buildContext(
       ctx += `\n`;
     }
     if (tasks.length > 20) ctx += `... and ${tasks.length - 20} more\n`;
+    ctx += "\n";
+  }
+
+  if (unreadEmails.length > 0) {
+    ctx += `Unread emails (${unreadEmails.length}):\n`;
+    for (const e of unreadEmails.slice(0, 15)) {
+      ctx += `- [${e.gmailMessageId}] From: ${e.fromName || e.fromEmail} — "${e.subject}" — ${e.snippet.slice(0, 80)}\n`;
+    }
+    if (unreadEmails.length > 15) ctx += `... and ${unreadEmails.length - 15} more\n`;
   }
 
   return ctx;
@@ -430,6 +596,202 @@ async function executeToolCall(
       return {
         type: "plan_day",
         summary: `Generated plan for ${planArgs.date}`,
+      };
+    }
+
+    // --- Email tool handlers ---
+
+    case "searchEmails": {
+      const searchArgs = args as {
+        label?: string;
+        unreadOnly?: boolean;
+        query?: string;
+        limit?: number;
+      };
+      const label = searchArgs.label || "INBOX";
+      const allEmails = await convex.query(api.emails.list, { labelFilter: label });
+      let results = allEmails;
+
+      if (searchArgs.unreadOnly) {
+        results = results.filter((e: { isUnread: boolean }) => e.isUnread);
+      }
+      if (searchArgs.query) {
+        const q = searchArgs.query.toLowerCase();
+        results = results.filter(
+          (e: { subject: string; fromName: string; fromEmail: string; snippet: string }) =>
+            e.subject.toLowerCase().includes(q) ||
+            e.fromName.toLowerCase().includes(q) ||
+            e.fromEmail.toLowerCase().includes(q) ||
+            e.snippet.toLowerCase().includes(q)
+        );
+      }
+      const limit = searchArgs.limit || 20;
+      results = results.slice(0, limit);
+
+      return {
+        type: "list_emails",
+        summary: `Found ${results.length} emails${searchArgs.unreadOnly ? " (unread)" : ""} in ${label}`,
+        details: {
+          emails: results.map((e: { gmailMessageId: string; subject: string; fromName: string; fromEmail: string; snippet: string; isUnread: boolean; isStarred: boolean; date: number }) => ({
+            id: e.gmailMessageId,
+            subject: e.subject,
+            from: e.fromName || e.fromEmail,
+            snippet: e.snippet.slice(0, 100),
+            isUnread: e.isUnread,
+            isStarred: e.isStarred,
+            date: format(new Date(e.date), "MMM d, h:mm a"),
+          })),
+        },
+      };
+    }
+
+    case "archiveEmails": {
+      const archiveArgs = args as { messageIds: string[] };
+      if (archiveArgs.messageIds.length === 1) {
+        await archiveMessage(archiveArgs.messageIds[0]);
+      } else {
+        await archiveMessages(archiveArgs.messageIds);
+      }
+      // Update Convex cache
+      for (const id of archiveArgs.messageIds) {
+        await convex.mutation(api.emails.updateLabels, {
+          gmailMessageId: id,
+          removeLabelIds: ["INBOX"],
+        });
+      }
+      return {
+        type: "email_action",
+        summary: `Archived ${archiveArgs.messageIds.length} email(s)`,
+      };
+    }
+
+    case "trashEmails": {
+      const trashArgs = args as { messageIds: string[] };
+      if (trashArgs.messageIds.length === 1) {
+        await trashMessage(trashArgs.messageIds[0]);
+      } else {
+        await trashMessages(trashArgs.messageIds);
+      }
+      for (const id of trashArgs.messageIds) {
+        await convex.mutation(api.emails.updateLabels, {
+          gmailMessageId: id,
+          addLabelIds: ["TRASH"],
+          removeLabelIds: ["INBOX"],
+        });
+      }
+      return {
+        type: "email_action",
+        summary: `Trashed ${trashArgs.messageIds.length} email(s)`,
+      };
+    }
+
+    case "markEmailsRead": {
+      const readArgs = args as { messageIds: string[] };
+      if (readArgs.messageIds.length === 1) {
+        await markAsRead(readArgs.messageIds[0]);
+      } else {
+        await markMessagesAsRead(readArgs.messageIds);
+      }
+      for (const id of readArgs.messageIds) {
+        await convex.mutation(api.emails.updateLabels, {
+          gmailMessageId: id,
+          removeLabelIds: ["UNREAD"],
+        });
+      }
+      return {
+        type: "email_action",
+        summary: `Marked ${readArgs.messageIds.length} email(s) as read`,
+      };
+    }
+
+    case "markEmailsUnread": {
+      const unreadArgs = args as { messageIds: string[] };
+      if (unreadArgs.messageIds.length === 1) {
+        await markAsUnread(unreadArgs.messageIds[0]);
+      } else {
+        await markMessagesAsUnread(unreadArgs.messageIds);
+      }
+      for (const id of unreadArgs.messageIds) {
+        await convex.mutation(api.emails.updateLabels, {
+          gmailMessageId: id,
+          addLabelIds: ["UNREAD"],
+        });
+      }
+      return {
+        type: "email_action",
+        summary: `Marked ${unreadArgs.messageIds.length} email(s) as unread`,
+      };
+    }
+
+    case "starEmails": {
+      const starArgs = args as { messageIds: string[] };
+      for (const id of starArgs.messageIds) {
+        await starMessage(id);
+        await convex.mutation(api.emails.updateLabels, {
+          gmailMessageId: id,
+          addLabelIds: ["STARRED"],
+        });
+      }
+      return {
+        type: "email_action",
+        summary: `Starred ${starArgs.messageIds.length} email(s)`,
+      };
+    }
+
+    case "unstarEmails": {
+      const unstarArgs = args as { messageIds: string[] };
+      for (const id of unstarArgs.messageIds) {
+        await unstarMessage(id);
+        await convex.mutation(api.emails.updateLabels, {
+          gmailMessageId: id,
+          removeLabelIds: ["STARRED"],
+        });
+      }
+      return {
+        type: "email_action",
+        summary: `Unstarred ${unstarArgs.messageIds.length} email(s)`,
+      };
+    }
+
+    case "sendEmail": {
+      const sendArgs = args as {
+        to: string;
+        subject: string;
+        body: string;
+        cc?: string;
+        bcc?: string;
+      };
+      await gmailSendMessage({
+        to: sendArgs.to,
+        subject: sendArgs.subject,
+        body: sendArgs.body,
+        cc: sendArgs.cc,
+        bcc: sendArgs.bcc,
+      });
+      return {
+        type: "send_email",
+        summary: `Sent email to ${sendArgs.to}: "${sendArgs.subject}"`,
+      };
+    }
+
+    case "draftEmail": {
+      const draftArgs = args as {
+        to: string;
+        subject: string;
+        body: string;
+        cc?: string;
+        bcc?: string;
+      };
+      await gmailCreateDraft({
+        to: draftArgs.to,
+        subject: draftArgs.subject,
+        body: draftArgs.body,
+        cc: draftArgs.cc,
+        bcc: draftArgs.bcc,
+      });
+      return {
+        type: "draft_email",
+        summary: `Created draft to ${draftArgs.to}: "${draftArgs.subject}"`,
       };
     }
 

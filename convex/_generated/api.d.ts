@@ -10,6 +10,8 @@
 
 import type * as aiSettings from "../aiSettings.js";
 import type * as calendarEvents from "../calendarEvents.js";
+import type * as emailSyncState from "../emailSyncState.js";
+import type * as emails from "../emails.js";
 import type * as favorites from "../favorites.js";
 import type * as projects from "../projects.js";
 import type * as sections from "../sections.js";
@@ -24,6 +26,8 @@ import type {
 declare const fullApi: ApiFromModules<{
   aiSettings: typeof aiSettings;
   calendarEvents: typeof calendarEvents;
+  emailSyncState: typeof emailSyncState;
+  emails: typeof emails;
   favorites: typeof favorites;
   projects: typeof projects;
   sections: typeof sections;

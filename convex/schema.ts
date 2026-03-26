@@ -39,6 +39,10 @@ export default defineSchema({
     timeZone: v.optional(v.string()),
     googleUpdatedAt: v.optional(v.string()),
     lastSyncedAt: v.optional(v.number()),
+    // Gmail linking fields
+    gmailMessageId: v.optional(v.string()),
+    gmailThreadId: v.optional(v.string()),
+    gmailSubject: v.optional(v.string()),
     sortOrder: v.number(),
     completedAt: v.optional(v.number()),
     userId: v.string(),
@@ -50,7 +54,8 @@ export default defineSchema({
     .index("by_userId_and_dueDate", ["userId", "dueDate"])
     .index("by_parentTaskId", ["parentTaskId"])
     .index("by_userId_and_sectionId", ["userId", "sectionId"])
-    .index("by_userId_and_googleEventId", ["userId", "googleEventId"]),
+    .index("by_userId_and_googleEventId", ["userId", "googleEventId"])
+    .index("by_userId_and_gmailThreadId", ["userId", "gmailThreadId"]),
 
   projects: defineTable({
     name: v.string(),
@@ -125,6 +130,33 @@ export default defineSchema({
   })
     .index("by_userId", ["userId"])
     .index("by_userId_and_calendarId", ["userId", "googleCalendarId"]),
+
+  emails: defineTable({
+    gmailMessageId: v.string(),
+    gmailThreadId: v.string(),
+    labelIds: v.array(v.string()),
+    snippet: v.string(),
+    subject: v.string(),
+    fromName: v.string(),
+    fromEmail: v.string(),
+    toSummary: v.string(),
+    date: v.number(),
+    hasAttachments: v.boolean(),
+    isUnread: v.boolean(),
+    isStarred: v.boolean(),
+    historyId: v.string(),
+    userId: v.string(),
+  })
+    .index("by_userId_and_date", ["userId", "date"])
+    .index("by_userId_and_threadId", ["userId", "gmailThreadId"])
+    .index("by_userId_and_messageId", ["userId", "gmailMessageId"])
+    .index("by_userId_and_unread", ["userId", "isUnread"]),
+
+  emailSyncState: defineTable({
+    lastHistoryId: v.string(),
+    lastSyncedAt: v.number(),
+    userId: v.string(),
+  }).index("by_userId", ["userId"]),
 
   aiSettings: defineTable({
     apiKey: v.string(),

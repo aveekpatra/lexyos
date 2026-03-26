@@ -1,26 +1,62 @@
 "use client";
 
 /**
- * useVoiceChat — simple speech-to-text that fills an input box.
- * Press mic → speak → transcript appears in callback → user edits and sends manually.
- * No auto-submit, no TTS, no conversation loop.
+ * useVoiceChat — two modes:
+ *
+ * 1. **Normal mode** (default): Press mic → speak → transcript fills input → user sends manually.
+ * 2. **Call mode**: Continuous listening. Detects silence pause → auto-submits →
+ *    waits for AI response → resumes listening. Like a phone call with an assistant.
+ *
+ * Call mode lifecycle:
+ *   listening → silence detected → auto-submit → waiting for AI → AI responds → listening again
  */
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 
 const CARTESIA_API_KEY = process.env.NEXT_PUBLIC_CARTESIA_API_KEY || "";
 const STT_MODEL = "ink-whisper";
 
-export function useVoiceChat(onTranscript: (text: string) => void) {
+/** How long of silence (ms) before auto-submitting in call mode */
+const SILENCE_TIMEOUT_MS = 1800;
+
+export type VoiceMode = "normal" | "call";
+
+interface UseVoiceChatOpts {
+  onTranscript: (text: string) => void;
+  /** Called in call mode when silence is detected and we have text to submit */
+  onAutoSubmit?: (text: string) => Promise<void>;
+}
+
+export function useVoiceChat({ onTranscript, onAutoSubmit }: UseVoiceChatOpts) {
   const [listening, setListening] = useState(false);
+  const [callMode, setCallMode] = useState(false);
   const [transcript, setTranscript] = useState("");
+  const [waitingForAI, setWaitingForAI] = useState(false);
 
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
   const sttWsRef = useRef<WebSocket | null>(null);
+  const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fullTextRef = useRef("");
+  const callModeRef = useRef(false);
+  const waitingRef = useRef(false);
+  const isListeningRef = useRef(false);
+
+  // Keep refs in sync
+  useEffect(() => { callModeRef.current = callMode; }, [callMode]);
+  useEffect(() => { waitingRef.current = waitingForAI; }, [waitingForAI]);
+  useEffect(() => { isListeningRef.current = listening; }, [listening]);
+
+  const clearSilenceTimer = useCallback(() => {
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
+  }, []);
 
   const cleanup = useCallback(() => {
+    clearSilenceTimer();
     if (processorRef.current) {
       processorRef.current.disconnect();
       processorRef.current = null;
@@ -33,20 +69,181 @@ export function useVoiceChat(onTranscript: (text: string) => void) {
       audioContextRef.current?.close();
       audioContextRef.current = null;
     }
-  }, []);
-
-  const stopListening = useCallback(() => {
-    // Send finalize to get final transcript
     if (sttWsRef.current?.readyState === WebSocket.OPEN) {
       sttWsRef.current.send("done");
+      sttWsRef.current.close();
     }
+    sttWsRef.current = null;
+  }, [clearSilenceTimer]);
+
+  const stopListening = useCallback(() => {
     cleanup();
     setListening(false);
+    fullTextRef.current = "";
   }, [cleanup]);
+
+  /** Fully exit call mode and stop everything */
+  const stopCallMode = useCallback(() => {
+    setCallMode(false);
+    callModeRef.current = false;
+    setWaitingForAI(false);
+    waitingRef.current = false;
+    stopListening();
+  }, [stopListening]);
+
+  const startCartesiaListening = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
+      });
+      mediaStreamRef.current = stream;
+
+      const audioCtx = new AudioContext();
+      audioContextRef.current = audioCtx;
+      const nativeRate = audioCtx.sampleRate;
+
+      const source = audioCtx.createMediaStreamSource(stream);
+      const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+      processorRef.current = processor;
+
+      const sttUrl = `wss://api.cartesia.ai/stt/websocket?cartesia_version=2025-04-16&model=${STT_MODEL}&language=en&encoding=pcm_s16le&sample_rate=${nativeRate}&min_volume=0.05&api_key=${CARTESIA_API_KEY}`;
+      const sttWs = new WebSocket(sttUrl);
+      sttWsRef.current = sttWs;
+
+      fullTextRef.current = "";
+
+      sttWs.onopen = () => {
+        setListening(true);
+        isListeningRef.current = true;
+        setTranscript("");
+
+        processor.onaudioprocess = (e) => {
+          if (sttWs.readyState !== WebSocket.OPEN) return;
+          const float32 = e.inputBuffer.getChannelData(0);
+          const int16 = new Int16Array(float32.length);
+          for (let i = 0; i < float32.length; i++) {
+            const s = Math.max(-1, Math.min(1, float32[i]));
+            int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+          }
+          sttWs.send(int16.buffer);
+        };
+
+        source.connect(processor);
+        const silentGain = audioCtx.createGain();
+        silentGain.gain.value = 0;
+        processor.connect(silentGain);
+        silentGain.connect(audioCtx.destination);
+      };
+
+      sttWs.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === "transcript" && data.text) {
+            // Reset silence timer on any transcript activity
+            clearSilenceTimer();
+
+            if (data.is_final) {
+              fullTextRef.current = (fullTextRef.current + " " + data.text).trim();
+              setTranscript(fullTextRef.current);
+              onTranscript(fullTextRef.current);
+
+              // In call mode, start silence timer after each final segment
+              if (callModeRef.current && fullTextRef.current.trim()) {
+                silenceTimerRef.current = setTimeout(() => {
+                  // Silence detected — auto-submit
+                  const text = fullTextRef.current.trim();
+                  if (text && callModeRef.current && onAutoSubmit) {
+                    fullTextRef.current = "";
+                    setTranscript("");
+
+                    // Pause listening while AI processes
+                    cleanup();
+                    setListening(false);
+                    isListeningRef.current = false;
+                    setWaitingForAI(true);
+                    waitingRef.current = true;
+
+                    onAutoSubmit(text).finally(() => {
+                      // After AI responds, resume listening if still in call mode
+                      if (callModeRef.current) {
+                        setWaitingForAI(false);
+                        waitingRef.current = false;
+                        // Small delay before resuming to avoid picking up speaker audio
+                        setTimeout(() => {
+                          if (callModeRef.current) {
+                            startCartesiaListening();
+                          }
+                        }, 500);
+                      }
+                    });
+                  }
+                }, SILENCE_TIMEOUT_MS);
+              }
+            } else {
+              // Interim result
+              const interim = (fullTextRef.current + " " + data.text).trim();
+              setTranscript(interim);
+              onTranscript(interim);
+
+              // In call mode, also reset silence timer on interim results
+              if (callModeRef.current && fullTextRef.current.trim()) {
+                clearSilenceTimer();
+                silenceTimerRef.current = setTimeout(() => {
+                  const text = fullTextRef.current.trim();
+                  if (text && callModeRef.current && onAutoSubmit) {
+                    fullTextRef.current = "";
+                    setTranscript("");
+                    cleanup();
+                    setListening(false);
+                    isListeningRef.current = false;
+                    setWaitingForAI(true);
+                    waitingRef.current = true;
+
+                    onAutoSubmit(text).finally(() => {
+                      if (callModeRef.current) {
+                        setWaitingForAI(false);
+                        waitingRef.current = false;
+                        setTimeout(() => {
+                          if (callModeRef.current) {
+                            startCartesiaListening();
+                          }
+                        }, 500);
+                      }
+                    });
+                  }
+                }, SILENCE_TIMEOUT_MS);
+              }
+            }
+          }
+        } catch { /* ignore */ }
+      };
+
+      sttWs.onerror = () => {
+        console.error("[STT] WebSocket error");
+        cleanup();
+        setListening(false);
+        isListeningRef.current = false;
+      };
+
+      sttWs.onclose = () => {
+        // Only fully stop if not in call mode (call mode will reconnect)
+        if (!callModeRef.current || !waitingRef.current) {
+          cleanup();
+          setListening(false);
+          isListeningRef.current = false;
+        }
+      };
+    } catch (err) {
+      console.error("[STT] Mic access error:", err);
+      setListening(false);
+      isListeningRef.current = false;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onTranscript, onAutoSubmit, cleanup, clearSilenceTimer]);
 
   const startListening = useCallback(async () => {
     if (!CARTESIA_API_KEY) {
-      // Fallback to Web Speech API if no Cartesia key
+      // Fallback to Web Speech API (no call mode support)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
       if (!SR) { alert("Speech recognition not supported"); return; }
@@ -70,92 +267,48 @@ export function useVoiceChat(onTranscript: (text: string) => void) {
       return;
     }
 
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
-      });
-      mediaStreamRef.current = stream;
+    await startCartesiaListening();
+  }, [onTranscript, startCartesiaListening]);
 
-      const audioCtx = new AudioContext();
-      audioContextRef.current = audioCtx;
-      const nativeRate = audioCtx.sampleRate;
-
-      const source = audioCtx.createMediaStreamSource(stream);
-      const processor = audioCtx.createScriptProcessor(4096, 1, 1);
-      processorRef.current = processor;
-
-      // Connect to Cartesia STT at native sample rate
-      const sttUrl = `wss://api.cartesia.ai/stt/websocket?cartesia_version=2025-04-16&model=${STT_MODEL}&language=en&encoding=pcm_s16le&sample_rate=${nativeRate}&min_volume=0.05&api_key=${CARTESIA_API_KEY}`;
-      const sttWs = new WebSocket(sttUrl);
-      sttWsRef.current = sttWs;
-
-      let fullText = "";
-
-      sttWs.onopen = () => {
-        setListening(true);
-        setTranscript("");
-
-        processor.onaudioprocess = (e) => {
-          if (sttWs.readyState !== WebSocket.OPEN) return;
-          const float32 = e.inputBuffer.getChannelData(0);
-          // Float32 → Int16 PCM
-          const int16 = new Int16Array(float32.length);
-          for (let i = 0; i < float32.length; i++) {
-            const s = Math.max(-1, Math.min(1, float32[i]));
-            int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-          }
-          sttWs.send(int16.buffer);
-        };
-
-        source.connect(processor);
-        const silentGain = audioCtx.createGain();
-        silentGain.gain.value = 0;
-        processor.connect(silentGain);
-        silentGain.connect(audioCtx.destination);
-      };
-
-      sttWs.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.type === "transcript" && data.text) {
-            if (data.is_final) {
-              // Append final segment with a space
-              fullText = (fullText + " " + data.text).trim();
-            } else {
-              // Show interim: full confirmed text + current partial
-              setTranscript((fullText + " " + data.text).trim());
-              onTranscript((fullText + " " + data.text).trim());
-              return;
-            }
-            setTranscript(fullText);
-            onTranscript(fullText);
-          }
-        } catch { /* ignore */ }
-      };
-
-      sttWs.onerror = () => {
-        console.error("[STT] WebSocket error");
-        cleanup();
-        setListening(false);
-      };
-
-      sttWs.onclose = () => {
-        cleanup();
-        setListening(false);
-      };
-    } catch (err) {
-      console.error("[STT] Mic access error:", err);
-      setListening(false);
-    }
-  }, [onTranscript, cleanup]);
-
+  /** Toggle normal voice mode (press to talk) */
   const toggleVoice = useCallback(() => {
-    if (listening) {
+    if (callMode) {
+      // If in call mode, stop call mode
+      stopCallMode();
+    } else if (listening) {
       stopListening();
     } else {
       startListening();
     }
-  }, [listening, startListening, stopListening]);
+  }, [callMode, listening, startListening, stopListening, stopCallMode]);
 
-  return { listening, transcript, toggleVoice };
+  /** Enter call mode — continuous listen/submit/listen loop */
+  const startCallMode = useCallback(async () => {
+    if (!CARTESIA_API_KEY) {
+      alert("Call mode requires Cartesia API key");
+      return;
+    }
+    setCallMode(true);
+    callModeRef.current = true;
+    await startCartesiaListening();
+  }, [startCartesiaListening]);
+
+  /** Toggle call mode on/off */
+  const toggleCallMode = useCallback(() => {
+    if (callMode) {
+      stopCallMode();
+    } else {
+      startCallMode();
+    }
+  }, [callMode, startCallMode, stopCallMode]);
+
+  return {
+    listening,
+    transcript,
+    callMode,
+    waitingForAI,
+    toggleVoice,
+    toggleCallMode,
+    stopCallMode,
+  };
 }

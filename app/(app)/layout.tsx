@@ -10,6 +10,7 @@ import {
   InboxIcon,
   Calendar01Icon,
   FolderLibraryIcon,
+  Mail01Icon,
   Settings01Icon,
   Clock01Icon,
   HelpCircleIcon,
@@ -28,6 +29,7 @@ const NAV_ITEMS = [
   { icon: InboxIcon, label: "Inbox", href: "/timeline" },
   { icon: Calendar01Icon, label: "Planner", href: "/planner" },
   { icon: FolderLibraryIcon, label: "Projects", href: "/projects" },
+  { icon: Mail01Icon, label: "Mail", href: "/mail" },
 ];
 
 export default function AppLayout({ children }: { children: ReactNode }) {

@@ -24,7 +24,7 @@ export interface AIProviderResult {
   toolCalls: AIToolCall[];
 }
 
-const DEFAULT_MODEL = "anthropic/claude-sonnet-4";
+const DEFAULT_MODEL = "anthropic/claude-haiku-4.5:nitro";
 
 export async function callOpenRouter(config: OpenRouterConfig): Promise<AIProviderResult> {
   const client = new OpenAI({

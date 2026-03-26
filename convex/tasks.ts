@@ -76,6 +76,22 @@ export const getById = query({
   },
 });
 
+export const getByGmailThread = query({
+  args: { gmailThreadId: v.string() },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) return null;
+
+    const tasks = await ctx.db
+      .query("tasks")
+      .withIndex("by_userId_and_gmailThreadId", (q) =>
+        q.eq("userId", identity.subject).eq("gmailThreadId", args.gmailThreadId)
+      )
+      .collect();
+    return tasks[0] || null;
+  },
+});
+
 export const getSubtasks = query({
   args: { parentTaskId: v.id("tasks") },
   handler: async (ctx, args) => {
@@ -113,6 +129,10 @@ export const create = mutation({
     parentTaskId: v.optional(v.id("tasks")),
     googleEventId: v.optional(v.string()),
     googleCalendarId: v.optional(v.string()),
+    // Gmail linking
+    gmailMessageId: v.optional(v.string()),
+    gmailThreadId: v.optional(v.string()),
+    gmailSubject: v.optional(v.string()),
     // Client-provided local date (format: "YYYY-MM-DD") to avoid UTC drift on the server.
     // Falls back to server UTC date if not provided.
     userDate: v.optional(v.string()),
@@ -149,6 +169,9 @@ export const create = mutation({
       parentTaskId: args.parentTaskId,
       googleEventId: args.googleEventId,
       googleCalendarId: args.googleCalendarId,
+      gmailMessageId: args.gmailMessageId,
+      gmailThreadId: args.gmailThreadId,
+      gmailSubject: args.gmailSubject,
       source: "local",
       sortOrder: maxOrder + 1,
       userId,

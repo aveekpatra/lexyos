@@ -8,7 +8,7 @@ import {
   deleteCalendarEvent,
   type GoogleEvent,
   type CreateEventInput,
-} from "./calendar";
+} from "@/lib/calendar-api";
 
 /**
  * Fetch events from Google Calendar and return them in the format
