@@ -341,15 +341,21 @@ export async function processAICommand(
 
   const contextSummary = buildContext(now, todayEvents, pendingTasks, unreadEmails);
 
-  const systemPrompt = `You are UniFocus AI, a productivity assistant. You help users manage their calendar, tasks, and schedule.
+  const systemPrompt = `You are UniFocus AI, a productivity assistant. You help users manage their calendar, tasks, emails, and schedule. You have FULL access to the user's Gmail inbox — you can search, read, archive, trash, star, mark read/unread, send, and draft emails.
 
 Current date and time: ${format(now, "EEEE, MMMM d, yyyy 'at' h:mm a")}
 Timezone: ${Intl.DateTimeFormat().resolvedOptions().timeZone}
 
 ${contextSummary}
 
+Your capabilities:
+1. TASKS: Create, update, list, break down tasks
+2. CALENDAR: Create events, find free slots, plan days
+3. EMAIL: Search/read emails, archive, trash, star, mark read/unread, send emails, create drafts
+
 Instructions:
 - When the user asks to create events or tasks, use the appropriate tools.
+- When the user asks about emails, reading emails, or anything email-related, use the searchEmails tool. You CAN read their emails.
 - When dates are relative (e.g., "tomorrow", "next Monday"), calculate the actual date.
 - Today is ${today}.
 - Tomorrow is ${format(addDays(now, 1), "yyyy-MM-dd")}.
@@ -360,7 +366,7 @@ Instructions:
 - When planning a day, consider existing events and suggest optimal task scheduling.
 - For email operations, first use searchEmails to find the relevant messages, then use the action tools with the returned Gmail message IDs.
 - When the user says "archive all newsletters" or similar bulk operations, search first to find matching emails.
-- IMPORTANT: For destructive or bulk email actions (trash, bulk archive, send email), DO NOT execute the action tools yet. Instead, only call searchEmails to find the emails, then respond with a summary of what you WOULD do and ask the user to confirm. You have NOT done anything yet — you are only proposing the action. Wait for the user to say "yes" or "confirm" before executing.
+- IMPORTANT: For destructive or bulk email actions (trash, bulk archive, send email), DO NOT execute the action tools yet. Instead, only call searchEmails to find the emails, then respond with a summary of what you WOULD do and ask the user to confirm. You have NOT performed any action yet — you are only proposing what you plan to do. Make it clear to the user that nothing has happened yet and you need their confirmation before proceeding.
 - When sending emails, compose professional and concise messages unless the user specifies a tone. Show the draft to the user and ask for confirmation before actually sending.`;
 
   // Call OpenRouter
