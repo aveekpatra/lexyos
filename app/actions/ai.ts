@@ -22,7 +22,10 @@ import {
   trashMessages,
   sendMessage as gmailSendMessage,
   createDraft as gmailCreateDraft,
+  setGmailToken,
+  clearGmailToken,
 } from "@/lib/gmail-api";
+import { getGoogleAccessToken } from "./google-auth";
 import { format, addDays, parseISO, startOfDay, endOfDay } from "date-fns";
 
 const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
@@ -307,6 +310,15 @@ export async function processAICommand(
   // Set auth for Convex client
   await setConvexAuth(clerkToken);
 
+  // Pre-fetch Google OAuth token before any Convex calls consume the request context
+  try {
+    const googleToken = await getGoogleAccessToken();
+    setGmailToken(googleToken);
+  } catch {
+    // Gmail not connected — email tools will fail gracefully
+  }
+
+  try {
   // Get AI settings
   const aiSettings = await convex.query(api.aiSettings.getFullKey, {});
   if (!aiSettings) {
@@ -381,6 +393,9 @@ Instructions:
     message: result.message || (actions.length > 0 ? "Done! Here's what I did:" : "I'm not sure how to help with that."),
     actions,
   };
+  } finally {
+    clearGmailToken();
+  }
 }
 
 async function getCalendarEventsForDay(date: string): Promise<GoogleEvent[]> {
