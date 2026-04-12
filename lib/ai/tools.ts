@@ -604,11 +604,11 @@ export function createTools(authToken: string, googleToken?: string): Record<str
       execute: async (args: any) => {
         return withGmail(async () => {
           const sent = await gmailSendMessage({
-            to: args.to,
-            subject: args.subject,
+            to: args.to.trim(),
+            subject: args.subject.trim(),
             body: args.body,
-            cc: args.cc,
-            bcc: args.bcc,
+            cc: args.cc?.trim(),
+            bcc: args.bcc?.trim(),
           });
           return { id: sent.id, threadId: sent.threadId, sent: true };
         });

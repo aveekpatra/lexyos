@@ -169,11 +169,14 @@ export function buildRawEmail(opts: {
   const lines: string[] = [];
   const boundary = `----=_Part_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 
-  if (opts.from) lines.push(`From: ${opts.from}`);
-  lines.push(`To: ${opts.to}`);
-  if (opts.cc) lines.push(`Cc: ${opts.cc}`);
-  if (opts.bcc) lines.push(`Bcc: ${opts.bcc}`);
-  lines.push(`Subject: ${opts.subject}`);
+  // Sanitize email addresses — strip newlines, trim, remove surrounding quotes/brackets
+  const cleanEmail = (s: string) => s.replace(/[\r\n]/g, "").trim().replace(/^["'<]+|["'>]+$/g, "");
+
+  if (opts.from) lines.push(`From: ${cleanEmail(opts.from)}`);
+  lines.push(`To: ${cleanEmail(opts.to)}`);
+  if (opts.cc) lines.push(`Cc: ${cleanEmail(opts.cc)}`);
+  if (opts.bcc) lines.push(`Bcc: ${cleanEmail(opts.bcc)}`);
+  lines.push(`Subject: ${opts.subject.trim()}`);
   if (opts.inReplyTo) lines.push(`In-Reply-To: ${opts.inReplyTo}`);
   if (opts.references) lines.push(`References: ${opts.references}`);
   lines.push(`MIME-Version: 1.0`);
