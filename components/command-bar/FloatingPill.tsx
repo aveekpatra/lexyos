@@ -171,7 +171,7 @@ const FloatingPill = memo(function FloatingPill() {
 
 
   return (
-    <div className="fixed bottom-4 left-1/2 z-50 w-[480px] -translate-x-1/2" ref={containerRef}>
+    <div className="fixed bottom-4 right-4 z-50 w-[400px]" ref={containerRef}>
       <div
         className={`overflow-hidden rounded-[20px] border border-blue-300 bg-blue-50 shadow-[0_4px_24px_-2px_rgba(0,0,0,0.12),0_1px_4px_-1px_rgba(0,0,0,0.08)] backdrop-blur-2xl backdrop-saturate-150 transition-all duration-300 dark:border-blue-500/40 dark:bg-blue-950/60 dark:shadow-[0_4px_24px_-2px_rgba(0,0,0,0.4),0_1px_4px_-1px_rgba(0,0,0,0.3)] ${callMode ? "ring-2 ring-blue-300/40" : ""}`}
       >
