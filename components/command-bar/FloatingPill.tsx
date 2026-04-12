@@ -167,7 +167,7 @@ const FloatingPill = memo(function FloatingPill() {
   }, [input, isLoading, sendMessage]);
 
   const hasMessages = messages.length > 0;
-  const [chatFolded, setChatFolded] = useState(false);
+  const [chatFolded, setChatFolded] = useState(true);
 
 
   return (
