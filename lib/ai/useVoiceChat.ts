@@ -18,8 +18,9 @@ const STT_MODEL = "ink-whisper";
 const TTS_MODEL = "sonic-2";
 const TTS_VOICE_ID = process.env.NEXT_PUBLIC_CARTESIA_VOICE_ID || "69267136-1bdc-412f-ad78-0caad210fb40";
 
-/** How long of silence (ms) before auto-submitting in call mode */
-const SILENCE_TIMEOUT_MS = 1800;
+/** How long of silence (ms) before auto-submitting in call mode.
+ *  Needs to be long enough to not cut off mid-sentence pauses (1-2s is normal). */
+const SILENCE_TIMEOUT_MS = 3000;
 
 export type VoiceMode = "normal" | "call";
 
