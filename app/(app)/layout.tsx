@@ -28,6 +28,7 @@ import {
 
 import FloatingPill from "@/components/command-bar/FloatingPill";
 import { ThemeSyncer } from "@/components/ThemeSyncer";
+import { HelpDialog, useHelpShortcut } from "@/components/HelpDialog";
 
 const NAV_ITEMS = [
   { icon: InboxIcon, label: "Inbox", href: "/timeline" },
@@ -39,6 +40,9 @@ const NAV_ITEMS = [
 export default function AppLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
+  const [helpOpen, setHelpOpen] = useState(false);
+
+  useHelpShortcut(useCallback(() => setHelpOpen(true), []));
 
   return (
     <div className="flex h-svh overflow-hidden">
@@ -73,7 +77,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           <ThemeToggleButton />
           <RailButton icon={Settings01Icon} label="Settings" />
           <RailButton icon={Clock01Icon} label="Activity" />
-          <RailButton icon={HelpCircleIcon} label="Help" />
+          <RailButton icon={HelpCircleIcon} label="Help  ?" onClick={() => setHelpOpen(true)} />
         </nav>
       </aside>
 
@@ -85,6 +89,8 @@ export default function AppLayout({ children }: { children: ReactNode }) {
       <ThemeSyncer />
       {/* Floating AI pill — always visible, no lazy/suspense to prevent re-mount on nav */}
       <FloatingPill />
+      {/* Help dialog */}
+      <HelpDialog open={helpOpen} onOpenChange={setHelpOpen} />
     </div>
   );
 }
