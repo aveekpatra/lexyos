@@ -13,6 +13,7 @@ import {
   clearGmailToken,
   listMessagesWithDetails,
   sendMessage as gmailSendMessage,
+  createDraft as gmailCreateDraft,
   getMessage as gmailGetMessage,
   archiveMessage,
   trashMessage,
@@ -616,6 +617,54 @@ export function createTools(authToken: string, googleToken?: string): Record<str
             references: original.messageIdHeader,
           });
           return { id: sent.id, threadId: sent.threadId, replied: true };
+        });
+      }),
+    }),
+
+    save_draft: ({
+      description: `Save an email as a draft in Gmail. The user can review and send it later from Gmail. Use this when the user asks to "draft", "write a draft", "save for later", or "prepare an email" — anything that implies they want to review before sending. Do NOT ask for confirmation — just save the draft.`,
+      parameters: z.object({
+        to: z.string().describe("Recipient email address"),
+        subject: z.string().describe("Email subject"),
+        body: z.string().describe("Email body (plain text)"),
+        cc: z.string().optional().describe("CC email address(es), comma separated"),
+        bcc: z.string().optional().describe("BCC email address(es), comma separated"),
+      }),
+      execute: safe(async (args: any) => {
+        return withGmail(async () => {
+          const draft = await gmailCreateDraft({
+            to: args.to.trim(),
+            subject: args.subject.trim(),
+            body: args.body,
+            cc: args.cc?.trim(),
+            bcc: args.bcc?.trim(),
+          });
+          return { draftId: draft.id, messageId: draft.messageId, saved: true };
+        });
+      }),
+    }),
+
+    save_reply_draft: ({
+      description: `Save a reply as a draft in Gmail (in the same thread). Use when the user asks to "draft a reply", "prepare a reply", or wants to reply but review it first. Do NOT ask for confirmation — just save the draft.`,
+      parameters: z.object({
+        messageId: z.string().describe("The message ID to reply to"),
+        body: z.string().describe("Reply body (plain text)"),
+        replyAll: z.boolean().optional().describe("If true, reply to all recipients (default: false)"),
+      }),
+      execute: safe(async (args: any) => {
+        return withGmail(async () => {
+          const original = await gmailGetMessage(args.messageId);
+          const replyTo = args.replyAll
+            ? [original.from.email, ...original.to.map((a: { email: string }) => a.email), ...original.cc.map((a: { email: string }) => a.email)].join(", ")
+            : original.from.email;
+          const subject = original.subject.startsWith("Re:") ? original.subject : `Re: ${original.subject}`;
+          const draft = await gmailCreateDraft({
+            to: replyTo,
+            subject,
+            body: args.body,
+            threadId: original.threadId,
+          });
+          return { draftId: draft.id, messageId: draft.messageId, threadId: original.threadId, saved: true };
         });
       }),
     }),
