@@ -60,6 +60,7 @@ export async function listMessages(opts?: {
   labelIds?: string[];
   pageToken?: string;
   maxResults?: number;
+  includeSpamTrash?: boolean;
 }): Promise<GmailListResponse> {
   const params = new URLSearchParams();
   if (opts?.query) params.set("q", opts.query);
@@ -67,6 +68,7 @@ export async function listMessages(opts?: {
     for (const id of opts.labelIds) params.append("labelIds", id);
   }
   if (opts?.pageToken) params.set("pageToken", opts.pageToken);
+  if (opts?.includeSpamTrash) params.set("includeSpamTrash", "true");
   params.set("maxResults", String(opts?.maxResults ?? 25));
 
   const res = await gmailFetch(`/messages?${params}`);

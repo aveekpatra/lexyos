@@ -1,18 +1,14 @@
 import type { Metadata } from "next";
-import { Lato, DM_Sans } from "next/font/google";
+import { Poppins } from "next/font/google";
 import "./globals.css";
 import ConvexClientProvider from "@/components/ConvexClientProvider";
+import { ThemeProvider } from "@/components/ThemeProvider";
 import { ClerkProvider } from "@clerk/nextjs";
 
-const lato = Lato({
+const poppins = Poppins({
   variable: "--font-sans",
-  weight: ["300", "400", "700", "900"],
-  subsets: ["latin"],
-});
-
-const dmSans = DM_Sans({
-  variable: "--font-heading",
-  subsets: ["latin"],
+  weight: ["300", "400", "500", "600", "700"],
+  subsets: ["latin", "latin-ext"],
 });
 
 export const metadata: Metadata = {
@@ -26,18 +22,28 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark" suppressHydrationWarning>
-      <body
-        className={`${dmSans.variable} ${lato.variable} antialiased`}
-      >
-        <ClerkProvider
-          dynamic
-          appearance={{
-            baseTheme: undefined,
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <script
+          // Set theme before paint to avoid flash
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var t=localStorage.getItem('unifocus-theme');if(t==='dark'){document.documentElement.classList.add('dark');document.documentElement.style.colorScheme='dark';}else{document.documentElement.style.colorScheme='light';}}catch(e){}})();`,
           }}
-        >
-          <ConvexClientProvider>{children}</ConvexClientProvider>
-        </ClerkProvider>
+        />
+      </head>
+      <body
+        className={`${poppins.variable} antialiased`}
+      >
+        <ThemeProvider>
+          <ClerkProvider
+            dynamic
+            appearance={{
+              baseTheme: undefined,
+            }}
+          >
+            <ConvexClientProvider>{children}</ConvexClientProvider>
+          </ClerkProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

@@ -45,10 +45,10 @@ const QUARTER_PX = HOUR_HEIGHT / 4; // 24px per 15-min slot
 
 type CalView = "day" | "week" | "month" | number;
 
-const viewBtnBase = "relative z-10 rounded-[7px] px-2.5 py-1.5 text-[11px] font-medium transition-all";
-const viewBtnActive = `${viewBtnBase} border border-[#3a3a4a] bg-[#2a2a38] text-white shadow-[0_1px_0_0_rgba(0,0,0,0.3),inset_0_1px_0_0_rgba(255,255,255,0.06)]`;
-const viewBtnInactive = `${viewBtnBase} border border-transparent text-[#71717a] hover:text-[#a1a1aa]`;
-const navBtn = "flex size-[30px] items-center justify-center rounded-[7px] border border-[#2a2a36] bg-[#131318] text-[#a1a1aa] shadow-[0_2px_0_0_rgba(0,0,0,0.4),inset_0_1px_0_0_rgba(255,255,255,0.04)] transition-colors hover:border-[#3a3a4a] hover:text-white active:translate-y-[1px] active:shadow-[0_1px_0_0_rgba(0,0,0,0.4)]";
+const viewBtnBase = "relative rounded-[7px] px-2.5 py-1 text-xs font-medium transition-colors";
+const viewBtnActive = `${viewBtnBase} text-foreground`;
+const viewBtnInactive = `${viewBtnBase} text-text-muted hover:text-text-secondary`;
+const navBtn = "flex size-[30px] items-center justify-center rounded-[7px] border border-line-strong bg-surface-0 text-text-secondary shadow-3d transition-colors hover:border-line-strong hover:text-foreground active:translate-y-[1px] active:shadow-3d-sm";
 
 function loadCalView(): CalView {
   if (typeof window === "undefined") return "week";
@@ -246,25 +246,45 @@ export default function PlannerView() {
     return tasks.filter((t) => !t.googleCalendarId || !hiddenCalendarIds.has(t.googleCalendarId));
   }, [tasks, hiddenCalendarIds]);
 
-  // Sync Google Calendar events → Convex (runs on view/anchor changes)
-  const lastSyncRef = useRef<string>("");
+  // Sync Google Calendar events → Convex.
+  // Strategy: keep a wide "loaded range" cache. Only fetch when the desired
+  // window extends beyond what we already have (then extend by a big chunk),
+  // and debounce so rapid scroll/anchor changes don't fire repeated network
+  // requests. Background syncs do NOT toggle the loading spinner.
+  const loadedRangeRef = useRef<{ min: number; max: number } | null>(null);
+  const inFlightRef = useRef(false);
   useEffect(() => {
-    async function sync() {
-      let timeMin: string, timeMax: string;
-      if (calView === "month") {
-        timeMin = startOfMonth(calAnchor).toISOString();
-        timeMax = addDays(endOfMonth(calAnchor), 1).toISOString();
-      } else if (visibleDays.length > 0) {
-        timeMin = subDays(visibleDays[0], 7).toISOString();
-        timeMax = addDays(visibleDays[visibleDays.length - 1], 8).toISOString();
-      } else return;
+    // Compute desired window
+    let desiredMin: Date, desiredMax: Date;
+    if (calView === "month") {
+      desiredMin = startOfMonth(calAnchor);
+      desiredMax = addDays(endOfMonth(calAnchor), 1);
+    } else if (visibleDays.length > 0) {
+      desiredMin = subDays(visibleDays[0], 7);
+      desiredMax = addDays(visibleDays[visibleDays.length - 1], 8);
+    } else return;
 
-      // Deduplicate — don't re-sync if the range hasn't changed
-      const syncKey = `${timeMin}|${timeMax}`;
-      if (syncKey === lastSyncRef.current) return;
-      lastSyncRef.current = syncKey;
+    const desiredMinMs = desiredMin.getTime();
+    const desiredMaxMs = desiredMax.getTime();
 
-      setCalendarLoading(true);
+    // If already covered by the loaded range, nothing to do.
+    const loaded = loadedRangeRef.current;
+    if (loaded && desiredMinMs >= loaded.min && desiredMaxMs <= loaded.max) return;
+
+    // Debounce — wait for scroll/anchor to settle before firing.
+    const handle = setTimeout(async () => {
+      if (inFlightRef.current) return;
+      inFlightRef.current = true;
+
+      // Extend the fetch window well beyond what we need so future scrolls hit the cache.
+      const CHUNK_DAYS = 60;
+      const fetchMin = subDays(desiredMin, CHUNK_DAYS);
+      const fetchMax = addDays(desiredMax, CHUNK_DAYS);
+      const timeMin = fetchMin.toISOString();
+      const timeMax = fetchMax.toISOString();
+
+      const isFirstLoad = !loadedRangeRef.current;
+      if (isFirstLoad) setCalendarLoading(true);
       setCalendarError(null);
       try {
         const userTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -272,21 +292,29 @@ export default function PlannerView() {
         if (googleEvents.length > 0) {
           await bulkUpsert({ events: googleEvents });
         }
-        // Clean up events deleted from Google Calendar
         const knownIds = googleEvents.map((e) => e.googleEventId);
-        const rangeStart = timeMin.slice(0, 10); // ISO date
-        const rangeEnd = timeMax.slice(0, 10);
-        await removeDeleted({ knownGoogleEventIds: knownIds, syncRangeStart: rangeStart, syncRangeEnd: rangeEnd });
+        await removeDeleted({
+          knownGoogleEventIds: knownIds,
+          syncRangeStart: timeMin.slice(0, 10),
+          syncRangeEnd: timeMax.slice(0, 10),
+        });
+        // Merge into loaded range
+        const prev = loadedRangeRef.current;
+        loadedRangeRef.current = prev
+          ? { min: Math.min(prev.min, fetchMin.getTime()), max: Math.max(prev.max, fetchMax.getTime()) }
+          : { min: fetchMin.getTime(), max: fetchMax.getTime() };
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Failed to sync calendar";
         setCalendarError(msg);
         console.error("Calendar sync error:", msg);
       } finally {
-        setCalendarLoading(false);
+        if (isFirstLoad) setCalendarLoading(false);
+        inFlightRef.current = false;
       }
-    }
-    sync();
-  }, [calAnchor, calView, bulkUpsert, removeDeleted]);
+    }, 250);
+
+    return () => clearTimeout(handle);
+  }, [calAnchor, calView, visibleDays, bulkUpsert, removeDeleted]);
 
   // Scroll to current hour on mount and when switching views
   useEffect(() => {
@@ -375,7 +403,7 @@ export default function PlannerView() {
     <div className="flex flex-1 overflow-hidden">
       {/* ── Left panel (task sidebar) ── */}
       {showTaskSidebar && <div
-        className="relative flex shrink-0 flex-col border-r border-dashed border-[#3a3a48]"
+        className="relative flex shrink-0 flex-col border-r border-dashed border-line-strong"
         style={{ width: panelWidth }}
         onDragEnter={(e) => { e.preventDefault(); leftDragCounter.current++; setLeftDropOver(true); }}
         onDragLeave={() => { leftDragCounter.current--; if (leftDragCounter.current <= 0) { leftDragCounter.current = 0; setLeftDropOver(false); } }}
@@ -384,14 +412,14 @@ export default function PlannerView() {
       >
         {leftDropOver && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-            className="pointer-events-none absolute inset-2 z-20 rounded-xl border-2 border-dashed border-[#a78bfa]/60 bg-[#a78bfa]/5" />
+            className="pointer-events-none absolute inset-2 z-20 rounded-xl border-2 border-dashed border-brand/60 bg-brand/5" />
         )}
 
         {/* Header with date picker + sidebar toggle */}
         <div className="flex items-center justify-between px-5 pb-3 pt-4">
           <Popover>
             <PopoverTrigger render={
-              <button className="flex items-center gap-1.5 text-[15px] font-bold text-white transition-colors hover:text-[#a78bfa]" />
+              <button className="flex items-center gap-1.5 text-[15px] font-bold text-foreground transition-colors hover:text-brand" />
             }>
               {isToday(selectedDate) ? "Today" : format(selectedDate, "EEE, MMM d")}
               <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 5l3 3 3-3" /></svg>
@@ -400,7 +428,7 @@ export default function PlannerView() {
               <Calendar mode="single" selected={selectedDate} onSelect={(d) => { if (d) { setSelectedDate(d); setCalAnchor(d); } }} />
               <div className="border-t px-3 py-2">
                 <button onClick={() => { setSelectedDate(new Date()); setCalAnchor(new Date()); }}
-                  className="rounded-[7px] border border-[#2a2a36] bg-[#131318] px-3 py-1.5 text-xs font-medium text-[#a78bfa] shadow-[0_2px_0_0_rgba(0,0,0,0.4),inset_0_1px_0_0_rgba(255,255,255,0.04)] transition-colors hover:border-[#3a3a4a] hover:text-white active:translate-y-[1px] active:shadow-[0_1px_0_0_rgba(0,0,0,0.4)]">
+                  className="rounded-[7px] border border-line-strong bg-surface-0 px-3 py-1.5 text-xs font-medium text-brand shadow-3d transition-colors hover:border-line-strong hover:text-foreground active:translate-y-[1px] active:shadow-3d-sm">
                   Go to today
                 </button>
               </div>
@@ -419,8 +447,10 @@ export default function PlannerView() {
         {/* Add task */}
         <div
           onClick={() => { if (!addingTask) setAddingTask(true); }}
-          className={`mx-5 mb-3 flex items-center justify-between rounded-[10px] border px-3.5 py-2.5 transition-colors ${
-            addingTask ? "border-[#4a4a58] bg-[#1a1a22]" : "cursor-pointer border-[#333340] bg-[#16161e] hover:border-[#4a4a58] hover:bg-[#1e1e28]"
+          className={`mx-5 mb-3 flex items-center justify-between rounded-[10px] border px-3.5 py-2.5 transition-all ${
+            addingTask
+              ? "border-blue-300 bg-blue-50 shadow-3d dark:border-blue-500/40 dark:bg-blue-950/30"
+              : "cursor-pointer border-line-strong bg-surface-1 shadow-3d hover:border-blue-200 hover:bg-blue-50/60 hover:shadow-3d active:translate-y-[1px] active:shadow-3d-sm dark:border-white/10 dark:hover:border-blue-500/40 dark:hover:bg-blue-950/30"
           }`}
         >
           {addingTask ? (
@@ -432,11 +462,11 @@ export default function PlannerView() {
                 if (e.key === "Escape") setAddingTask(false);
               }}
               onBlur={() => { if (!newTitle.trim()) setAddingTask(false); }}
-              className="flex-1 bg-transparent text-sm text-white outline-none placeholder:text-[#71717a]"
+              className="flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-text-muted"
             />
           ) : (
             <>
-              <span className="flex items-center gap-2.5 text-sm text-[#a1a1aa]">
+              <span className="flex items-center gap-2.5 text-sm text-text-faint">
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><circle cx="8" cy="8" r="6.5" /><path d="M8 5v6M5 8h6" /></svg>
                 Add new task
               </span>
@@ -452,9 +482,9 @@ export default function PlannerView() {
               <div className="mb-2 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <span className="text-[13px] font-bold text-[#ef4444]">Overdue</span>
-                  <span className="text-[13px] font-medium text-[#a1a1aa]">{dayTasks.overdue.length}</span>
+                  <span className="text-[13px] font-medium text-text-secondary">{dayTasks.overdue.length}</span>
                 </div>
-                {overdueDuration && <span className="text-[11px] font-medium text-[#a1a1aa]">{overdueDuration}</span>}
+                {overdueDuration && <span className="text-[11px] font-medium text-text-secondary">{overdueDuration}</span>}
               </div>
               <div className="flex flex-col gap-1.5">
                 {dayTasks.overdue.map((t) => <KanbanCard key={t._id} task={t} isOverdue context="sidebar" />)}
@@ -472,86 +502,31 @@ export default function PlannerView() {
             if (sorted.length === 0) return null;
             return (
               <div className="flex flex-col gap-1.5">
-                {sorted.map((t) => {
-                  if (t.source === "google_calendar") {
-                    const color = (t as Record<string, unknown>).calendarColor as string || "#059669";
-                    const startStr = t.scheduledStartTime || "";
-                    const endStr = t.scheduledEndTime || "";
-                    let timeStr = "";
-                    if (startStr && endStr) {
-                      const fmtTime = (ts: string) => {
-                        const [hh, mm] = ts.split(":").map(Number);
-                        const h12 = hh === 0 ? 12 : hh > 12 ? hh - 12 : hh;
-                        const ampm = hh < 12 ? "am" : "pm";
-                        return `${h12}:${String(mm).padStart(2, "0")}${ampm}`;
-                      };
-                      timeStr = `${fmtTime(startStr)} – ${fmtTime(endStr)}`;
-                    } else if (startStr) {
-                      const [hh, mm] = startStr.split(":").map(Number);
-                      const h12 = hh === 0 ? 12 : hh > 12 ? hh - 12 : hh;
-                      const ampm = hh < 12 ? "am" : "pm";
-                      timeStr = `${h12}:${String(mm).padStart(2, "0")}${ampm}`;
-                    } else if ((t as Record<string, unknown>).isAllDay) {
-                      timeStr = "All day";
-                    }
-                    return (
-                      <TaskContextMenu key={t._id} task={t}>
-                        <div
-                          draggable
-                          onDragStart={(e) => {
-                            e.dataTransfer.setData("text/plain", t._id);
-                            e.dataTransfer.setData("application/source-date", t.dueDate || t.scheduledDate || "");
-                            e.dataTransfer.effectAllowed = "move";
-                          }}
-                          className="flex cursor-grab flex-col gap-1.5 rounded-[10px] border border-[#333340] bg-[#1a1a22] px-3 py-2.5 shadow-[0_2px_0_0_rgba(0,0,0,0.3),inset_0_1px_0_0_rgba(255,255,255,0.04)] transition-colors hover:border-[#4a4a58] hover:bg-[#1e1e28] active:cursor-grabbing">
-                          {/* Row 1: Icon + Title */}
-                          <div className="flex min-w-0 items-start gap-2.5">
-                            <HugeiconsIcon icon={DashedLineCircleIcon} size={16} style={{ color }} className="mt-0.5 shrink-0" />
-                            <span
-                              className="min-w-0 flex-1 text-sm font-medium leading-snug text-[#e4e4e7]"
-                              style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}
-                            >
-                              {t.title || "(No title)"}
-                            </span>
-                          </div>
-                          {/* Row 2: Time chip */}
-                          {timeStr && (
-                            <div className="pl-[26px]">
-                              <span className="inline-flex rounded-[6px] bg-[#1a1a22] px-2 py-0.5 text-[11px] font-medium text-[#a1a1aa] shadow-[0_1px_0_0_rgba(0,0,0,0.3),inset_0_1px_0_0_rgba(255,255,255,0.04)]">
-                                {timeStr}
-                              </span>
-                            </div>
-                          )}
-                        </div>
-                      </TaskContextMenu>
-                    );
-                  }
-                  return <KanbanCard key={t._id} task={t} context="sidebar" />;
-                })}
+                {sorted.map((t) => <KanbanCard key={t._id} task={t} context="sidebar" />)}
               </div>
             );
           })()}
 
           {totalTasks === 0 && !showDone && (
             <div className="mt-auto flex items-center gap-2 pb-2">
-              <span className="text-[12px] tracking-wide text-[#52525b]">No tasks</span>
-              <span className="flex size-[18px] items-center justify-center rounded-[5px] border border-[#3a3a48] bg-[#1a1a22] text-[10px] font-bold text-[#606068] shadow-[0_2px_0_0_rgba(0,0,0,0.4),inset_0_1px_0_0_rgba(255,255,255,0.04)]">0</span>
+              <span className="text-[12px] tracking-wide text-text-faint">No tasks</span>
+              <span className="flex size-[18px] items-center justify-center rounded-[5px] border border-line-strong bg-surface-1 text-[10px] font-bold text-text-faint shadow-3d">0</span>
             </div>
           )}
 
           {/* Done tasks toggle */}
           {dayTasks.done.length > 0 && (
-            <div className="mt-4 border-t border-[#2a2a32] pt-3">
+            <div className="mt-4 border-t border-line-strong pt-3">
               <button
                 onClick={() => setShowDone(!showDone)}
-                className="mb-2 flex w-full items-center gap-2 text-[12px] font-medium text-[#52525b] transition-colors hover:text-[#a1a1aa]"
+                className="mb-2 flex w-full items-center gap-2 text-[12px] font-medium text-text-faint transition-colors hover:text-text-secondary"
               >
                 <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5"
                   className={`transition-transform ${showDone ? "rotate-90" : ""}`}>
                   <path d="M3.5 2L6.5 5L3.5 8" />
                 </svg>
                 Completed
-                <span className="flex size-[16px] items-center justify-center rounded-full border border-[#3a3a48] text-[9px] font-medium text-[#52525b]">
+                <span className="flex size-[16px] items-center justify-center rounded-full border border-line-strong text-[9px] font-medium text-text-faint">
                   {dayTasks.done.length}
                 </span>
               </button>
@@ -571,14 +546,14 @@ export default function PlannerView() {
       {/* ── Right panel: Calendar ── */}
       <div className="flex flex-1 flex-col overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-[#2a2a32] px-5 py-3">
+        <div className="flex items-center justify-between border-b border-line-strong px-6 py-3">
           <div className="flex items-center gap-3">
-            <span className="text-[15px] font-bold text-white">{viewLabel}</span>
-            {calView !== "month" && <span className="text-[13px] font-medium text-[#71717a]">W{weekOfMonth}</span>}
+            <span className="text-[15px] font-bold text-foreground">{viewLabel}</span>
+            {calView !== "month" && <span className="text-[13px] font-medium text-text-muted">W{weekOfMonth}</span>}
           </div>
           <div className="flex items-center gap-2">
             {/* View switcher */}
-            <div className="flex items-center rounded-[10px] border border-[#2a2a36] bg-[#131318] p-[3px] shadow-[0_2px_0_0_rgba(0,0,0,0.4),inset_0_1px_0_0_rgba(255,255,255,0.04)]">
+            <div className="relative flex items-center rounded-[10px] border border-line-strong bg-surface-0 p-[3px] shadow-3d">
               {([
                 { id: "day" as const, label: "D" },
                 { id: "week" as const, label: "W" },
@@ -586,15 +561,29 @@ export default function PlannerView() {
               ] as const).map((v) => (
                 <button key={v.id} onClick={() => setCalView(v.id)}
                   className={calView === v.id ? viewBtnActive : viewBtnInactive}>
-                  {v.label}
+                  {calView === v.id && (
+                    <motion.div
+                      layoutId="planner-view-tab-indicator"
+                      className="absolute inset-0 rounded-[7px] border border-line-strong bg-brand-bg shadow-3d-sm"
+                      transition={{ type: "spring", stiffness: 400, damping: 30 }}
+                    />
+                  )}
+                  <span className="relative z-10">{v.label}</span>
                 </button>
               ))}
               <Menu>
                 <MenuTrigger render={
-                  <button className={typeof calView === "number" ? viewBtnActive : viewBtnInactive} />
-                }>
-                  {typeof calView === "number" ? `${calView}D` : "X"}
-                </MenuTrigger>
+                  <button className={typeof calView === "number" ? viewBtnActive : viewBtnInactive}>
+                    {typeof calView === "number" && (
+                      <motion.div
+                        layoutId="planner-view-tab-indicator"
+                        className="absolute inset-0 rounded-[7px] border border-line-strong bg-brand-bg shadow-3d-sm"
+                        transition={{ type: "spring", stiffness: 400, damping: 30 }}
+                      />
+                    )}
+                    <span className="relative z-10">{typeof calView === "number" ? `${calView}D` : "X"}</span>
+                  </button>
+                } />
                 <MenuPopup>
                   {[2, 3, 4, 5, 6].map((n) => (
                     <MenuItem key={n} onClick={() => setCalView(n)}>
@@ -618,7 +607,7 @@ export default function PlannerView() {
             </button>
 
             {/* Divider */}
-            <div className="mx-1 h-5 w-px bg-[#2a2a36]" />
+            <div className="mx-1 h-5 w-px bg-line-strong" />
 
             {/* Calendar picker */}
             <Menu>
@@ -658,7 +647,7 @@ export default function PlannerView() {
             {!showTaskSidebar && (
               <button
                 onClick={toggleTaskSidebar}
-                className={`${navBtn} border-[#a78bfa]/30 text-[#a78bfa]`}
+                className={`${navBtn} border-brand/30 text-brand`}
                 title="Show task sidebar"
               >
                 <HugeiconsIcon icon={LayoutAlignLeftIcon} size={14} />
@@ -669,17 +658,17 @@ export default function PlannerView() {
 
         {/* Calendar status */}
         {calendarError && (
-          <div className="flex items-center gap-2 border-b border-[#2a2a32] bg-[#1a1018] px-5 py-2">
+          <div className="flex items-center gap-2 border-b border-rose-200 bg-rose-50 px-5 py-2 dark:border-line-strong dark:bg-[#1a1018]">
             <span className="text-[12px] text-[#f87171]">⚠ {calendarError}</span>
-            <button onClick={() => setCalendarError(null)} className="text-[11px] text-[#71717a] hover:text-white">dismiss</button>
+            <button onClick={() => setCalendarError(null)} className="text-[11px] text-text-muted hover:text-foreground">dismiss</button>
           </div>
         )}
         {calendarLoading && !calendarError && (
-          <div className="flex items-center gap-2 border-b border-[#2a2a32] px-5 py-1.5">
-            <div className="h-0.5 w-20 overflow-hidden rounded-full bg-[#1f1f28]">
-              <div className="h-full w-8 animate-[shimmer_1s_ease-in-out_infinite] rounded-full bg-[#a78bfa]/60" />
+          <div className="flex items-center gap-2 border-b border-line-strong px-5 py-1.5">
+            <div className="h-0.5 w-20 overflow-hidden rounded-full bg-line">
+              <div className="h-full w-8 animate-[shimmer_1s_ease-in-out_infinite] rounded-full bg-brand/60" />
             </div>
-            <span className="text-[11px] text-[#52525b]">Loading calendar...</span>
+            <span className="text-[11px] text-text-faint">Loading calendar...</span>
           </div>
         )}
 
@@ -698,8 +687,8 @@ export default function PlannerView() {
           ) : (
             <>
               {/* Day headers — scrolls in sync with time grid */}
-              <div className="flex border-b border-[#2a2a32]">
-                <div className="w-14 shrink-0 px-2 py-2 text-[11px] text-[#52525b]">
+              <div className="flex border-b border-line-strong">
+                <div className="w-14 shrink-0 px-2 py-2 text-[11px] text-text-faint">
                   {Intl.DateTimeFormat().resolvedOptions().timeZone.split("/").pop()?.replace("_", " ") || ""}
                 </div>
                 <div
@@ -715,14 +704,14 @@ export default function PlannerView() {
                       <button
                         key={day.toISOString()}
                         onClick={() => setSelectedDate(day)}
-                        className={`flex shrink-0 items-center gap-1.5 px-2 py-2 transition-colors ${isSel ? "bg-[#1a1a28]" : "hover:bg-[#14141c]"}`}
+                        className={`flex shrink-0 items-center gap-1.5 px-2 py-2 transition-colors ${isSel ? "bg-surface-1" : "hover:bg-surface-0"}`}
                         style={{ width: `${pct}%` }}
                       >
-                        <span className={`text-[12px] font-medium ${isNow ? "text-white" : isSel ? "text-[#a78bfa]" : "text-[#a1a1aa]"}`}>
+                        <span className={`text-[12px] font-medium ${isNow ? "text-foreground" : isSel ? "text-brand" : "text-text-secondary"}`}>
                           {format(day, "EEE")}
                         </span>
                         <span className={`flex size-[22px] items-center justify-center rounded-[5px] text-[12px] font-bold ${
-                          isNow ? "bg-[#7c3aed] text-white" : isSel ? "bg-[#2a2a3a] text-[#a78bfa]" : "text-[#a1a1aa]"
+                          isNow ? "bg-brand-strong text-white" : isSel ? "bg-brand-bg text-brand-strong" : "text-text-secondary"
                         }`}>
                           {format(day, "d")}
                         </span>
@@ -736,9 +725,9 @@ export default function PlannerView() {
               <div ref={scrollRef} className="flex-1 overflow-y-auto">
                 <div className="flex" style={{ height: (END_HOUR - START_HOUR) * HOUR_HEIGHT }}>
                   {/* Hour labels — sticky left */}
-                  <div className="sticky left-0 z-10 w-14 shrink-0 bg-[#0c0c10]">
+                  <div className="sticky left-0 z-10 w-14 shrink-0 bg-surface-0">
                     {Array.from({ length: END_HOUR - START_HOUR }, (_, i) => i + START_HOUR).map((hour) => (
-                      <div key={hour} className="flex items-start justify-end pr-2 text-[11px] text-[#52525b]"
+                      <div key={hour} className="flex items-start justify-end pr-2 text-[11px] text-text-faint"
                         style={{ height: HOUR_HEIGHT, paddingTop: 2 }}>
                         {hour === 0 ? "12 am" : hour < 12 ? `${hour} am` : hour === 12 ? "12 pm" : `${hour - 12} pm`}
                       </div>
@@ -772,10 +761,10 @@ export default function PlannerView() {
         </div>
 
         {/* Bottom bar */}
-        <div className="flex items-center gap-3 border-t border-[#2a2a32] px-5 py-2">
-          <span className="text-[12px] font-medium text-[#7c3aed]">{format(new Date(), "h:mm a")}</span>
-          <div className="h-px flex-1 border-t border-dashed border-[#3a3a48]" />
-          <span className="text-[12px] font-medium text-[#a1a1aa]">{totalTasks} Task{totalTasks !== 1 ? "s" : ""}</span>
+        <div className="flex items-center gap-3 border-t border-line-strong px-5 py-2">
+          <span className="text-[12px] font-medium text-brand-strong">{format(new Date(), "h:mm a")}</span>
+          <div className="h-px flex-1 border-t border-dashed border-line-strong" />
+          <span className="text-[12px] font-medium text-text-secondary">{totalTasks} Task{totalTasks !== 1 ? "s" : ""}</span>
         </div>
       </div>
 
@@ -800,13 +789,13 @@ function MonthGrid({ anchor, selectedDate, onSelectDate, tasks, updateTask }: {
 
   return (
     <div className="flex flex-1 flex-col">
-      <div className="grid grid-cols-7 border-b border-[#2a2a32]">
+      <div className="grid grid-cols-7 border-b border-line-strong">
         {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => (
-          <div key={d} className="px-2 py-2 text-center text-[11px] font-medium text-[#71717a]">{d}</div>
+          <div key={d} className="px-2 py-2 text-center text-[11px] font-medium text-text-muted">{d}</div>
         ))}
       </div>
       {weeks.map((ws) => (
-        <div key={ws.toISOString()} className="grid min-h-[100px] grid-cols-7 border-b border-[#1a1a22]">
+        <div key={ws.toISOString()} className="grid min-h-[100px] grid-cols-7 border-b border-surface-1">
           {Array.from({ length: 7 }, (_, i) => (
             <MonthDayCell
               key={i}
@@ -860,15 +849,15 @@ function MonthDayCell({ day, anchor, selectedDate, onSelectDate, activeTasks, up
       onDragLeave={() => { dragCounter.current--; if (dragCounter.current <= 0) { dragCounter.current = 0; setIsOver(false); } }}
       onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
       onDrop={handleDrop}
-      className={`relative flex cursor-pointer flex-col gap-0.5 border-r border-[#1a1a22] p-1.5 text-left transition-colors last:border-r-0 ${
-        isSel ? "bg-[#1a1a28]" : "hover:bg-[#14141c]"
+      className={`relative flex cursor-pointer flex-col gap-0.5 border-r border-surface-1 p-1.5 text-left transition-colors last:border-r-0 ${
+        isSel ? "bg-surface-1" : "hover:bg-surface-0"
       } ${isOtherMonth ? "opacity-40" : ""}`}
     >
       {isOver && (
-        <div className="pointer-events-none absolute inset-0.5 rounded-md border-2 border-dashed border-[#a78bfa]/60 bg-[#a78bfa]/5" />
+        <div className="pointer-events-none absolute inset-0.5 rounded-md border-2 border-dashed border-brand/60 bg-brand/5" />
       )}
       <span className={`mb-0.5 flex size-[24px] items-center justify-center self-end rounded-full text-[12px] font-bold ${
-        isNow ? "bg-[#7c3aed] text-white" : isSel ? "text-[#a78bfa]" : "text-[#a1a1aa]"
+        isNow ? "bg-brand-strong text-white" : isSel ? "text-brand" : "text-text-secondary"
       }`}>
         {format(day, "d")}
       </span>
@@ -876,7 +865,7 @@ function MonthDayCell({ day, anchor, selectedDate, onSelectDate, activeTasks, up
         const done = t.status === "done";
         return (
           <TaskContextMenu key={t._id} task={t}>
-            <div className={`truncate rounded-[3px] px-1 py-px text-[10px] font-medium ${done ? "opacity-70 line-through" : "text-white"}`}
+            <div className={`truncate rounded-[3px] px-1 py-px text-[10px] font-medium ${done ? "opacity-70 line-through" : "text-foreground"}`}
               style={{ backgroundColor: (t as Record<string, unknown>).calendarColor as string || "#059669" }}>
               {t.title || "(No title)"}
             </div>
@@ -891,13 +880,13 @@ function MonthDayCell({ day, anchor, selectedDate, onSelectDate, activeTasks, up
               <span className="size-1.5 shrink-0 rounded-full" style={{
                 backgroundColor: done ? "#52525b" : PRIORITY_COLORS[t.priority]
               }} />
-              <span className={`truncate ${done ? "text-[#71717a] line-through" : "text-[#d4d4d8]"}`}>{t.title}</span>
+              <span className={`truncate ${done ? "text-text-muted line-through" : "text-text-strong"}`}>{t.title}</span>
             </div>
           </TaskContextMenu>
         );
       })}
       {dayTasks.length > 4 && (
-        <span className="px-1 text-[9px] text-[#71717a]">+{dayTasks.length - 4} more</span>
+        <span className="px-1 text-[9px] text-text-muted">+{dayTasks.length - 4} more</span>
       )}
     </div>
   );
@@ -998,7 +987,7 @@ function CalendarDayColumn({ day, selectedDate, tasks, updateTask }: {
 
   return (
     <div ref={columnRef}
-      className={`relative flex-1 border-l ${isSelected ? "border-[#2a2a3a]" : "border-[#1f1f28]"}`}
+      className={`relative flex-1 border-l ${isSelected ? "border-line-strong" : "border-line"}`}
       onDragEnter={(e) => { e.preventDefault(); dragCounter.current++; setIsOver(true); }}
       onDragLeave={() => {
         dragCounter.current--;
@@ -1010,10 +999,10 @@ function CalendarDayColumn({ day, selectedDate, tasks, updateTask }: {
       {/* 15-min box drop indicator */}
       {isOver && dropIndicator && (
         <div
-          className="pointer-events-none absolute left-1 right-1 z-30 rounded-[10px] border-2 border-dashed border-[#a78bfa]/70 bg-[#a78bfa]/10"
+          className="pointer-events-none absolute left-1 right-1 z-30 rounded-[10px] border-2 border-dashed border-brand/70 bg-brand/10"
           style={{ top: dropIndicator.topPx, height: HALF_HOUR_PX }}
         >
-          <span className="absolute right-1 top-1 rounded-[5px] bg-[#a78bfa] px-1.5 py-0.5 text-[10px] font-bold text-white shadow-[0_1px_0_0_rgba(0,0,0,0.3)]">
+          <span className="absolute right-1 top-1 rounded-[5px] bg-brand px-1.5 py-0.5 text-[10px] font-bold text-white shadow-3d-sm">
             {dropIndicator.label}
           </span>
         </div>
@@ -1023,10 +1012,10 @@ function CalendarDayColumn({ day, selectedDate, tasks, updateTask }: {
       {Array.from({ length: (END_HOUR - START_HOUR) * 4 }, (_, i) => (
         <div key={i} className={
           i % 4 === 0
-            ? "border-b border-[#1e1e28]"
+            ? "border-b border-surface-1"
             : i % 2 === 0
-              ? "border-b border-dashed border-[#181820]"
-              : "border-b border-[#131318]"
+              ? "border-b border-dashed border-line"
+              : "border-b border-surface-0"
         } style={{ height: QUARTER_PX }} />
       ))}
 
@@ -1192,7 +1181,7 @@ function ResizableTaskBlock({ task, dayStr, updateTask, style: overrideStyle }: 
   const endAmpm = endHour < 12 ? "am" : "pm";
 
   return (
-    <TaskContextMenu task={task} className="absolute overflow-hidden" style={{ top: topPx, height, ...(overrideStyle || { left: 4, right: 4 }) }}>
+    <TaskContextMenu task={task} className="absolute" style={{ top: topPx, height, ...(overrideStyle || { left: 4, right: 4 }) }}>
     <div
       draggable={!isResizing && !isDone}
       onDragStart={(e) => {
@@ -1201,34 +1190,49 @@ function ResizableTaskBlock({ task, dayStr, updateTask, style: overrideStyle }: 
         e.dataTransfer.setData("application/source-date", dayStr);
         e.dataTransfer.effectAllowed = "move";
       }}
-      className={`group h-full w-full overflow-hidden rounded-[10px] border shadow-[0_2px_0_0_rgba(0,0,0,0.3),inset_0_1px_0_0_rgba(255,255,255,0.04)] ${
+      className={`group h-full w-full overflow-hidden rounded-[10px] border shadow-3d transition-all ${
         isDone
-          ? "border-[#2a2a32] bg-[#1a1a22] opacity-70"
+          ? ""
           : isResizing
-            ? "z-40 cursor-ns-resize border-[#a78bfa]/50 ring-1 ring-[#a78bfa]/30 bg-[#1a1a22]"
-            : "border-[#333340] bg-[#1a1a22] cursor-grab active:cursor-grabbing"
+            ? "z-40 cursor-ns-resize ring-1 ring-blue-300/40"
+            : "cursor-grab hover:brightness-95 active:translate-y-[1px] active:shadow-3d-sm active:cursor-grabbing"
       }`}
+      style={{
+        backgroundColor: `${isCalendarSource ? (calColor || "#059669") : color}${isDone ? "0c" : "18"}`,
+        borderColor: `${isCalendarSource ? (calColor || "#059669") : color}${isDone ? "20" : "40"}`,
+      }}
     >
       {/* Content — top-left aligned, responsive to block height */}
       <div className={`flex flex-col px-2 ${height < 36 ? "flex-row items-start gap-1.5 pt-0.5" : "gap-0.5 pt-1.5"}`}>
         <div className="flex min-w-0 items-center gap-1.5">
-          {isCalendarSource ? (
-            <HugeiconsIcon icon={DashedLineCircleIcon} size={height < 36 ? 10 : 14} style={{ color: isDone ? "#71717a" : calColor || "#059669" }} className="shrink-0" />
+          {isDone ? (
+            <span
+              className="flex size-[16px] shrink-0 items-center justify-center rounded-full"
+              style={{ border: "2px solid #93c5fd", backgroundColor: "#93c5fd" }}
+            >
+              <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
+                <path d="M1.5 4L3.2 5.7L6.5 2.3" stroke="#ffffff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </span>
+          ) : isCalendarSource ? (
+            <span className="flex shrink-0 items-center justify-center">
+              <HugeiconsIcon icon={DashedLineCircleIcon} size={16} style={{ color: calColor || "#059669" }} />
+            </span>
           ) : (
             <span
-              className={`shrink-0 rounded-full ${height < 36 ? "size-[10px]" : "size-[14px]"}`}
-              style={{ border: `2px solid ${isDone ? "#71717a" : color}`, backgroundColor: isDone ? "#71717a" : "transparent" }}
+              className="flex size-[16px] shrink-0 items-center justify-center rounded-full"
+              style={{ border: `2px solid ${color}`, backgroundColor: "transparent" }}
             />
           )}
-          <p className={`min-w-0 truncate font-semibold ${isDone ? "text-[#71717a] line-through" : "text-white"} ${height < 36 ? "text-[11px]" : "text-[13px]"}`}>{task.title}</p>
+          <p className={`min-w-0 truncate font-semibold ${isDone ? "text-text-faint line-through decoration-text-faint" : "text-foreground"} ${height < 36 ? "text-[11px]" : "text-[13px]"}`}>{task.title}</p>
         </div>
         {height >= 44 && (
-          <p className={`truncate font-medium ${isDone ? "text-[#606068]" : "text-[#a1a1aa]"} ${height < 36 ? "text-[9px]" : "text-[11px]"}`} style={{ paddingLeft: height < 36 ? 0 : 20 }}>
+          <p className={`truncate font-medium ${isDone ? "text-text-faint" : "text-text-secondary"} ${height < 36 ? "text-[9px]" : "text-[11px]"}`} style={{ paddingLeft: height < 36 ? 0 : 20 }}>
             {fmtH}:{String(m).padStart(2, "0")} {ampm} – {endFmtH}:{String(endMin).padStart(2, "0")} {endAmpm}
           </p>
         )}
         {height < 44 && height >= 36 && (
-          <p className={`truncate pl-5 text-[10px] font-medium ${isDone ? "text-[#606068]" : "text-[#71717a]"}`}>
+          <p className={`truncate pl-5 text-[10px] font-medium ${isDone ? "text-text-faint" : "text-text-muted"}`}>
             {fmtH}:{String(m).padStart(2, "0")} {ampm}
           </p>
         )}
@@ -1240,7 +1244,7 @@ function ResizableTaskBlock({ task, dayStr, updateTask, style: overrideStyle }: 
           onMouseDown={handleResizeStart}
           className="absolute bottom-0 left-0 right-0 z-30 flex h-2.5 cursor-ns-resize items-center justify-center opacity-0 transition-opacity group-hover:opacity-100"
         >
-          <div className="h-[2px] w-8 rounded-full bg-[#a1a1aa]/60" />
+          <div className="h-[2px] w-8 rounded-full bg-text-secondary/60" />
         </div>
       )}
     </div>
@@ -1262,8 +1266,8 @@ function CurrentTimeLine() {
   return (
     <div className="pointer-events-none absolute left-0 right-0 z-20" style={{ top }}>
       <div className="flex items-center">
-        <div className="size-2 rounded-full bg-[#7c3aed]" />
-        <div className="h-[2px] flex-1 bg-[#7c3aed]" />
+        <div className="size-2 rounded-full bg-brand-strong" />
+        <div className="h-[2px] flex-1 bg-brand-strong" />
       </div>
     </div>
   );

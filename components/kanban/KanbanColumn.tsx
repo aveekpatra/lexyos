@@ -138,7 +138,7 @@ export default function KanbanColumn({ section, tasks }: KanbanColumnProps) {
         <Button
           variant="ghost"
           size="sm"
-          className="mt-2 justify-start"
+          className="mt-2 justify-start text-text-faint"
           onClick={() => setAddingTask(true)}
         >
           <HugeiconsIcon icon={Add01Icon} size={16} />

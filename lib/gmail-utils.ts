@@ -149,6 +149,7 @@ export function parseGmailMessage(raw: {
     attachments,
     isUnread: (raw.labelIds || []).includes("UNREAD"),
     isStarred: (raw.labelIds || []).includes("STARRED"),
+    messageIdHeader: getHeader(headers, "Message-ID") || getHeader(headers, "Message-Id"),
   };
 }
 

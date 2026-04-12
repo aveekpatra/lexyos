@@ -27,7 +27,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import {
   Add01Icon, FolderLibraryIcon, HashtagIcon, MoreHorizontalIcon,
   Delete01Icon, Calendar01Icon, Copy01Icon, Settings01Icon,
-  ArrowRight01Icon, ArrowLeft01Icon,
+  ArrowRight01Icon, ArrowLeft01Icon, SortingAZ01Icon,
 } from "@hugeicons/core-free-icons";
 import { format, parseISO } from "date-fns";
 import { PRIORITY_COLORS, PRIORITY_LABELS } from "@/lib/constants";
@@ -87,7 +87,7 @@ export default function ProjectsView() {
   if (projects === undefined) {
     return (
       <div className="flex flex-1">
-        <div className="w-56 border-r border-dashed border-[#3a3a48] p-4">
+        <div className="w-56 border-r border-dashed border-line-strong p-4">
           <Skeleton className="mb-4 h-6 w-32" />
           {[1, 2, 3].map((i) => <Skeleton key={i} className="mb-2 h-8 w-full" />)}
         </div>
@@ -102,7 +102,7 @@ export default function ProjectsView() {
     <div className="flex flex-1 overflow-hidden">
       {/* Resizable sidebar */}
       <div
-        className="flex shrink-0 flex-col border-r border-dashed border-[#3a3a48]"
+        className="flex shrink-0 flex-col border-r border-line"
         style={{ width: sidebarWidth }}
       >
         <ProjectSidebar
@@ -127,8 +127,8 @@ export default function ProjectsView() {
       ) : (
         <div className="flex flex-1 items-center justify-center">
           <div className="flex flex-col items-center gap-3">
-            <HugeiconsIcon icon={FolderLibraryIcon} size={28} className="text-[#52525b]" />
-            <span className="text-[13px] text-[#52525b]">
+            <HugeiconsIcon icon={FolderLibraryIcon} size={28} className="text-text-faint" />
+            <span className="text-[13px] text-text-faint">
               {(projects?.length ?? 0) === 0 ? "Create your first project" : "Select a project"}
             </span>
             {!showArchived && (projects?.length ?? 0) === 0 && (
@@ -145,6 +145,40 @@ export default function ProjectsView() {
   );
 }
 
+/* ─── Sort options ─── */
+type ProjectSort = "manual" | "name-asc" | "name-desc" | "date-newest" | "date-oldest" | "priority";
+
+const SORT_LABELS: Record<ProjectSort, string> = {
+  "manual": "Manual",
+  "name-asc": "Name (A → Z)",
+  "name-desc": "Name (Z → A)",
+  "date-newest": "Newest first",
+  "date-oldest": "Oldest first",
+  "priority": "Priority",
+};
+
+const PRIORITY_ORDER: Record<string, number> = { p1: 0, p2: 1, p3: 2, p4: 3 };
+
+function sortProjects(projects: Doc<"projects">[], sort: ProjectSort): Doc<"projects">[] {
+  const sorted = [...projects];
+  switch (sort) {
+    case "manual":
+      return sorted.sort((a, b) => a.sortOrder - b.sortOrder);
+    case "name-asc":
+      return sorted.sort((a, b) => a.name.localeCompare(b.name));
+    case "name-desc":
+      return sorted.sort((a, b) => b.name.localeCompare(a.name));
+    case "date-newest":
+      return sorted.sort((a, b) => b._creationTime - a._creationTime);
+    case "date-oldest":
+      return sorted.sort((a, b) => a._creationTime - b._creationTime);
+    case "priority":
+      return sorted.sort((a, b) => (PRIORITY_ORDER[a.priority ?? "p4"] ?? 3) - (PRIORITY_ORDER[b.priority ?? "p4"] ?? 3));
+    default:
+      return sorted;
+  }
+}
+
 /* ─── Sidebar ─── */
 function ProjectSidebar({ projects, selectedId, onSelect, onCreate, showArchived, onToggleArchived }: {
   projects: Doc<"projects">[]; selectedId: Id<"projects"> | null;
@@ -154,9 +188,34 @@ function ProjectSidebar({ projects, selectedId, onSelect, onCreate, showArchived
   const removeProject = useMutation(api.projects.remove);
   const updateProject = useMutation(api.projects.update);
   const duplicateProject = useMutation(api.projects.duplicate);
+  const reorderProjects = useMutation(api.projects.reorder);
+  const prefs = useQuery(api.userPreferences.get);
+  const setPrefs = useMutation(api.userPreferences.set);
   const [editingId, setEditingId] = useState<Id<"projects"> | null>(null);
   const [editName, setEditName] = useState("");
   const editRef = useRef<HTMLInputElement>(null);
+  const [dragOverId, setDragOverId] = useState<Id<"projects"> | null>(null);
+  const [draggedId, setDraggedId] = useState<Id<"projects"> | null>(null);
+  const [sort, setSortRaw] = useState<ProjectSort>(() => {
+    if (typeof window === "undefined") return "manual";
+    return (localStorage.getItem("unifocus:projects:sort") as ProjectSort) || "manual";
+  });
+
+  // Hydrate from Convex once loaded
+  useEffect(() => {
+    if (prefs?.projectSort) {
+      setSortRaw(prefs.projectSort as ProjectSort);
+      try { localStorage.setItem("unifocus:projects:sort", prefs.projectSort); } catch {}
+    }
+  }, [prefs?.projectSort]);
+
+  const setSort = useCallback((s: ProjectSort) => {
+    setSortRaw(s);
+    try { localStorage.setItem("unifocus:projects:sort", s); } catch {}
+    setPrefs({ projectSort: s }).catch(() => {});
+  }, [setPrefs]);
+
+  const sortedProjects = useMemo(() => sortProjects(projects, sort), [projects, sort]);
 
   function startRename(project: Doc<"projects">) {
     setEditingId(project._id);
@@ -172,52 +231,100 @@ function ProjectSidebar({ projects, selectedId, onSelect, onCreate, showArchived
   }
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between px-4 pb-3 pt-4">
-        <span className="text-[15px] font-bold text-white">
+    <div className="flex h-full flex-col py-3">
+      {/* Header with add + sort + archive toggle */}
+      <div className="flex items-center justify-between px-4 pb-2">
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-text-faint">
           {showArchived ? "Archived" : "Projects"}
         </span>
-        <div className="flex items-center gap-0.5">
+        <div className="flex items-center gap-1">
+          {!showArchived && (
+            <button
+              onClick={onCreate}
+              className="flex size-6 items-center justify-center rounded-md text-text-faint transition-colors hover:text-text-secondary"
+              title="New project"
+            >
+              <HugeiconsIcon icon={Add01Icon} size={14} strokeWidth={1.5} />
+            </button>
+          )}
+          <Menu>
+            <MenuTrigger
+              render={
+                <button
+                  className="flex size-6 items-center justify-center rounded-md text-text-faint transition-colors hover:text-text-secondary"
+                  title="Sort projects"
+                />
+              }
+            >
+              <HugeiconsIcon icon={SortingAZ01Icon} size={13} />
+            </MenuTrigger>
+            <MenuPopup>
+              {(Object.keys(SORT_LABELS) as ProjectSort[]).map((key) => (
+                <MenuItem key={key} onClick={() => setSort(key)}>
+                  {SORT_LABELS[key]}
+                  {sort === key && <span className="ml-auto text-[10px] text-text-muted">✓</span>}
+                </MenuItem>
+              ))}
+            </MenuPopup>
+          </Menu>
           <button
             onClick={onToggleArchived}
-            className={`flex size-7 items-center justify-center rounded-[6px] border transition-colors ${
+            className={`flex size-6 items-center justify-center rounded-md transition-colors ${
               showArchived
-                ? "border-[#3a3a48] bg-[#1f1f28] text-white shadow-[0_2px_0_0_rgba(0,0,0,0.3),inset_0_1px_0_0_rgba(255,255,255,0.05)]"
-                : "border-[#2a2a32] bg-[#16161e] text-[#71717a] shadow-[0_2px_0_0_rgba(0,0,0,0.3),inset_0_1px_0_0_rgba(255,255,255,0.03)] hover:border-[#3a3a48] hover:text-[#a1a1aa]"
+                ? "text-blue-700"
+                : "text-text-faint hover:text-text-secondary"
             }`}
             title={showArchived ? "Show active" : "Show archived"}
           >
             <HugeiconsIcon icon={showArchived ? ArrowLeft01Icon : FolderLibraryIcon} size={13} />
           </button>
-          {!showArchived && (
-            <button
-              onClick={onCreate}
-              className="flex size-7 items-center justify-center rounded-[6px] border border-[#2a2a32] bg-[#16161e] text-[#71717a] shadow-[0_2px_0_0_rgba(0,0,0,0.3),inset_0_1px_0_0_rgba(255,255,255,0.03)] transition-colors hover:border-[#3a3a48] hover:text-[#a1a1aa]"
-            >
-              <HugeiconsIcon icon={Add01Icon} size={13} />
-            </button>
-          )}
         </div>
       </div>
 
-      <nav className="flex flex-1 flex-col gap-0.5 overflow-y-auto px-2 pb-4">
-        {projects.length === 0 && (
+      <nav className="flex flex-1 flex-col gap-1.5 overflow-y-auto px-3 pb-1">
+        {sortedProjects.length === 0 && (
           <div className="flex flex-col items-center gap-2 px-2 py-8">
-            <HugeiconsIcon icon={FolderLibraryIcon} size={20} className="text-[#52525b]" />
-            <span className="text-[12px] text-[#52525b]">
+            <HugeiconsIcon icon={FolderLibraryIcon} size={20} className="text-text-faint" />
+            <span className="text-[12px] text-text-faint">
               {showArchived ? "No archived projects" : "No projects yet"}
             </span>
           </div>
         )}
-        {projects.map((project) => (
+        {sortedProjects.map((project) => (
           <ContextMenu key={project._id}>
             <ContextMenuTrigger
+              draggable={sort === "manual" && !editingId}
+              onDragStart={(e) => {
+                setDraggedId(project._id);
+                e.dataTransfer.effectAllowed = "move";
+              }}
+              onDragOver={(e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+                if (draggedId && draggedId !== project._id) setDragOverId(project._id);
+              }}
+              onDragLeave={() => { if (dragOverId === project._id) setDragOverId(null); }}
+              onDrop={(e) => {
+                e.preventDefault();
+                setDragOverId(null);
+                if (!draggedId || draggedId === project._id) return;
+                const fromIdx = sortedProjects.findIndex((p) => p._id === draggedId);
+                const toIdx = sortedProjects.findIndex((p) => p._id === project._id);
+                if (fromIdx === -1 || toIdx === -1) return;
+                const reordered = [...sortedProjects];
+                const [moved] = reordered.splice(fromIdx, 1);
+                reordered.splice(toIdx, 0, moved);
+                reorderProjects({ orderedIds: reordered.map((p) => p._id) }).catch(() => {});
+              }}
+              onDragEnd={() => { setDraggedId(null); setDragOverId(null); }}
               onClick={() => onSelect(project._id)}
-              className={`flex w-full cursor-pointer items-center gap-2.5 rounded-[8px] border px-3 py-2.5 text-left text-[14px] transition-all ${
-                selectedId === project._id
-                  ? "border-[#3a3a48] bg-[#1f1f28] text-white shadow-[0_2px_0_0_rgba(0,0,0,0.3),inset_0_1px_0_0_rgba(255,255,255,0.05)]"
-                  : "border-transparent text-[#a1a1aa] hover:border-[#2a2a32] hover:bg-[#18181d] hover:text-white hover:shadow-[0_2px_0_0_rgba(0,0,0,0.2),inset_0_1px_0_0_rgba(255,255,255,0.03)]"
-              }`}
+              className={`flex w-full cursor-pointer items-center gap-2.5 rounded-[10px] border px-3 py-2.5 text-left text-[13px] shadow-3d transition-all active:translate-y-[1px] active:shadow-3d-sm ${
+                dragOverId === project._id
+                  ? "border-brand bg-brand-bg"
+                  : selectedId === project._id
+                    ? "border-blue-300 bg-blue-100 text-blue-700 dark:border-blue-500/40 dark:bg-blue-950/50 dark:text-blue-400"
+                    : "border-line bg-surface-1 text-text-secondary hover:border-blue-200 hover:bg-blue-50/60 hover:text-text-strong dark:border-white/10 dark:hover:border-blue-500/40 dark:hover:bg-blue-950/30"
+              } ${draggedId === project._id ? "opacity-40" : ""}`}
             >
               <HugeiconsIcon icon={HashtagIcon} size={14} color={project.color} />
               {editingId === project._id ? (
@@ -233,10 +340,10 @@ function ProjectSidebar({ projects, selectedId, onSelect, onCreate, showArchived
                   onBlur={commitRename}
                   onClick={(e) => e.stopPropagation()}
                   onContextMenu={(e) => e.stopPropagation()}
-                  className="flex-1 truncate bg-transparent text-[14px] text-white outline-none"
+                  className="flex-1 truncate bg-transparent text-[13px] font-medium text-foreground outline-none"
                 />
               ) : (
-                <span className="flex-1 truncate">{project.name}</span>
+                <span className="flex-1 truncate font-medium">{project.name}</span>
               )}
             </ContextMenuTrigger>
             <ContextMenuPopup>
@@ -248,7 +355,7 @@ function ProjectSidebar({ projects, selectedId, onSelect, onCreate, showArchived
                     <MenuItem key={p} onClick={() => updateProject({ id: project._id, priority: p })}>
                       <span className="size-2 rounded-full" style={{ backgroundColor: PRIORITY_COLORS[p] }} />
                       {PRIORITY_LABELS[p]}
-                      {project.priority === p && <span className="ml-auto text-[10px] text-[#71717a]">✓</span>}
+                      {project.priority === p && <span className="ml-auto text-[10px] text-text-muted">✓</span>}
                     </MenuItem>
                   ))}
                   <MenuSeparator />
@@ -295,10 +402,10 @@ function ArchivedProjectView({ project }: { project: Doc<"projects"> }) {
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
-      <div className="flex items-center justify-between border-b border-[#2a2a32] px-6 py-3">
+      <div className="flex items-center justify-between border-b border-line-strong px-6 py-3">
         <div className="flex items-center gap-3">
           <HugeiconsIcon icon={HashtagIcon} size={18} color={project.color} />
-          <h1 className="text-[15px] font-bold text-white">{project.name}</h1>
+          <h1 className="text-[15px] font-bold text-foreground">{project.name}</h1>
           <Badge variant="secondary" size="sm">Archived</Badge>
         </div>
         <Button size="sm" variant="outline" onClick={() => updateProject({ id: project._id, status: "active" })}>
@@ -311,7 +418,7 @@ function ArchivedProjectView({ project }: { project: Doc<"projects"> }) {
             {tasks.map((t) => <KanbanCard key={t._id} task={t} context="project" />)}
           </div>
         ) : (
-          <span className="text-[13px] text-[#52525b]">No tasks in this project.</span>
+          <span className="text-[13px] text-text-faint">No tasks in this project.</span>
         )}
       </div>
     </div>
@@ -366,24 +473,10 @@ function ProjectBoard({ project }: { project: Doc<"projects"> }) {
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-[#2a2a32] px-6 py-3">
-        {/* Left: name + priority */}
+      <div className="flex items-center justify-between border-b border-line-strong px-6 py-3">
+        {/* Left: name */}
         <div className="flex items-center gap-3">
-          <HugeiconsIcon icon={HashtagIcon} size={16} color={project.color} />
-          <span className="text-sm font-semibold text-white">{project.name}</span>
-          {project.priority && (
-            <span
-              className="rounded-[5px] px-2 py-0.5 text-[11px] font-bold tracking-wide"
-              style={{
-                color: PRIORITY_COLORS[project.priority],
-                backgroundColor: PRIORITY_COLORS[project.priority] + "14",
-                border: `1px solid ${PRIORITY_COLORS[project.priority]}25`,
-                boxShadow: `0 1px 3px ${PRIORITY_COLORS[project.priority]}10, inset 0 1px 0 rgba(255,255,255,0.04)`,
-              }}
-            >
-              {PRIORITY_LABELS[project.priority]}
-            </span>
-          )}
+          <span className="text-[15px] font-semibold text-foreground">{project.name}</span>
         </div>
 
         {/* Right: dates + menu */}
@@ -488,7 +581,7 @@ function GTDColumn({ column, tasks, allTasks, projectId, isLast, isAdding, onSta
 
   return (
     <div
-      className={`relative flex min-w-[260px] flex-1 flex-col ${!isLast ? "border-r border-dashed border-[#3a3a48]" : ""}`}
+      className={`relative flex min-w-[260px] flex-1 flex-col ${!isLast ? "border-r border-dashed border-line-strong" : ""}`}
       onDragEnter={(e) => { e.preventDefault(); dragCounter.current++; setIsOver(true); }}
       onDragLeave={() => { dragCounter.current--; if (dragCounter.current <= 0) { dragCounter.current = 0; setIsOver(false); } }}
       onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
@@ -496,17 +589,17 @@ function GTDColumn({ column, tasks, allTasks, projectId, isLast, isAdding, onSta
     >
       {/* Drop indicator */}
       {isOver && (
-        <div className="pointer-events-none absolute inset-2 z-20 rounded-xl border-2 border-dashed border-[#a78bfa]/60 bg-[#a78bfa]/5" />
+        <div className="pointer-events-none absolute inset-2 z-20 rounded-xl border-2 border-dashed border-brand/60 bg-brand/5" />
       )}
 
       <div className="flex items-center gap-2 px-5 pb-3 pt-4">
-        <span className="text-[15px] font-bold text-[#f4f4f5]">{column.label}</span>
-        <span className="text-[13px] font-medium text-[#71717a]">{tasks.length}</span>
+        <span className="text-[15px] font-bold text-brand">{column.label}</span>
+        <span className="text-[13px] font-medium text-text-secondary">{tasks.length}</span>
       </div>
       <div
         onClick={() => { if (!isAdding) onStartAdd(); }}
         className={`mx-5 mb-3 flex items-center justify-between rounded-[10px] border px-3.5 py-2.5 transition-colors ${
-          isAdding ? "border-[#4a4a58] bg-[#1a1a22]" : "cursor-pointer border-[#333340] bg-[#16161e] hover:border-[#4a4a58] hover:bg-[#1e1e28]"
+          isAdding ? "border-line-strong bg-surface-1" : "cursor-pointer border-line-strong bg-surface-0 hover:border-line-strong hover:bg-surface-1"
         }`}
       >
         {isAdding ? (
@@ -514,10 +607,10 @@ function GTDColumn({ column, tasks, allTasks, projectId, isLast, isAdding, onSta
             placeholder="Enter = quick add, Tab = full editor, Esc = cancel"
             onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleAdd(); } if (e.key === "Tab") { e.preventDefault(); onStopAdd(); setCreateDialogOpen(true); } if (e.key === "Escape") onStopAdd(); }}
             onBlur={() => { if (!newTitle.trim()) onStopAdd(); }}
-            className="flex-1 bg-transparent text-sm text-white outline-none placeholder:text-[#71717a]" />
+            className="flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-text-muted" />
         ) : (
           <>
-            <span className="flex items-center gap-2.5 text-sm text-[#a1a1aa]">
+            <span className="flex items-center gap-2.5 text-sm text-text-faint">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><circle cx="8" cy="8" r="6.5" /><path d="M8 5v6M5 8h6" /></svg>
               Add new task
             </span>
@@ -530,8 +623,8 @@ function GTDColumn({ column, tasks, allTasks, projectId, isLast, isAdding, onSta
           <div className="flex flex-col gap-1.5">{tasks.map((t) => <KanbanCard key={t._id} task={t} context="project" />)}</div>
         ) : (
           <div className="mt-auto flex items-center gap-2 pb-2">
-            <span className="text-[12px] tracking-wide text-[#52525b]">No tasks</span>
-            <span className="flex size-[18px] items-center justify-center rounded-[5px] border border-[#3a3a48] bg-[#1a1a22] text-[10px] font-bold text-[#606068] shadow-[0_2px_0_0_rgba(0,0,0,0.4),inset_0_1px_0_0_rgba(255,255,255,0.04)]">0</span>
+            <span className="text-[12px] tracking-wide text-text-faint">No tasks</span>
+            <span className="flex size-[18px] items-center justify-center rounded-[5px] border border-line-strong bg-surface-1 text-[10px] font-bold text-text-faint shadow-3d">0</span>
           </div>
         )}
       </div>
@@ -553,8 +646,8 @@ function ProjectDatePicker({ projectId, startDate, dueDate }: {
         render={
           <button className={`flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-[12px] font-medium transition-all ${
             hasAnyDate
-              ? "border border-[#2a2a32] bg-[#16161e] text-[#a1a1aa] hover:border-[#3a3a48] hover:bg-[#1e1e28]"
-              : "text-[#52525b] hover:text-[#a1a1aa]"
+              ? "border border-line-strong bg-surface-0 text-text-secondary hover:border-line-strong hover:bg-surface-1"
+              : "text-text-faint hover:text-text-secondary"
           }`} />
         }
       >
@@ -562,7 +655,7 @@ function ProjectDatePicker({ projectId, startDate, dueDate }: {
         {hasAnyDate ? (
           <span>
             {startDate && format(parseISO(startDate), "MMM d")}
-            {startDate && dueDate && <span className="mx-1 text-[#52525b]">→</span>}
+            {startDate && dueDate && <span className="mx-1 text-text-faint">→</span>}
             {dueDate && format(parseISO(dueDate), "MMM d")}
           </span>
         ) : (
@@ -570,10 +663,10 @@ function ProjectDatePicker({ projectId, startDate, dueDate }: {
         )}
       </PopoverTrigger>
       <PopoverPopup side="bottom" align="end" sideOffset={8} className="p-0 w-auto">
-        <div className="flex divide-x divide-[#2a2a32]">
+        <div className="flex divide-x divide-line-strong">
           {/* Start date */}
           <div className="flex flex-col">
-            <div className="px-4 py-2.5 text-[11px] font-bold uppercase tracking-wider text-[#71717a]">
+            <div className="px-4 py-2.5 text-[11px] font-bold uppercase tracking-wider text-text-muted">
               Start
             </div>
             <Calendar
@@ -597,7 +690,7 @@ function ProjectDatePicker({ projectId, startDate, dueDate }: {
           </div>
           {/* Due date */}
           <div className="flex flex-col">
-            <div className="px-4 py-2.5 text-[11px] font-bold uppercase tracking-wider text-[#71717a]">
+            <div className="px-4 py-2.5 text-[11px] font-bold uppercase tracking-wider text-text-muted">
               Due
             </div>
             <Calendar

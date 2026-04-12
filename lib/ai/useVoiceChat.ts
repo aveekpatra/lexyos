@@ -15,6 +15,8 @@ import { useState, useRef, useCallback, useEffect } from "react";
 
 const CARTESIA_API_KEY = process.env.NEXT_PUBLIC_CARTESIA_API_KEY || "";
 const STT_MODEL = "ink-whisper";
+const TTS_MODEL = "sonic-2";
+const TTS_VOICE_ID = process.env.NEXT_PUBLIC_CARTESIA_VOICE_ID || "694f9389-aac1-45b6-b726-9d9369183238";
 
 /** How long of silence (ms) before auto-submitting in call mode */
 const SILENCE_TIMEOUT_MS = 1800;
@@ -311,4 +313,49 @@ export function useVoiceChat({ onTranscript, onAutoSubmit }: UseVoiceChatOpts) {
     toggleCallMode,
     stopCallMode,
   };
+}
+
+/**
+ * Play text as speech using Cartesia TTS REST API.
+ * Returns a promise that resolves when playback finishes.
+ */
+export async function playCartesiaTTS(text: string): Promise<void> {
+  if (!CARTESIA_API_KEY || !text.trim()) return;
+
+  const res = await fetch("https://api.cartesia.ai/tts/bytes", {
+    method: "POST",
+    headers: {
+      "X-API-Key": CARTESIA_API_KEY,
+      "Cartesia-Version": "2024-06-10",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model_id: TTS_MODEL,
+      transcript: text,
+      voice: { mode: "id", id: TTS_VOICE_ID },
+      output_format: { container: "wav", encoding: "pcm_s16le", sample_rate: 24000 },
+    }),
+  });
+
+  if (!res.ok) {
+    console.error("[TTS] Cartesia error:", res.status, await res.text().catch(() => ""));
+    return;
+  }
+
+  const arrayBuffer = await res.arrayBuffer();
+  const audioCtx = new AudioContext({ sampleRate: 24000 });
+
+  try {
+    const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+    const source = audioCtx.createBufferSource();
+    source.buffer = audioBuffer;
+    source.connect(audioCtx.destination);
+    source.start();
+
+    await new Promise<void>((resolve) => {
+      source.onended = () => resolve();
+    });
+  } finally {
+    await audioCtx.close();
+  }
 }

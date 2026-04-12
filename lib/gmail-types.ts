@@ -26,6 +26,7 @@ export interface GmailMessage {
   attachments: GmailAttachment[];
   isUnread: boolean;
   isStarred: boolean;
+  messageIdHeader: string;
 }
 
 export interface GmailThread {

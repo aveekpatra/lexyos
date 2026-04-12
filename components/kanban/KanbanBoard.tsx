@@ -315,22 +315,22 @@ export default function KanbanBoard() {
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
       {/* Header */}
-      <div className="flex shrink-0 items-center justify-between border-b border-[#2a2a32] px-6 py-3">
+      <div className="flex shrink-0 items-center justify-between border-b border-line-strong px-6 py-3">
         <div className="flex items-center gap-4">
-          <h1 className="text-[15px] font-bold tracking-tight text-white">Upcoming</h1>
-          <div className="relative flex items-center rounded-[10px] border border-[#2a2a36] bg-[#131318] p-[3px] shadow-[0_2px_0_0_rgba(0,0,0,0.4),inset_0_1px_0_0_rgba(255,255,255,0.04)]">
+          <h1 className="text-[15px] font-bold tracking-tight text-foreground">Upcoming</h1>
+          <div className="relative flex items-center rounded-[10px] border border-line-strong bg-surface-0 p-[3px] shadow-3d">
             {views.map((v) => (
               <button
                 key={v.id}
                 onClick={() => setView(v.id)}
                 className={`relative z-10 rounded-[7px] px-2.5 py-1 text-xs font-medium transition-colors ${
-                  view === v.id ? "text-white" : "text-[#71717a] hover:text-[#a1a1aa]"
+                  view === v.id ? "text-foreground" : "text-text-muted hover:text-text-secondary"
                 }`}
               >
                 {view === v.id && (
                   <motion.div
                     layoutId="view-tab-indicator"
-                    className="absolute inset-0 rounded-[7px] border border-[#3a3a4a] bg-[#2a2a38] shadow-[0_1px_0_0_rgba(0,0,0,0.3),inset_0_1px_0_0_rgba(255,255,255,0.06)]"
+                    className="absolute inset-0 rounded-[7px] border border-line-strong bg-brand-bg shadow-3d-sm"
                     transition={{ type: "spring", stiffness: 400, damping: 30 }}
                   />
                 )}
@@ -345,7 +345,7 @@ export default function KanbanBoard() {
           {/* Sort */}
           <Menu>
             <MenuTrigger render={
-              <button className="inline-flex h-7 items-center gap-1.5 rounded-[10px] border border-[#2a2a36] bg-[#131318] px-2.5 text-xs font-medium text-[#a1a1aa] shadow-[0_2px_0_0_rgba(0,0,0,0.4),inset_0_1px_0_0_rgba(255,255,255,0.04)] transition-colors hover:border-[#3a3a4a] hover:text-white" />
+              <button className="inline-flex h-7 items-center gap-1.5 rounded-[10px] border border-line-strong bg-surface-0 px-2.5 text-xs font-medium text-text-secondary shadow-3d transition-colors hover:border-line-strong hover:text-foreground" />
             }>
               <HugeiconsIcon icon={SortingAZ01Icon} size={13} />
               <span>{SORT_LABELS[sortBy]}</span>
@@ -363,8 +363,8 @@ export default function KanbanBoard() {
           {/* Filter */}
           <Menu>
             <MenuTrigger render={
-              <button className={`inline-flex h-7 items-center gap-1.5 rounded-[10px] border bg-[#131318] px-2.5 text-xs font-medium shadow-[0_2px_0_0_rgba(0,0,0,0.4),inset_0_1px_0_0_rgba(255,255,255,0.04)] transition-colors hover:border-[#3a3a4a] hover:text-white ${
-                isFiltered ? "border-[#a78bfa]/30 text-[#a78bfa]" : "border-[#2a2a36] text-[#a1a1aa]"
+              <button className={`inline-flex h-7 items-center gap-1.5 rounded-[10px] border bg-surface-0 px-2.5 text-xs font-medium shadow-3d transition-colors hover:border-line-strong hover:text-foreground ${
+                isFiltered ? "border-brand/30 text-brand" : "border-line-strong text-text-secondary"
               }`} />
             }>
               <HugeiconsIcon icon={FilterIcon} size={13} />
@@ -413,8 +413,8 @@ export default function KanbanBoard() {
           {/* Show done toggle */}
           <button
             onClick={() => setShowDone(!showDone)}
-            className={`inline-flex h-7 items-center gap-1.5 rounded-[10px] border bg-[#131318] px-2.5 text-xs font-medium shadow-[0_2px_0_0_rgba(0,0,0,0.4),inset_0_1px_0_0_rgba(255,255,255,0.04)] transition-colors hover:border-[#3a3a4a] hover:text-white ${
-              showDone ? "border-[#a78bfa]/30 text-[#a78bfa]" : "border-[#2a2a36] text-[#a1a1aa]"
+            className={`inline-flex h-7 items-center gap-1.5 rounded-[10px] border bg-surface-0 px-2.5 text-xs font-medium shadow-3d transition-colors hover:border-line-strong hover:text-foreground ${
+              showDone ? "border-brand/30 text-brand" : "border-line-strong text-text-secondary"
             }`}
           >
             <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -507,10 +507,10 @@ function DayViewHourBlocks({ tasks, columnId }: { tasks: Doc<"tasks">[]; columnI
           <div key={h} className="relative">
             {/* Hour label with dashed line */}
             <div className="flex items-center gap-2 py-1.5">
-              <span className={`shrink-0 text-[11px] font-medium tabular-nums ${isCurrentHour ? "text-[#a78bfa]" : "text-[#52525b]"}`}>
+              <span className={`shrink-0 text-[11px] font-medium tabular-nums ${isCurrentHour ? "text-brand" : "text-text-faint"}`}>
                 {formatHour(h)}
               </span>
-              <div className={`h-px flex-1 ${isCurrentHour ? "border-t border-dashed border-[#a78bfa]/40" : "border-t border-dashed border-[#2a2a32]"}`} />
+              <div className={`h-px flex-1 ${isCurrentHour ? "border-t border-dashed border-brand/40" : "border-t border-dashed border-line-strong"}`} />
             </div>
 
             {/* Tasks in this hour */}
@@ -706,7 +706,7 @@ function UpcomingColumn({ column, isLast, isAdding, onStartAdd, onStopAdd, apply
   return (
     <div
       data-column-id={column.id}
-      className={`relative flex flex-col overflow-hidden ${widthClass} ${!isLast ? "border-r border-dashed border-[#3a3a48]" : ""}`}
+      className={`relative flex flex-col overflow-hidden ${widthClass} ${!isLast ? "border-r border-dashed border-line-strong" : ""}`}
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}
       onDragOver={handleDragOver}
@@ -719,21 +719,23 @@ function UpcomingColumn({ column, isLast, isAdding, onStartAdd, onStopAdd, apply
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.15 }}
-          className="pointer-events-none absolute inset-2 z-20 rounded-xl border-2 border-dashed border-[#a78bfa]/60 bg-[#a78bfa]/5"
+          className="pointer-events-none absolute inset-2 z-20 rounded-xl border-2 border-dashed border-brand/60 bg-brand/5"
         />
       )}
 
       {/* Header */}
       <div className="flex items-center gap-2 px-5 pb-3 pt-4">
-        <span className="text-[15px] font-bold text-[#a78bfa]">{column.title}</span>
-        {column.subtitle && <span className="text-sm text-[#a1a1aa]">{column.subtitle}</span>}
+        <span className="text-[15px] font-bold text-brand">{column.title}</span>
+        {column.subtitle && <span className="text-sm text-text-secondary">{column.subtitle}</span>}
       </div>
 
       {/* Add task — click opens inline quick-add, Tab opens full dialog */}
       <div
         onClick={() => { if (!isAdding) onStartAdd(); }}
-        className={`mx-5 mb-3 flex items-center justify-between rounded-[10px] border px-3.5 py-2.5 transition-colors ${
-          isAdding ? "border-[#4a4a58] bg-[#1a1a22]" : "cursor-pointer border-[#333340] bg-[#16161e] hover:border-[#4a4a58] hover:bg-[#1e1e28]"
+        className={`mx-5 mb-3 flex items-center justify-between rounded-[10px] border px-3.5 py-2.5 transition-all ${
+          isAdding
+            ? "border-blue-300 bg-blue-50 shadow-3d dark:border-blue-500/40 dark:bg-blue-950/30"
+            : "cursor-pointer border-line-strong bg-surface-1 shadow-3d hover:border-blue-200 hover:bg-blue-50/60 hover:shadow-3d active:translate-y-[1px] active:shadow-3d-sm dark:border-white/10 dark:hover:border-blue-500/40 dark:hover:bg-blue-950/30"
         }`}
       >
         {isAdding ? (
@@ -746,16 +748,16 @@ function UpcomingColumn({ column, isLast, isAdding, onStartAdd, onStopAdd, apply
               if (e.key === "Escape") onStopAdd();
             }}
             onBlur={() => { if (!newTitle.trim()) onStopAdd(); }}
-            className="flex-1 bg-transparent text-sm text-white outline-none placeholder:text-[#71717a]"
+            className="flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-text-muted"
           />
         ) : (
           <>
-            <span className="flex items-center gap-2.5 text-sm text-[#a1a1aa]">
+            <span className="flex items-center gap-2.5 text-sm text-text-faint">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><circle cx="8" cy="8" r="6.5" /><path d="M8 5v6M5 8h6" /></svg>
               Add new task
             </span>
             {column.shortcut && (
-              <span className="flex size-[22px] items-center justify-center rounded-[5px] bg-[#28283a] text-[11px] font-bold text-[#a1a1aa] shadow-[0_1px_0_0_rgba(0,0,0,0.4),inset_0_1px_0_0_rgba(255,255,255,0.06)]">
+              <span className="flex size-[22px] items-center justify-center rounded-[5px] bg-line-strong text-[11px] font-bold text-text-secondary shadow-3d-sm">
                 {column.shortcut}
               </span>
             )}
@@ -770,7 +772,7 @@ function UpcomingColumn({ column, isLast, isAdding, onStartAdd, onStopAdd, apply
             <div className="mb-2 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <span className="text-[13px] font-bold text-[#ef4444]">Overdue</span>
-                <span className="text-[13px] font-medium text-[#a1a1aa]">{sortedOverdue.length}</span>
+                <span className="text-[13px] font-medium text-text-secondary">{sortedOverdue.length}</span>
               </div>
             </div>
             <div className="flex flex-col gap-1.5">
@@ -794,10 +796,10 @@ function UpcomingColumn({ column, isLast, isAdding, onStartAdd, onStopAdd, apply
 
         {/* Done tasks */}
         {showDone && doneTasks.length > 0 && (
-          <div className="mt-4 border-t border-[#2a2a32] pt-3">
+          <div className="mt-4 border-t border-line-strong pt-3">
             <div className="mb-2 flex items-center gap-2">
-              <span className="text-[12px] font-medium text-[#52525b]">Completed</span>
-              <span className="flex size-[16px] items-center justify-center rounded-full border border-[#3a3a48] text-[9px] font-medium text-[#52525b]">
+              <span className="text-[12px] font-medium text-text-faint">Completed</span>
+              <span className="flex size-[16px] items-center justify-center rounded-full border border-line-strong text-[9px] font-medium text-text-faint">
                 {doneTasks.length}
               </span>
             </div>
@@ -809,8 +811,8 @@ function UpcomingColumn({ column, isLast, isAdding, onStartAdd, onStopAdd, apply
 
         {totalTasks === 0 && !showDone && (
           <div className="mt-auto flex items-center gap-2 pb-1">
-            <span className="text-[12px] tracking-wide text-[#52525b]">No tasks</span>
-            <span className="flex size-[18px] items-center justify-center rounded-[5px] border border-[#3a3a48] bg-[#1a1a22] text-[10px] font-bold text-[#606068] shadow-[0_2px_0_0_rgba(0,0,0,0.4),inset_0_1px_0_0_rgba(255,255,255,0.04)]">0</span>
+            <span className="text-[12px] tracking-wide text-text-faint">No tasks</span>
+            <span className="flex size-[18px] items-center justify-center rounded-[5px] border border-line-strong bg-surface-1 text-[10px] font-bold text-text-faint shadow-3d">0</span>
           </div>
         )}
       </div>

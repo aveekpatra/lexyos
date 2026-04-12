@@ -20,11 +20,11 @@ import {
  * Shared styles
  * ──────────────────────────────────────────────────────── */
 
-const popoverClass = "w-[260px] rounded-xl border border-[#2a2a36] bg-[#131318] p-0 shadow-[0_8px_32px_rgba(0,0,0,0.5)]";
-const inputClass = "w-full border-b border-[#1f1f28] bg-transparent px-3.5 py-2.5 text-sm text-white outline-none placeholder:text-[#52525b]";
-const itemClass = "flex w-full cursor-pointer items-center justify-between rounded-lg px-3.5 py-2 text-sm text-[#d4d4d8] transition-colors duration-100 hover:bg-[#1f1f28]";
-const removeClass = "flex w-full cursor-pointer items-center gap-2 rounded-lg px-3.5 py-2 text-sm text-[#ef4444] transition-colors duration-100 hover:bg-[#1f1f28]";
-const sectionClass = "px-3.5 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wider text-[#52525b]";
+const popoverClass = "w-[260px] rounded-xl border border-line-strong bg-surface-0 p-0 shadow-3d";
+const inputClass = "w-full border-b border-line bg-transparent px-3.5 py-2.5 text-sm text-foreground outline-none placeholder:text-text-faint";
+const itemClass = "flex w-full cursor-pointer items-center justify-between rounded-lg px-3.5 py-2 text-sm text-text-strong transition-colors duration-100 hover:bg-line";
+const removeClass = "flex w-full cursor-pointer items-center gap-2 rounded-lg px-3.5 py-2 text-sm text-[#ef4444] transition-colors duration-100 hover:bg-line";
+const sectionClass = "px-3.5 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wider text-text-faint";
 
 /* ────────────────────────────────────────────────────────
  * DatePickerPopover
@@ -100,7 +100,7 @@ export const DatePickerPopover = memo(function DatePickerPopover({
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger render={<button type="button" draggable={false} className="inline-flex" />}>
+      <PopoverTrigger render={<span role="button" tabIndex={0} draggable={false} className="inline-flex cursor-pointer" />}>
         {children}
       </PopoverTrigger>
       <PopoverPopup className={popoverClass} sideOffset={6}>
@@ -126,16 +126,16 @@ export const DatePickerPopover = memo(function DatePickerPopover({
             >
               <span className="flex items-center gap-2.5">
                 {preset.icon && (
-                  <HugeiconsIcon icon={preset.icon} size={14} className="text-[#71717a]" />
+                  <HugeiconsIcon icon={preset.icon} size={14} className="text-text-muted" />
                 )}
                 {preset.label}
               </span>
-              <span className="text-xs text-[#71717a]">{preset.detail}</span>
+              <span className="text-xs text-text-muted">{preset.detail}</span>
             </button>
           ))}
         </div>
         {value && (
-          <div className="border-t border-[#1f1f28] p-1.5">
+          <div className="border-t border-line p-1.5">
             <button onClick={() => select(undefined)} className={removeClass}>
               <HugeiconsIcon icon={Delete02Icon} size={14} />
               Remove
@@ -211,7 +211,7 @@ export const DurationPickerPopover = memo(function DurationPickerPopover({
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger render={<button type="button" draggable={false} className="inline-flex" />}>
+      <PopoverTrigger render={<span role="button" tabIndex={0} draggable={false} className="inline-flex cursor-pointer" />}>
         {children}
       </PopoverTrigger>
       <PopoverPopup className={popoverClass} sideOffset={6}>
@@ -238,14 +238,14 @@ export const DurationPickerPopover = memo(function DurationPickerPopover({
             <button
               key={preset.minutes}
               onClick={() => select(preset.minutes)}
-              className={`${itemClass} ${value === preset.minutes ? "bg-[#1f1f28]" : ""}`}
+              className={`${itemClass} ${value === preset.minutes ? "bg-brand-bg text-brand-strong" : ""}`}
             >
               {preset.label}
             </button>
           ))}
         </div>
         {value !== undefined && value > 0 && (
-          <div className="border-t border-[#1f1f28] p-1.5">
+          <div className="border-t border-line p-1.5">
             <button onClick={() => select(undefined)} className={removeClass}>
               <HugeiconsIcon icon={Delete02Icon} size={14} />
               Remove
@@ -297,7 +297,7 @@ export const ProjectPickerPopover = memo(function ProjectPickerPopover({
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger render={<button type="button" draggable={false} className="inline-flex" />}>
+      <PopoverTrigger render={<span role="button" tabIndex={0} draggable={false} className="inline-flex cursor-pointer" />}>
         {children}
       </PopoverTrigger>
       <PopoverPopup className={popoverClass} sideOffset={6}>
@@ -323,11 +323,11 @@ export const ProjectPickerPopover = memo(function ProjectPickerPopover({
                 <button
                   key={project._id}
                   onClick={() => select(project._id)}
-                  className={`${itemClass} ${value === project._id ? "bg-[#1f1f28]" : ""}`}
+                  className={`${itemClass} ${value === project._id ? "bg-brand-bg text-brand-strong" : ""}`}
                 >
                   <span className="flex items-center gap-2.5">
                     <span
-                      className="flex size-5 items-center justify-center rounded-md text-[10px] font-bold text-white"
+                      className="flex size-5 items-center justify-center rounded-md text-[10px] font-bold text-foreground"
                       style={{ backgroundColor: project.color || "#6366f1" }}
                     >
                       {project.name[0]?.toUpperCase()}
@@ -341,13 +341,13 @@ export const ProjectPickerPopover = memo(function ProjectPickerPopover({
         )}
 
         {filtered.length === 0 && (
-          <div className="px-3.5 py-4 text-center text-sm text-[#52525b]">
+          <div className="px-3.5 py-4 text-center text-sm text-text-faint">
             No projects found
           </div>
         )}
 
         {value && (
-          <div className="border-t border-[#1f1f28] p-1.5">
+          <div className="border-t border-line p-1.5">
             <button onClick={() => select(undefined)} className={removeClass}>
               <HugeiconsIcon icon={Delete02Icon} size={14} />
               Remove project
@@ -433,7 +433,7 @@ export const TimePickerPopover = memo(function TimePickerPopover({
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger render={<button type="button" draggable={false} className="inline-flex" />}>
+      <PopoverTrigger render={<span role="button" tabIndex={0} draggable={false} className="inline-flex cursor-pointer" />}>
         {children}
       </PopoverTrigger>
       <PopoverPopup className={popoverClass} sideOffset={6}>
@@ -455,14 +455,14 @@ export const TimePickerPopover = memo(function TimePickerPopover({
             <button
               key={t.value}
               onClick={() => select(t.value)}
-              className={`${itemClass} ${value === t.value ? "bg-[#1f1f28]" : ""}`}
+              className={`${itemClass} ${value === t.value ? "bg-brand-bg text-brand-strong" : ""}`}
             >
               {t.label}
             </button>
           ))}
         </div>
         {value && (
-          <div className="border-t border-[#1f1f28] p-1.5">
+          <div className="border-t border-line p-1.5">
             <button onClick={() => select(undefined)} className={removeClass}>
               <HugeiconsIcon icon={Delete02Icon} size={14} />
               Remove
@@ -491,8 +491,8 @@ export const TaskChip = memo(function TaskChip({ children, active, className = "
       onClick={onClick}
       className={`inline-flex cursor-pointer items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] font-medium transition-colors duration-100 ${
         active
-          ? "border-[#3a3a4a] bg-[#1f1f28] text-white shadow-[0_1px_0_0_rgba(0,0,0,0.3),inset_0_1px_0_0_rgba(255,255,255,0.04)]"
-          : "border-[#2a2a36] bg-[#16161e] text-[#a1a1aa] shadow-[0_1px_0_0_rgba(0,0,0,0.3),inset_0_1px_0_0_rgba(255,255,255,0.03)] hover:border-[#3a3a4a] hover:text-white"
+          ? "border-blue-200 bg-blue-50 text-blue-700 shadow-3d-sm hover:border-blue-300 hover:bg-blue-100 dark:border-brand-border dark:bg-brand-bg dark:text-brand"
+          : "border-line bg-surface-1 text-text-muted shadow-3d-sm hover:border-line-strong hover:bg-surface-2 hover:text-text-strong"
       } ${className}`}
     >
       {children}

@@ -171,6 +171,24 @@ export const duplicate = mutation({
   },
 });
 
+export const reorder = mutation({
+  args: {
+    orderedIds: v.array(v.id("projects")),
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Not authenticated");
+    const userId = identity.subject;
+
+    for (let i = 0; i < args.orderedIds.length; i++) {
+      const project = await ctx.db.get(args.orderedIds[i]);
+      if (project && project.userId === userId) {
+        await ctx.db.patch(args.orderedIds[i], { sortOrder: i });
+      }
+    }
+  },
+});
+
 export const remove = mutation({
   args: { id: v.id("projects") },
   handler: async (ctx, args) => {

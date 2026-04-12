@@ -2,6 +2,7 @@ import { generateText } from "ai";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { createTools } from "@/lib/ai/tools";
 import { auth } from "@clerk/nextjs/server";
+import { getGoogleAccessToken } from "@/app/actions/google-auth";
 
 export const maxDuration = 60;
 
@@ -13,19 +14,22 @@ const SYSTEM_PROMPT = `You are UniFocus AI — a personal task and calendar mana
 - Check today's schedule, find free time, plan days
 - Answer questions about what's coming up, what's overdue, priorities
 - Find tasks by name and act on them (reschedule, reprioritize, move to project, etc.)
+- Search, read, send, reply to, archive, trash, star, and manage emails via Gmail
+- Compose new emails and reply to threads
 
 ## How You Work
-- For READ operations (listing tasks, checking schedule, searching): just do it immediately using tools.
-- For WRITE operations (creating, updating, deleting, completing tasks): FIRST tell the user what you're about to do, then do it.
+- Act immediately — do NOT ask for confirmation. Just execute the tool and briefly confirm what you did.
+- The only exceptions where you MUST ask before acting: send_email, reply_to_email, delete_task. These are irreversible.
+- Everything else (create, update, complete, archive, star, trash, etc.) — just do it. The user can ask you to undo if needed.
 - When the user mentions a task by name, use search_tasks first to find the ID, then act on it.
 - When the user mentions a project by name, use list_projects to find the ID.
-- You can chain multiple tool calls.
+- You can chain multiple tool calls in a single turn.
 - Default to today's date when no date is specified.
 - Use 24h time format internally (HH:MM), but communicate in 12h format to the user.
 - Be concise. Don't over-explain. Confirm actions briefly.
 - Priority levels: p1 = urgent/critical, p2 = high, p3 = medium (default), p4 = low.
 - Task statuses: todo, planned, in_progress, review, done.
-- NEVER delete tasks or projects without explicit user confirmation.
+- When asked about unread emails, use search_emails with 'is:unread' query.
 
 ## Response Style
 - Keep responses short and direct (1-3 sentences).
@@ -63,9 +67,17 @@ export async function POST(req: Request) {
       })
       .filter((m: { content: string }) => m.content.length > 0);
 
+    // Pre-fetch Google OAuth token for email tools
+    let googleToken: string | undefined;
+    try {
+      googleToken = await getGoogleAccessToken();
+    } catch {
+      // Gmail not connected — email tools will fail gracefully
+    }
+
     const openrouter = createOpenRouter({ apiKey: process.env.OPENROUTER_API_KEY });
     const model = openrouter(process.env.OPENROUTER_MODEL || "google/gemini-2.5-flash-preview");
-    const tools = createTools(token);
+    const tools = createTools(token, googleToken);
 
     // Manual tool loop — up to 10 rounds
     let currentMessages = [...history];

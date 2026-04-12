@@ -8,6 +8,19 @@ import { z } from "zod";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
+import {
+  setGmailToken,
+  clearGmailToken,
+  listMessagesWithDetails,
+  sendMessage as gmailSendMessage,
+  getMessage as gmailGetMessage,
+  archiveMessage,
+  trashMessage,
+  markAsRead,
+  markAsUnread,
+  starMessage,
+  unstarMessage,
+} from "@/lib/gmail-api";
 
 // ─── Convex client setup ───
 // We use ConvexHttpClient (not the React client) since this runs server-side.
@@ -24,8 +37,19 @@ function today() {
 }
 
 // ─── Tool factory: creates tools that receive auth token at runtime ───
-export function createTools(authToken: string): Record<string, any> {
+export function createTools(authToken: string, googleToken?: string): Record<string, any> {
   const convex = getConvex(authToken);
+
+  /** Wrap a gmail-api call with token setup/teardown */
+  async function withGmail<T>(fn: () => Promise<T>): Promise<T> {
+    if (!googleToken) throw new Error("Gmail not connected");
+    setGmailToken(googleToken);
+    try {
+      return await fn();
+    } finally {
+      clearGmailToken();
+    }
+  }
 
   return {
     // ═══════════════════════════════════════════
@@ -247,7 +271,7 @@ export function createTools(authToken: string): Record<string, any> {
     }),
 
     delete_task: ({
-      description: `Permanently delete a task. Use when the user explicitly asks to remove or delete a task. Don't use this for completing tasks — use complete_task instead.`,
+      description: `Permanently delete a task. IMPORTANT: This is irreversible — confirm with the user BEFORE calling this tool. Don't use this for completing tasks — use complete_task instead.`,
       parameters: z.object({
         id: z.string().describe("Task ID to delete"),
       }),
@@ -504,6 +528,179 @@ export function createTools(authToken: string): Record<string, any> {
           freeSlots: slots,
           totalFreeMinutes: slots.reduce((sum, s) => sum + s.durationMinutes, 0),
         };
+      },
+    }),
+
+    // ═══════════════════════════════════════════
+    // EMAIL TOOLS
+    // ═══════════════════════════════════════════
+
+    search_emails: ({
+      description: `Search emails using Gmail search syntax. Use when the user asks about emails, wants to find a message, check unread mail, etc. Returns subject, from, date, snippet, and IDs. Supports Gmail search operators: from:, to:, subject:, is:unread, is:starred, has:attachment, after:, before:, label:, etc.`,
+      parameters: z.object({
+        query: z.string().describe("Gmail search query (e.g. 'from:john subject:meeting is:unread', 'after:2024/01/01')"),
+        maxResults: z.number().optional().describe("Max results to return (default: 10)"),
+      }),
+      execute: async (args: any) => {
+        return withGmail(async () => {
+          const result = await listMessagesWithDetails({
+            query: args.query,
+            maxResults: args.maxResults || 10,
+          });
+          return result.messages.map((m) => ({
+            id: m.id,
+            threadId: m.threadId,
+            subject: m.subject,
+            from: m.from,
+            to: m.to,
+            date: m.date,
+            snippet: m.snippet,
+            isUnread: m.isUnread,
+            isStarred: m.isStarred,
+            hasAttachments: m.attachments.length > 0,
+          }));
+        });
+      },
+    }),
+
+    read_email: ({
+      description: `Read the full content of a specific email by its message ID. Use after search_emails to get the full body text of a message.`,
+      parameters: z.object({
+        messageId: z.string().describe("Gmail message ID"),
+      }),
+      execute: async (args: any) => {
+        return withGmail(async () => {
+          const msg = await gmailGetMessage(args.messageId);
+          return {
+            id: msg.id,
+            threadId: msg.threadId,
+            subject: msg.subject,
+            from: msg.from,
+            to: msg.to,
+            cc: msg.cc,
+            date: msg.date,
+            bodyText: msg.bodyText,
+            isUnread: msg.isUnread,
+            isStarred: msg.isStarred,
+            attachments: msg.attachments.map((a) => ({
+              filename: a.filename,
+              mimeType: a.mimeType,
+              size: a.size,
+            })),
+          };
+        });
+      },
+    }),
+
+    send_email: ({
+      description: `Compose and send a new email. IMPORTANT: This is irreversible — always confirm the recipient, subject, and body with the user BEFORE calling this tool.`,
+      parameters: z.object({
+        to: z.string().describe("Recipient email address"),
+        subject: z.string().describe("Email subject"),
+        body: z.string().describe("Email body (plain text)"),
+        cc: z.string().optional().describe("CC email address(es), comma separated"),
+        bcc: z.string().optional().describe("BCC email address(es), comma separated"),
+      }),
+      execute: async (args: any) => {
+        return withGmail(async () => {
+          const sent = await gmailSendMessage({
+            to: args.to,
+            subject: args.subject,
+            body: args.body,
+            cc: args.cc,
+            bcc: args.bcc,
+          });
+          return { id: sent.id, threadId: sent.threadId, sent: true };
+        });
+      },
+    }),
+
+    reply_to_email: ({
+      description: `Reply to an email thread. IMPORTANT: This is irreversible — confirm the reply content with the user BEFORE calling this tool. Requires the message ID to reply to (get it from search_emails or read_email first).`,
+      parameters: z.object({
+        messageId: z.string().describe("The message ID to reply to"),
+        body: z.string().describe("Reply body (plain text)"),
+        replyAll: z.boolean().optional().describe("If true, reply to all recipients (default: false)"),
+      }),
+      execute: async (args: any) => {
+        return withGmail(async () => {
+          const original = await gmailGetMessage(args.messageId);
+          const replyTo = args.replyAll
+            ? [original.from.email, ...original.to.map((a: { email: string }) => a.email), ...original.cc.map((a: { email: string }) => a.email)].join(", ")
+            : original.from.email;
+          const subject = original.subject.startsWith("Re:") ? original.subject : `Re: ${original.subject}`;
+          const sent = await gmailSendMessage({
+            to: replyTo,
+            subject,
+            body: args.body,
+            threadId: original.threadId,
+            inReplyTo: original.messageIdHeader,
+            references: original.messageIdHeader,
+          });
+          return { id: sent.id, threadId: sent.threadId, replied: true };
+        });
+      },
+    }),
+
+    archive_email: ({
+      description: `Archive an email (remove from inbox). Use when the user wants to archive a message.`,
+      parameters: z.object({
+        messageId: z.string().describe("Gmail message ID to archive"),
+      }),
+      execute: async (args: any) => {
+        return withGmail(async () => {
+          await archiveMessage(args.messageId);
+          return { messageId: args.messageId, archived: true };
+        });
+      },
+    }),
+
+    trash_email: ({
+      description: `Move an email to trash. Use when the user wants to delete a message.`,
+      parameters: z.object({
+        messageId: z.string().describe("Gmail message ID to trash"),
+      }),
+      execute: async (args: any) => {
+        return withGmail(async () => {
+          await trashMessage(args.messageId);
+          return { messageId: args.messageId, trashed: true };
+        });
+      },
+    }),
+
+    toggle_email_star: ({
+      description: `Star or unstar an email. Use when the user wants to star/flag or unstar a message.`,
+      parameters: z.object({
+        messageId: z.string().describe("Gmail message ID"),
+        star: z.boolean().describe("true to star, false to unstar"),
+      }),
+      execute: async (args: any) => {
+        return withGmail(async () => {
+          if (args.star) {
+            await starMessage(args.messageId);
+          } else {
+            await unstarMessage(args.messageId);
+          }
+          return { messageId: args.messageId, starred: args.star };
+        });
+      },
+    }),
+
+    toggle_email_read: ({
+      description: `Mark an email as read or unread.`,
+      parameters: z.object({
+        messageId: z.string().describe("Gmail message ID"),
+        read: z.boolean().describe("true to mark as read, false to mark as unread"),
+      }),
+      execute: async (args: any) => {
+        return withGmail(async () => {
+          if (args.read) {
+            await markAsRead(args.messageId);
+          } else {
+            await markAsUnread(args.messageId);
+          }
+          return { messageId: args.messageId, read: args.read };
+        });
       },
     }),
   };

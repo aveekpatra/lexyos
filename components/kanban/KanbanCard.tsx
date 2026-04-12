@@ -96,9 +96,11 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue, context = "
 
   // Determine if any chips should be shown (to render the second row)
   const hasDueTime = typeof (task as Record<string, unknown>).dueTime === "string";
+  const effectiveTime = ((task as Record<string, unknown>).dueTime as string | undefined) || task.scheduledStartTime;
   const hasChips = !!(
     (isSidebar && duration) ||
     hasDueTime ||
+    effectiveTime ||
     !isSidebar || // date chip always shows in kanban
     project
   );
@@ -113,8 +115,8 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue, context = "
           isDragging ? "opacity-40" : ""
         } ${
           isOverdue
-            ? "border border-[#4a2040] bg-[#1e1020] shadow-[0_2px_0_0_rgba(60,20,40,0.5),inset_0_1px_0_0_rgba(255,255,255,0.03)] hover:bg-[#281428]"
-            : "border border-[#333340] bg-[#1a1a22] shadow-[0_2px_0_0_rgba(0,0,0,0.3),inset_0_1px_0_0_rgba(255,255,255,0.04)] hover:bg-[#222230]"
+            ? "border border-rose-300/60 bg-rose-50 shadow-3d hover:border-blue-200 hover:bg-blue-50/60 active:translate-y-[1px] active:shadow-3d-sm dark:border-[#4a2040] dark:bg-[#1e1020] dark:hover:bg-[#281428]"
+            : "border border-line bg-surface-1 shadow-3d hover:border-blue-200 hover:bg-blue-50/60 active:translate-y-[1px] active:shadow-3d-sm dark:border-white/10 dark:hover:border-blue-500/40 dark:hover:bg-blue-950/30"
         }`}
       >
         {/* Row 1: Priority circle + Title */}
@@ -134,13 +136,13 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue, context = "
               onContextMenu={(e) => e.stopPropagation()}
               className="mt-0.5 flex size-[16px] shrink-0 items-center justify-center rounded-full transition-colors"
               style={{
-                border: `2px solid ${isDone ? "#71717a" : color}`,
+                border: `2px solid ${isDone ? "#93c5fd" : color}`,
                 backgroundColor: isDone ? "#71717a" : "transparent",
               }}
             >
               {isDone && (
                 <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
-                  <path d="M1.5 4L3.2 5.7L6.5 2.3" stroke="#1a1a22" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                  <path d="M1.5 4L3.2 5.7L6.5 2.3" stroke="#ffffff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
               )}
             </button>
@@ -149,7 +151,7 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue, context = "
           {/* Title — max 2 lines, click to edit */}
           <span
             onClick={(e) => { e.stopPropagation(); setEditOpen(true); }}
-            className={`min-w-0 flex-1 cursor-pointer text-sm font-medium leading-snug ${isDone ? "text-[#71717a] line-through" : "text-white"}`}
+            className={`min-w-0 flex-1 cursor-pointer text-sm font-normal leading-snug ${isDone ? "text-text-faint line-through decoration-text-faint" : "text-foreground"}`}
             style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}
           >
             {task.title}
@@ -184,13 +186,13 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue, context = "
               </DurationPickerPopover>
             )}
             {/* Sidebar: time with end time */}
-            {isSidebar && typeof (task as Record<string, unknown>).dueTime === "string" && (
+            {isSidebar && effectiveTime && (
               <TimePickerPopover
-                value={(task as Record<string, unknown>).dueTime as string}
+                value={effectiveTime}
                 onChange={(time) => syncUpdateTask({ id: task._id, ...(time ? { dueTime: time } : { clearDueTime: true }) })}
               >
                 <TaskChip active>
-                  {formatTime12((task as Record<string, unknown>).dueTime as string)}
+                  {formatTime12(effectiveTime)}
                   {task.scheduledEndTime && ` – ${formatTime12(task.scheduledEndTime)}`}
                 </TaskChip>
               </TimePickerPopover>
@@ -226,7 +228,7 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue, context = "
                 onChange={(pid) => syncUpdateTask({ id: task._id, ...(pid ? { projectId: pid } : { clearProjectId: true }) })}
               >
                 <TaskChip active>
-                  <span style={{ color: project.color }} className="max-w-[160px] truncate">{project.name}</span>
+                  <span className="max-w-[160px] truncate text-blue-800">{project.name}</span>
                 </TaskChip>
               </ProjectPickerPopover>
             )}

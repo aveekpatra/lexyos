@@ -155,12 +155,33 @@ export default defineSchema({
   emailSyncState: defineTable({
     lastHistoryId: v.string(),
     lastSyncedAt: v.number(),
+    lastFullSyncAt: v.optional(v.number()),
     userId: v.string(),
   }).index("by_userId", ["userId"]),
 
   aiSettings: defineTable({
     apiKey: v.string(),
     model: v.optional(v.string()),
+    userId: v.string(),
+  }).index("by_userId", ["userId"]),
+
+  userPreferences: defineTable({
+    theme: v.optional(v.string()),
+    projectSort: v.optional(v.string()),
+    userId: v.string(),
+  }).index("by_userId", ["userId"]),
+
+  aiChats: defineTable({
+    messages: v.array(v.object({
+      id: v.string(),
+      role: v.union(v.literal("user"), v.literal("assistant")),
+      text: v.string(),
+      toolCalls: v.optional(v.array(v.object({
+        toolName: v.string(),
+        input: v.any(),
+        output: v.any(),
+      }))),
+    })),
     userId: v.string(),
   }).index("by_userId", ["userId"]),
 });

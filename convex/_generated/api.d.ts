@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as aiChats from "../aiChats.js";
 import type * as aiSettings from "../aiSettings.js";
 import type * as calendarEvents from "../calendarEvents.js";
 import type * as emailSyncState from "../emailSyncState.js";
@@ -16,6 +17,7 @@ import type * as favorites from "../favorites.js";
 import type * as projects from "../projects.js";
 import type * as sections from "../sections.js";
 import type * as tasks from "../tasks.js";
+import type * as userPreferences from "../userPreferences.js";
 
 import type {
   ApiFromModules,
@@ -24,6 +26,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  aiChats: typeof aiChats;
   aiSettings: typeof aiSettings;
   calendarEvents: typeof calendarEvents;
   emailSyncState: typeof emailSyncState;
@@ -32,6 +35,7 @@ declare const fullApi: ApiFromModules<{
   projects: typeof projects;
   sections: typeof sections;
   tasks: typeof tasks;
+  userPreferences: typeof userPreferences;
 }>;
 
 /**
