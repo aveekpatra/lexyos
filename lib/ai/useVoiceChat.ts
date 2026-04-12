@@ -322,6 +322,8 @@ export function useVoiceChat({ onTranscript, onAutoSubmit }: UseVoiceChatOpts) {
 export async function playCartesiaTTS(text: string): Promise<void> {
   if (!CARTESIA_API_KEY || !text.trim()) return;
 
+  const SAMPLE_RATE = 24000;
+
   const res = await fetch("https://api.cartesia.ai/tts/bytes", {
     method: "POST",
     headers: {
@@ -333,7 +335,7 @@ export async function playCartesiaTTS(text: string): Promise<void> {
       model_id: TTS_MODEL,
       transcript: text,
       voice: { mode: "id", id: TTS_VOICE_ID },
-      output_format: { container: "wav", encoding: "pcm_s16le", sample_rate: 24000 },
+      output_format: { container: "raw", encoding: "pcm_f32le", sample_rate: SAMPLE_RATE },
     }),
   });
 
@@ -342,19 +344,55 @@ export async function playCartesiaTTS(text: string): Promise<void> {
     return;
   }
 
-  const arrayBuffer = await res.arrayBuffer();
-  const audioCtx = new AudioContext({ sampleRate: 24000 });
+  // Stream raw PCM f32le chunks into AudioContext for instant playback
+  const audioCtx = new AudioContext({ sampleRate: SAMPLE_RATE });
+  const reader = res.body?.getReader();
+  if (!reader) return;
+
+  let scheduledTime = audioCtx.currentTime;
+  const BUFFER_AHEAD = 0.05; // schedule 50ms ahead to prevent gaps
+  let leftover = new Uint8Array(0);
 
   try {
-    const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-    const source = audioCtx.createBufferSource();
-    source.buffer = audioBuffer;
-    source.connect(audioCtx.destination);
-    source.start();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
 
-    await new Promise<void>((resolve) => {
-      source.onended = () => resolve();
-    });
+      // Combine leftover bytes from previous chunk
+      let data: Uint8Array;
+      if (leftover.length > 0) {
+        data = new Uint8Array(leftover.length + value.length);
+        data.set(leftover);
+        data.set(value, leftover.length);
+      } else {
+        data = value;
+      }
+
+      // f32le = 4 bytes per sample
+      const completeBytes = data.length - (data.length % 4);
+      leftover = data.slice(completeBytes);
+
+      if (completeBytes === 0) continue;
+
+      const samples = new Float32Array(data.buffer, data.byteOffset, completeBytes / 4);
+      const audioBuffer = audioCtx.createBuffer(1, samples.length, SAMPLE_RATE);
+      audioBuffer.getChannelData(0).set(samples);
+
+      const source = audioCtx.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(audioCtx.destination);
+
+      const now = audioCtx.currentTime;
+      if (scheduledTime < now) scheduledTime = now;
+      source.start(scheduledTime + BUFFER_AHEAD);
+      scheduledTime += audioBuffer.duration;
+    }
+
+    // Wait for all scheduled audio to finish
+    const remaining = scheduledTime + BUFFER_AHEAD - audioCtx.currentTime;
+    if (remaining > 0) {
+      await new Promise<void>((resolve) => setTimeout(resolve, remaining * 1000));
+    }
   } finally {
     await audioCtx.close();
   }
