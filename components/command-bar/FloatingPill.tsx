@@ -11,6 +11,10 @@ import {
   AppleIntelligenceIcon,
   Mic01Icon,
   TelephoneIcon,
+  Cancel01Icon,
+  MoreHorizontalIcon,
+  ArrowExpand02Icon,
+  ArrowShrink02Icon,
 } from "@hugeicons/core-free-icons";
 
 
@@ -26,13 +30,24 @@ let _persistedMessages: ChatMsg[] = [];
 let _msgCounter = 0;
 let _hydrated = false;
 
+const SUGGESTION_CHIPS = [
+  "What can you do?",
+  "Timebox my day",
+  "Show my tasks for today",
+  "What's overdue?",
+];
+
 const FloatingPill = memo(function FloatingPill() {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<ChatMsg[]>(_persistedMessages);
   const [isLoading, setIsLoading] = useState(false);
+  const [isOpen, setIsOpen] = useState(false);
+  const [isMaximized, setIsMaximized] = useState(false);
+  const [showMenu, setShowMenu] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   // Convex persistence
   const savedChat = useQuery(api.aiChats.get);
@@ -137,19 +152,46 @@ const FloatingPill = memo(function FloatingPill() {
     }, 500);
   }, [messages, saveChat]);
 
-  // ⌘K focuses the input
+  // Ctrl+K focuses the input and opens panel
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === "k") { e.preventDefault(); inputRef.current?.focus(); }
+      if ((e.ctrlKey || e.metaKey) && e.key === "k") {
+        e.preventDefault();
+        setIsOpen(true);
+        setTimeout(() => inputRef.current?.focus(), 100);
+      }
+      // Escape closes the panel
+      if (e.key === "Escape" && isOpen) {
+        setIsOpen(false);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [isOpen]);
 
   // Auto-scroll
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  // Close menu on outside click
+  useEffect(() => {
+    if (!showMenu) return;
+    const onClick = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setShowMenu(false);
+      }
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [showMenu]);
+
+  // Focus input when panel opens
+  useEffect(() => {
+    if (isOpen) {
+      setTimeout(() => inputRef.current?.focus(), 150);
+    }
+  }, [isOpen]);
 
   const clearChat = useCallback(() => {
     setMessages([]);
@@ -166,59 +208,119 @@ const FloatingPill = memo(function FloatingPill() {
     sendMessage(text);
   }, [input, isLoading, sendMessage]);
 
-  const hasMessages = messages.length > 0;
-  const [chatFolded, setChatFolded] = useState(true);
+  const handleChipClick = useCallback((chip: string) => {
+    if (isLoading) return;
+    sendMessage(chip);
+  }, [isLoading, sendMessage]);
 
+  const hasMessages = messages.length > 0;
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 w-[400px]" ref={containerRef}>
-      <div
-        className={`overflow-hidden rounded-[20px] border border-blue-300 bg-blue-50 shadow-[0_4px_24px_-2px_rgba(0,0,0,0.12),0_1px_4px_-1px_rgba(0,0,0,0.08)] backdrop-blur-2xl backdrop-saturate-150 transition-all duration-300 dark:border-blue-500/40 dark:bg-blue-950/60 dark:shadow-[0_4px_24px_-2px_rgba(0,0,0,0.4),0_1px_4px_-1px_rgba(0,0,0,0.3)] ${callMode ? "ring-2 ring-blue-300/40" : ""}`}
-      >
-        {/* Messages area — slides up when messages exist */}
-        <AnimatePresence>
-          {hasMessages && (
-            <motion.div
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: "auto", opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              transition={{ duration: 0.2, ease: "easeOut" }}
-              className="overflow-hidden"
-            >
-              {/* Controls bar */}
-              <div className="flex items-center justify-between px-4 pt-2.5 pb-0">
+    <>
+      {/* ===== COLLAPSED STATE: Floating icon button ===== */}
+      <AnimatePresence>
+        {!isOpen && (
+          <motion.button
+            type="button"
+            onClick={() => setIsOpen(true)}
+            initial={{ scale: 0.8, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.8, opacity: 0 }}
+            transition={{ duration: 0.2, ease: "easeOut" }}
+            className="fixed bottom-5 right-5 z-50 flex size-12 items-center justify-center rounded-full border border-blue-300 bg-blue-50 shadow-lg transition-all duration-200 hover:scale-105 hover:shadow-xl dark:border-blue-500/40 dark:bg-blue-950/80 dark:shadow-[0_4px_20px_rgba(0,0,0,0.4)]"
+            title="Open AI assistant (Ctrl+K)"
+          >
+            <HugeiconsIcon
+              icon={AppleIntelligenceIcon}
+              size={22}
+              className="text-foreground dark:text-white"
+            />
+            {/* Unread indicator dot when there are messages */}
+            {hasMessages && (
+              <span className="absolute -top-0.5 -right-0.5 size-3 rounded-full border-2 border-blue-50 bg-brand dark:border-blue-950/80" />
+            )}
+          </motion.button>
+        )}
+      </AnimatePresence>
+
+      {/* ===== EXPANDED STATE: Full chat panel ===== */}
+      <AnimatePresence>
+        {isOpen && (
+          <motion.div
+            ref={containerRef}
+            initial={{ opacity: 0, y: 20, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 20, scale: 0.95 }}
+            transition={{ duration: 0.25, ease: "easeOut" }}
+            className="fixed bottom-5 right-5 z-50 flex w-[400px] flex-col overflow-hidden rounded-2xl border border-blue-300 bg-blue-50 shadow-[0_8px_32px_-4px_rgba(0,0,0,0.15),0_2px_8px_-2px_rgba(0,0,0,0.1)] transition-[height] duration-300 ease-in-out dark:border-blue-500/40 dark:bg-blue-950/80 dark:shadow-[0_8px_32px_-4px_rgba(0,0,0,0.5),0_2px_8px_-2px_rgba(0,0,0,0.3)]"
+            style={{ height: isMaximized ? "calc(100vh - 40px)" : "580px", maxHeight: "calc(100vh - 40px)" }}
+          >
+            {/* ── Header ── */}
+            <div className="flex shrink-0 items-center gap-3 border-b border-blue-100 px-4 py-3 dark:border-blue-500/30">
+              <HugeiconsIcon
+                icon={AppleIntelligenceIcon}
+                size={18}
+                className={`shrink-0 text-foreground dark:text-white ${isLoading ? "animate-spin" : ""}`}
+              />
+              <span className="flex-1 text-sm font-semibold text-foreground dark:text-white">
+                UniFocus AI
+              </span>
+
+              {/* Menu button */}
+              <div className="relative" ref={menuRef}>
                 <button
                   type="button"
-                  onClick={() => setChatFolded((f) => !f)}
-                  className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-text-muted transition-colors hover:bg-line hover:text-text-secondary"
+                  onClick={() => setShowMenu((v) => !v)}
+                  className="flex size-7 items-center justify-center rounded-lg text-text-muted transition-colors hover:bg-blue-200/40 hover:text-foreground dark:text-white/60 dark:hover:bg-blue-500/20 dark:hover:text-white"
                 >
-                  <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"
-                    className={`transition-transform ${chatFolded ? "" : "rotate-180"}`}>
-                    <path d="M2 6.5L5 3.5L8 6.5" />
-                  </svg>
-                  {chatFolded ? "Show chat" : "Hide chat"}
+                  <HugeiconsIcon icon={MoreHorizontalIcon} size={16} />
                 </button>
-                <button
-                  type="button"
-                  onClick={() => { clearChat(); setChatFolded(false); }}
-                  className="rounded-md px-2 py-0.5 text-[11px] text-text-faint transition-colors hover:bg-line hover:text-text-secondary"
-                >
-                  New chat
-                </button>
+                {/* Dropdown menu */}
+                <AnimatePresence>
+                  {showMenu && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -4 }}
+                      transition={{ duration: 0.12 }}
+                      className="absolute top-full right-0 z-10 mt-1 min-w-[140px] overflow-hidden rounded-lg border border-line bg-surface-0 py-1 shadow-lg"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => { clearChat(); setShowMenu(false); }}
+                        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-text-secondary transition-colors hover:bg-surface-1"
+                      >
+                        New chat
+                      </button>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
 
-              {/* Chat messages — foldable */}
-              <AnimatePresence>
-                {!chatFolded && (
-                  <motion.div
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: "auto", opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }}
-                    transition={{ duration: 0.15, ease: "easeOut" }}
-                    className="overflow-hidden"
-                  >
-              <div className="max-h-[320px] overflow-y-auto">
-                <div className="flex flex-col gap-1 px-4 py-2">
+              {/* Expand/shrink toggle */}
+              <button
+                type="button"
+                onClick={() => setIsMaximized((v) => !v)}
+                title={isMaximized ? "Shrink panel" : "Expand panel"}
+                className="flex size-7 items-center justify-center rounded-lg text-text-muted transition-colors hover:bg-blue-200/40 hover:text-foreground dark:text-white/60 dark:hover:bg-blue-500/20 dark:hover:text-white"
+              >
+                <HugeiconsIcon icon={isMaximized ? ArrowShrink02Icon : ArrowExpand02Icon} size={15} />
+              </button>
+
+              {/* Close button */}
+              <button
+                type="button"
+                onClick={() => setIsOpen(false)}
+                className="flex size-7 items-center justify-center rounded-lg text-text-muted transition-colors hover:bg-blue-200/40 hover:text-foreground dark:text-white/60 dark:hover:bg-blue-500/20 dark:hover:text-white"
+              >
+                <HugeiconsIcon icon={Cancel01Icon} size={16} />
+              </button>
+            </div>
+
+            {/* ── Messages area ── */}
+            <div className="flex-1 overflow-y-auto">
+              {hasMessages ? (
+                <div className="flex flex-col gap-1 px-4 py-3">
                   {messages.map((m) => (
                     <div key={m.id} className={`flex items-start gap-2.5 ${m.role === "user" ? "justify-end" : ""}`}>
                       {m.role === "assistant" && (
@@ -256,131 +358,146 @@ const FloatingPill = memo(function FloatingPill() {
                   {isLoading && <LoadingDots />}
                   <div ref={messagesEndRef} />
                 </div>
-              </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Voice / call mode indicator */}
-        <AnimatePresence>
-          {(listening || callMode) && (
-            <motion.div
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: "auto", opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              transition={{ duration: 0.15 }}
-              className="overflow-hidden"
-            >
-              <div className={`flex items-center gap-3 px-4 py-2 ${hasMessages ? "border-t border-line" : ""}`}>
-                {/* Animated bars when actively listening */}
-                {listening && !waitingForAI && (
-                  <div className="flex items-center gap-[3px]">
-                    {[0, 1, 2, 3, 4].map((i) => (
-                      <motion.div
-                        key={i}
-                        className={`w-[3px] rounded-full ${callMode ? "bg-brand" : "bg-brand"}`}
-                        animate={{ height: [4, 12 + Math.random() * 8, 4] }}
-                        transition={{ duration: 0.5 + i * 0.1, repeat: Infinity, ease: "easeInOut", delay: i * 0.08 }}
-                      />
+              ) : (
+                /* Empty state with suggestion chips */
+                <div className="flex flex-col items-center justify-center px-6 py-10">
+                  <div className="mb-3 flex size-10 items-center justify-center rounded-full bg-brand/10">
+                    <HugeiconsIcon icon={AppleIntelligenceIcon} size={20} className="text-brand" />
+                  </div>
+                  <p className="mb-1 text-sm font-medium text-text-strong">How can I help?</p>
+                  <p className="mb-5 text-center text-xs text-text-muted">
+                    Manage tasks, check your schedule, draft emails, and more.
+                  </p>
+                  <div className="flex flex-wrap justify-center gap-2">
+                    {SUGGESTION_CHIPS.map((chip) => (
+                      <button
+                        key={chip}
+                        type="button"
+                        onClick={() => handleChipClick(chip)}
+                        className="rounded-full border border-line bg-surface-0 px-3 py-1.5 text-xs text-text-secondary transition-colors hover:border-brand/40 hover:bg-brand/5 hover:text-text-strong"
+                      >
+                        {chip}
+                      </button>
                     ))}
                   </div>
-                )}
+                </div>
+              )}
+            </div>
 
-                {/* Pulsing dot when waiting for AI in call mode */}
-                {callMode && waitingForAI && (
+            {/* ── Voice / call mode indicator ── */}
+            <AnimatePresence>
+              {(listening || callMode) && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: "auto", opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.15 }}
+                  className="shrink-0 overflow-hidden"
+                >
+                  <div className="flex items-center gap-3 border-t border-blue-100 px-4 py-2 dark:border-blue-500/30">
+                    {/* Animated bars when actively listening */}
+                    {listening && !waitingForAI && (
+                      <div className="flex items-center gap-[3px]">
+                        {[0, 1, 2, 3, 4].map((i) => (
+                          <motion.div
+                            key={i}
+                            className="w-[3px] rounded-full bg-brand"
+                            animate={{ height: [4, 12 + Math.random() * 8, 4] }}
+                            transition={{ duration: 0.5 + i * 0.1, repeat: Infinity, ease: "easeInOut", delay: i * 0.08 }}
+                          />
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Pulsing dot when waiting for AI in call mode */}
+                    {callMode && waitingForAI && (
+                      <motion.div
+                        className="size-2.5 rounded-full bg-brand"
+                        animate={{ opacity: [0.4, 1, 0.4], scale: [0.9, 1.1, 0.9] }}
+                        transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut" }}
+                      />
+                    )}
+
+                    <p className="flex-1 truncate text-sm text-text-secondary">
+                      {callMode
+                        ? waitingForAI
+                          ? "Thinking..."
+                          : "Listening — I'll act when you pause..."
+                        : "Listening — speak now..."
+                      }
+                    </p>
+
+                    <button
+                      type="button"
+                      onClick={callMode ? toggleCallMode : toggleVoice}
+                      className="rounded-lg bg-brand px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-brand-strong"
+                    >
+                      {callMode ? "End call" : "Stop"}
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* ── Input row ── */}
+            <div className="flex shrink-0 items-center gap-2.5 border-t border-blue-100 px-4 py-2.5 dark:border-blue-500/30">
+              <input
+                ref={inputRef}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && input.trim()) { e.preventDefault(); handleSubmit(); }
+                }}
+                placeholder={callMode ? "Speak naturally..." : "Ask anything..."}
+                className="flex-1 bg-transparent text-[13px] text-foreground outline-none placeholder:text-text-faint dark:text-white dark:placeholder:text-blue-200/50"
+                disabled={callMode && listening}
+              />
+
+              {/* Mic button */}
+              <button
+                type="button"
+                onClick={toggleVoice}
+                className={`relative flex size-7 items-center justify-center rounded-full transition-colors duration-150 ${
+                  listening && !callMode
+                    ? "bg-blue-200/50 text-foreground dark:bg-blue-500/30 dark:text-white"
+                    : "text-text-muted hover:bg-blue-200/40 hover:text-foreground dark:text-white/70 dark:hover:bg-blue-500/20 dark:hover:text-white"
+                }`}
+              >
+                {listening && !callMode && (
                   <motion.div
-                    className="size-2.5 rounded-full bg-brand"
-                    animate={{ opacity: [0.4, 1, 0.4], scale: [0.9, 1.1, 0.9] }}
-                    transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut" }}
+                    className="absolute inset-0 rounded-full border border-blue-300/50"
+                    animate={{ scale: [1, 1.5], opacity: [0.5, 0] }}
+                    transition={{ duration: 1.2, repeat: Infinity, ease: "easeOut" }}
                   />
                 )}
+                <HugeiconsIcon icon={Mic01Icon} size={14} />
+              </button>
 
-                <p className="flex-1 truncate text-sm text-text-secondary">
-                  {callMode
-                    ? waitingForAI
-                      ? "Thinking..."
-                      : "Listening — I'll act when you pause..."
-                    : "Listening — speak now..."
-                  }
-                </p>
-
-                <button
-                  type="button"
-                  onClick={callMode ? toggleCallMode : toggleVoice}
-                  className="rounded-lg bg-brand px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-brand-strong"
-                >
-                  {callMode ? "End call" : "Stop"}
-                </button>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Input row — always visible */}
-        <div className={`flex items-center gap-2.5 px-4 py-2.5 ${hasMessages || listening || callMode ? "border-t border-blue-100 dark:border-blue-500/30" : ""}`}>
-          <HugeiconsIcon
-            icon={AppleIntelligenceIcon}
-            size={16}
-            className={`shrink-0 text-foreground dark:text-white ${isLoading ? "animate-spin" : ""}`}
-          />
-          <input
-            ref={inputRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && input.trim()) { e.preventDefault(); handleSubmit(); }
-            }}
-            placeholder={callMode ? "Speak naturally..." : "Ask AI anything..."}
-            className="flex-1 bg-transparent text-[13px] text-foreground outline-none placeholder:text-text-faint dark:text-white dark:placeholder:text-blue-200/50"
-            disabled={callMode && listening}
-          />
-
-          {/* Mic button */}
-          <button
-            type="button"
-            onClick={toggleVoice}
-            className={`relative flex size-7 items-center justify-center rounded-full transition-colors duration-150 ${
-              listening && !callMode
-                ? "bg-blue-200/50 text-foreground dark:bg-blue-500/30 dark:text-white"
-                : "text-text-muted hover:bg-blue-200/40 hover:text-foreground dark:text-white/70 dark:hover:bg-blue-500/20 dark:hover:text-white"
-            }`}
-          >
-            {listening && !callMode && (
-              <motion.div
-                className="absolute inset-0 rounded-full border border-blue-300/50"
-                animate={{ scale: [1, 1.5], opacity: [0.5, 0] }}
-                transition={{ duration: 1.2, repeat: Infinity, ease: "easeOut" }}
-              />
-            )}
-            <HugeiconsIcon icon={Mic01Icon} size={14} />
-          </button>
-
-          {/* Call mode button */}
-          <button
-            type="button"
-            onClick={toggleCallMode}
-            title={callMode ? "End call mode" : "Start call mode"}
-            className={`relative flex size-7 items-center justify-center rounded-full transition-colors duration-150 ${
-              callMode
-                ? "bg-blue-200/50 text-foreground dark:bg-blue-500/30 dark:text-white"
-                : "text-text-muted hover:bg-blue-200/40 hover:text-foreground dark:text-white/70 dark:hover:bg-blue-500/20 dark:hover:text-white"
-            }`}
-          >
-            {callMode && (
-              <motion.div
-                className="absolute inset-0 rounded-full border border-blue-300/50"
-                animate={{ scale: [1, 1.6], opacity: [0.5, 0] }}
-                transition={{ duration: 1.5, repeat: Infinity, ease: "easeOut" }}
-              />
-            )}
-            <HugeiconsIcon icon={TelephoneIcon} size={13} />
-          </button>
-        </div>
-      </div>
-    </div>
+              {/* Call mode button */}
+              <button
+                type="button"
+                onClick={toggleCallMode}
+                title={callMode ? "End call mode" : "Start call mode"}
+                className={`relative flex size-7 items-center justify-center rounded-full transition-colors duration-150 ${
+                  callMode
+                    ? "bg-blue-200/50 text-foreground dark:bg-blue-500/30 dark:text-white"
+                    : "text-text-muted hover:bg-blue-200/40 hover:text-foreground dark:text-white/70 dark:hover:bg-blue-500/20 dark:hover:text-white"
+                }`}
+              >
+                {callMode && (
+                  <motion.div
+                    className="absolute inset-0 rounded-full border border-blue-300/50"
+                    animate={{ scale: [1, 1.6], opacity: [0.5, 0] }}
+                    transition={{ duration: 1.5, repeat: Infinity, ease: "easeOut" }}
+                  />
+                )}
+                <HugeiconsIcon icon={TelephoneIcon} size={13} />
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </>
   );
 });
 

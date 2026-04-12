@@ -44,10 +44,15 @@ export default function AppLayout({ children }: { children: ReactNode }) {
 
   useHelpShortcut(useCallback(() => setHelpOpen(true), []));
 
-  // App-start: pull calendar changes + process pending sync queue
+  // Sync: pull calendar changes + process pending sync queue on start and every 2 minutes
   useEffect(() => {
-    fetch("/api/sync/pull-calendar", { method: "POST" }).catch(() => {});
-    fetch("/api/sync/process-queue", { method: "POST" }).catch(() => {});
+    const runSync = () => {
+      fetch("/api/sync/pull-calendar", { method: "POST" }).catch(() => {});
+      fetch("/api/sync/process-queue", { method: "POST" }).catch(() => {});
+    };
+    runSync();
+    const interval = setInterval(runSync, 2 * 60 * 1000);
+    return () => clearInterval(interval);
   }, []);
 
   return (
