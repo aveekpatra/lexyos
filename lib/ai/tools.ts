@@ -51,6 +51,20 @@ export function createTools(authToken: string, googleToken?: string): Record<str
     }
   }
 
+  /** Wrap a tool execute fn so errors are returned as { error: "..." } instead of thrown.
+   *  This ensures the model always sees a structured result and can react to failures. */
+  function safe<T>(fn: (args: any) => Promise<T>) {
+    return async (args: any): Promise<T | { error: string }> => {
+      try {
+        return await fn(args);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error("[AI Tool Error]", message);
+        return { error: message };
+      }
+    };
+  }
+
   return {
     // ═══════════════════════════════════════════
     // TASK TOOLS
@@ -66,7 +80,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
         source: z.enum(["local", "google_calendar"]).optional()
           .describe("Filter by source: 'local' for user-created tasks, 'google_calendar' for synced events"),
       }),
-      execute: async (args: any) => {
+      execute: safe(async (args: any) => {
         const tasks = await convex.query(api.tasks.list, {
           status: args.status as "todo" | "planned" | "in_progress" | "review" | "done" | undefined,
           projectId: args.projectId as Id<"projects"> | undefined,
@@ -85,7 +99,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
           source: t.source,
           description: t.description,
         }));
-      },
+      }),
     }),
 
     create_task: ({
@@ -101,7 +115,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
         scheduledStartTime: z.string().optional().describe("Start time in HH:MM format"),
         scheduledEndTime: z.string().optional().describe("End time in HH:MM format"),
       }),
-      execute: async (args: any) => {
+      execute: safe(async (args: any) => {
         const dueDate = args.dueDate || today();
         const dueTime = args.dueTime || args.scheduledStartTime;
         const id = await convex.mutation(api.tasks.create, {
@@ -147,7 +161,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
         }
 
         return { id, title: args.title, dueDate, created: true };
-      },
+      }),
     }),
 
     update_task: ({
@@ -164,7 +178,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
         scheduledStartTime: z.string().optional().describe("Start time (HH:MM)"),
         scheduledEndTime: z.string().optional().describe("End time (HH:MM)"),
       }),
-      execute: async (args: any) => {
+      execute: safe(async (args: any) => {
         const updateArgs: Record<string, unknown> = { id: args.id };
         if (args.title) updateArgs.title = args.title;
         if (args.description !== undefined) updateArgs.description = args.description;
@@ -242,7 +256,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
         }
 
         return { id: args.id, updated: true };
-      },
+      }),
     }),
 
     complete_task: ({
@@ -250,7 +264,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
       parameters: z.object({
         id: z.string().describe("Task ID to complete"),
       }),
-      execute: async (args: any) => {
+      execute: safe(async (args: any) => {
         const taskBefore = await convex.query(api.tasks.getById, { id: args.id as Id<"tasks"> });
         await convex.mutation(api.tasks.toggleComplete, { id: args.id as Id<"tasks"> });
         // Sync [Done] prefix to Google Calendar
@@ -267,7 +281,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
           }
         }
         return { id: args.id, toggled: true };
-      },
+      }),
     }),
 
     delete_task: ({
@@ -275,7 +289,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
       parameters: z.object({
         id: z.string().describe("Task ID to delete"),
       }),
-      execute: async (args: any) => {
+      execute: safe(async (args: any) => {
         // Fetch task before deleting to get Google event ID
         const taskBefore = await convex.query(api.tasks.getById, { id: args.id as Id<"tasks"> });
         await convex.mutation(api.tasks.remove, { id: args.id as Id<"tasks"> });
@@ -289,7 +303,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
           }
         }
         return { id: args.id, deleted: true };
-      },
+      }),
     }),
 
     search_tasks: ({
@@ -297,7 +311,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
       parameters: z.object({
         query: z.string().describe("Search text to match against task titles"),
       }),
-      execute: async (args: any) => {
+      execute: safe(async (args: any) => {
         const all = await convex.query(api.tasks.list, {});
         const q = args.query.toLowerCase();
         const matches = all.filter((t) => t.title.toLowerCase().includes(q));
@@ -310,7 +324,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
           dueTime: t.dueTime,
           projectId: t.projectId,
         }));
-      },
+      }),
     }),
 
     // ═══════════════════════════════════════════
@@ -320,7 +334,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
     list_projects: ({
       description: `List all active projects. Returns project id, name, color, priority, dates. Use this to find project IDs when the user mentions a project by name.`,
       parameters: z.object({}),
-      execute: async (_args: any) => {
+      execute: safe(async (_args: any) => {
         const projects = await convex.query(api.projects.list, { status: "active" });
         return projects.map((p) => ({
           id: p._id,
@@ -330,7 +344,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
           startDate: p.startDate,
           endDate: p.dueDate,
         }));
-      },
+      }),
     }),
 
     create_project: ({
@@ -342,7 +356,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
         startDate: z.string().optional().describe("Start date (YYYY-MM-DD)"),
         endDate: z.string().optional().describe("End date (YYYY-MM-DD)"),
       }),
-      execute: async (args: any) => {
+      execute: safe(async (args: any) => {
         const id = await convex.mutation(api.projects.create, {
           name: args.name,
           color: args.color || "#3b82f6",
@@ -351,7 +365,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
           dueDate: args.endDate,
         });
         return { id, name: args.name, created: true };
-      },
+      }),
     }),
 
     update_project: ({
@@ -364,7 +378,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
         startDate: z.string().optional().describe("New start date"),
         endDate: z.string().optional().describe("New end date"),
       }),
-      execute: async (args: any) => {
+      execute: safe(async (args: any) => {
         await convex.mutation(api.projects.update, {
           id: args.id as Id<"projects">,
           name: args.name,
@@ -374,7 +388,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
           dueDate: args.endDate,
         });
         return { id: args.id, updated: true };
-      },
+      }),
     }),
 
     // ═══════════════════════════════════════════
@@ -384,7 +398,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
     get_today_summary: ({
       description: `Get a summary of today's schedule: overdue tasks, today's tasks, calendar events, and upcoming deadlines this week. Use this when the user asks "what's on my plate", "what do I have today", "give me a rundown", etc.`,
       parameters: z.object({}),
-      execute: async (_args: any) => {
+      execute: safe(async (_args: any) => {
         const allTasks = await convex.query(api.tasks.list, {});
         const todayStr = today();
 
@@ -426,7 +440,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
           upcomingThisWeek: upcoming.length,
           upcomingTasks: upcoming.slice(0, 10).map((t) => ({ id: t._id, title: t.title, dueDate: t.dueDate, priority: t.priority })),
         };
-      },
+      }),
     }),
 
     plan_day: ({
@@ -434,7 +448,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
       parameters: z.object({
         date: z.string().optional().describe("Date to plan (YYYY-MM-DD). Defaults to today."),
       }),
-      execute: async (args: any) => {
+      execute: safe(async (args: any) => {
         const dateStr = args.date || today();
         const allTasks = await convex.query(api.tasks.list, {});
 
@@ -478,7 +492,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
           })),
           freeSlots: slots,
         };
-      },
+      }),
     }),
 
     find_free_time: ({
@@ -487,7 +501,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
         date: z.string().describe("Date to check (YYYY-MM-DD)"),
         durationMinutes: z.number().optional().describe("Minimum slot duration in minutes (default: 30)"),
       }),
-      execute: async (args: any) => {
+      execute: safe(async (args: any) => {
         const allTasks = await convex.query(api.tasks.list, {});
         const minDuration = args.durationMinutes || 30;
 
@@ -528,7 +542,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
           freeSlots: slots,
           totalFreeMinutes: slots.reduce((sum, s) => sum + s.durationMinutes, 0),
         };
-      },
+      }),
     }),
 
     // ═══════════════════════════════════════════
@@ -541,7 +555,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
         query: z.string().describe("Gmail search query (e.g. 'from:john subject:meeting is:unread', 'after:2024/01/01')"),
         maxResults: z.number().optional().describe("Max results to return (default: 10)"),
       }),
-      execute: async (args: any) => {
+      execute: safe(async (args: any) => {
         return withGmail(async () => {
           const result = await listMessagesWithDetails({
             query: args.query,
@@ -560,7 +574,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
             hasAttachments: m.attachments.length > 0,
           }));
         });
-      },
+      }),
     }),
 
     read_email: ({
@@ -568,7 +582,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
       parameters: z.object({
         messageId: z.string().describe("Gmail message ID"),
       }),
-      execute: async (args: any) => {
+      execute: safe(async (args: any) => {
         return withGmail(async () => {
           const msg = await gmailGetMessage(args.messageId);
           return {
@@ -589,7 +603,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
             })),
           };
         });
-      },
+      }),
     }),
 
     send_email: ({
@@ -601,7 +615,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
         cc: z.string().optional().describe("CC email address(es), comma separated"),
         bcc: z.string().optional().describe("BCC email address(es), comma separated"),
       }),
-      execute: async (args: any) => {
+      execute: safe(async (args: any) => {
         return withGmail(async () => {
           const sent = await gmailSendMessage({
             to: args.to.trim(),
@@ -612,7 +626,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
           });
           return { id: sent.id, threadId: sent.threadId, sent: true };
         });
-      },
+      }),
     }),
 
     reply_to_email: ({
@@ -622,7 +636,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
         body: z.string().describe("Reply body (plain text)"),
         replyAll: z.boolean().optional().describe("If true, reply to all recipients (default: false)"),
       }),
-      execute: async (args: any) => {
+      execute: safe(async (args: any) => {
         return withGmail(async () => {
           const original = await gmailGetMessage(args.messageId);
           const replyTo = args.replyAll
@@ -639,7 +653,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
           });
           return { id: sent.id, threadId: sent.threadId, replied: true };
         });
-      },
+      }),
     }),
 
     archive_email: ({
@@ -647,12 +661,12 @@ export function createTools(authToken: string, googleToken?: string): Record<str
       parameters: z.object({
         messageId: z.string().describe("Gmail message ID to archive"),
       }),
-      execute: async (args: any) => {
+      execute: safe(async (args: any) => {
         return withGmail(async () => {
           await archiveMessage(args.messageId);
           return { messageId: args.messageId, archived: true };
         });
-      },
+      }),
     }),
 
     trash_email: ({
@@ -660,12 +674,12 @@ export function createTools(authToken: string, googleToken?: string): Record<str
       parameters: z.object({
         messageId: z.string().describe("Gmail message ID to trash"),
       }),
-      execute: async (args: any) => {
+      execute: safe(async (args: any) => {
         return withGmail(async () => {
           await trashMessage(args.messageId);
           return { messageId: args.messageId, trashed: true };
         });
-      },
+      }),
     }),
 
     toggle_email_star: ({
@@ -674,7 +688,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
         messageId: z.string().describe("Gmail message ID"),
         star: z.boolean().describe("true to star, false to unstar"),
       }),
-      execute: async (args: any) => {
+      execute: safe(async (args: any) => {
         return withGmail(async () => {
           if (args.star) {
             await starMessage(args.messageId);
@@ -683,7 +697,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
           }
           return { messageId: args.messageId, starred: args.star };
         });
-      },
+      }),
     }),
 
     toggle_email_read: ({
@@ -692,7 +706,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
         messageId: z.string().describe("Gmail message ID"),
         read: z.boolean().describe("true to mark as read, false to mark as unread"),
       }),
-      execute: async (args: any) => {
+      execute: safe(async (args: any) => {
         return withGmail(async () => {
           if (args.read) {
             await markAsRead(args.messageId);
@@ -701,7 +715,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
           }
           return { messageId: args.messageId, read: args.read };
         });
-      },
+      }),
     }),
   };
 }

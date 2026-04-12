@@ -82,7 +82,7 @@ export async function POST(req: Request) {
     // Manual tool loop — up to 10 rounds
     let currentMessages = [...history];
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const toolCallLog: Array<{ toolName: string; input: any; output: any }> = [];
+    const toolCallLog: Array<{ toolName: string; input: any; output: any; error?: boolean }> = [];
 
     for (let step = 0; step < 10; step++) {
       const result = await generateText({
@@ -106,10 +106,13 @@ export async function POST(req: Request) {
         for (let i = 0; i < result.toolCalls.length; i++) {
           const tc = result.toolCalls[i];
           const tr = result.toolResults?.[i];
+          const output = tr?.output ?? null;
+          const isError = output && typeof output === "object" && "error" in output;
           toolCallLog.push({
             toolName: tc.toolName,
             input: tc.input,
-            output: tr?.output ?? null,
+            output,
+            error: isError || false,
           });
         }
 

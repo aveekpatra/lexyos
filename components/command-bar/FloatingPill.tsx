@@ -18,7 +18,7 @@ type ChatMsg = {
   id: string;
   role: "user" | "assistant";
   text: string;
-  toolCalls?: Array<{ toolName: string; input: unknown; output: unknown }>;
+  toolCalls?: Array<{ toolName: string; input: unknown; output: unknown; error?: boolean }>;
 };
 
 // Module-level cache (survives re-renders, hydrated from Convex on load)
@@ -238,7 +238,9 @@ const FloatingPill = memo(function FloatingPill() {
                                 <div className="flex items-center gap-2 text-brand">
                                   <HugeiconsIcon icon={FlashIcon} size={12} />
                                   <span className="font-medium">{tc.toolName.replace(/_/g, " ")}</span>
-                                  <span className="ml-auto text-emerald-400">done</span>
+                                  <span className={`ml-auto ${tc.error ? "text-red-400" : "text-emerald-400"}`}>
+                                    {tc.error ? "failed" : "done"}
+                                  </span>
                                 </div>
                               </div>
                             ))}

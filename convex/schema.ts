@@ -180,6 +180,7 @@ export default defineSchema({
         toolName: v.string(),
         input: v.any(),
         output: v.any(),
+        error: v.optional(v.boolean()),
       }))),
     })),
     userId: v.string(),
