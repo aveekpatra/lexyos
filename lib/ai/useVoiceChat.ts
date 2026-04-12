@@ -16,7 +16,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 const CARTESIA_API_KEY = process.env.NEXT_PUBLIC_CARTESIA_API_KEY || "";
 const STT_MODEL = "ink-whisper";
 const TTS_MODEL = "sonic-2";
-const TTS_VOICE_ID = process.env.NEXT_PUBLIC_CARTESIA_VOICE_ID || "694f9389-aac1-45b6-b726-9d9369183238";
+const TTS_VOICE_ID = process.env.NEXT_PUBLIC_CARTESIA_VOICE_ID || "69267136-1bdc-412f-ad78-0caad210fb40";
 
 /** How long of silence (ms) before auto-submitting in call mode */
 const SILENCE_TIMEOUT_MS = 1800;
