@@ -247,7 +247,7 @@ const FloatingPill = memo(function FloatingPill() {
                           </div>
                         )}
                         {/* Text */}
-                        {m.text}
+                        <MiniMarkdown text={m.text} />
                       </div>
                     </div>
                   ))}
@@ -403,4 +403,52 @@ function LoadingDots() {
       </div>
     </div>
   );
+}
+
+/** Lightweight inline markdown: **bold**, *italic*, `code`, and bullet lists */
+function MiniMarkdown({ text }: { text: string }) {
+  if (!text) return null;
+  const lines = text.split("\n");
+  return (
+    <span>
+      {lines.map((line, li) => {
+        const isBullet = /^[-•]\s+/.test(line);
+        const content = isBullet ? line.replace(/^[-•]\s+/, "") : line;
+        const rendered = renderInline(content);
+        return (
+          <span key={li}>
+            {li > 0 && <br />}
+            {isBullet && <span className="mr-1 text-text-faint">•</span>}
+            {rendered}
+          </span>
+        );
+      })}
+    </span>
+  );
+}
+
+function renderInline(text: string) {
+  const parts: React.ReactNode[] = [];
+  // Match **bold**, *italic*, `code`
+  const regex = /(\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`)/g;
+  let lastIndex = 0;
+  let match;
+  let key = 0;
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(text.slice(lastIndex, match.index));
+    }
+    if (match[2]) {
+      parts.push(<strong key={key++} className="font-semibold">{match[2]}</strong>);
+    } else if (match[3]) {
+      parts.push(<em key={key++}>{match[3]}</em>);
+    } else if (match[4]) {
+      parts.push(<code key={key++} className="rounded bg-surface-1 px-1 py-0.5 text-xs">{match[4]}</code>);
+    }
+    lastIndex = match.index + match[0].length;
+  }
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex));
+  }
+  return parts;
 }
