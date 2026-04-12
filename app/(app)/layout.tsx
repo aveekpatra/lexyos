@@ -1,6 +1,6 @@
 "use client";
 
-import { ReactNode, useState, useCallback } from "react";
+import { ReactNode, useState, useCallback, useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { UserButton } from "@clerk/nextjs";
 import { useMutation } from "convex/react";
@@ -43,6 +43,12 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const [helpOpen, setHelpOpen] = useState(false);
 
   useHelpShortcut(useCallback(() => setHelpOpen(true), []));
+
+  // App-start: pull calendar changes + process pending sync queue
+  useEffect(() => {
+    fetch("/api/sync/pull-calendar", { method: "POST" }).catch(() => {});
+    fetch("/api/sync/process-queue", { method: "POST" }).catch(() => {});
+  }, []);
 
   return (
     <div className="flex h-svh overflow-hidden">

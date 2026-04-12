@@ -102,6 +102,31 @@ export function createTools(authToken: string, googleToken?: string): Record<str
       }),
     }),
 
+    get_task: ({
+      description: `Get a single task by its ID. Returns full task details including title, status, priority, dates, times, project, and description. Use this to verify a task exists and read its current state after creating or updating it.`,
+      parameters: z.object({
+        id: z.string().describe("Task ID to retrieve"),
+      }),
+      execute: safe(async (args: any) => {
+        const task = await convex.query(api.tasks.getById, { id: args.id as Id<"tasks"> });
+        if (!task) return { error: "Task not found" };
+        return {
+          id: task._id,
+          title: task.title,
+          status: task.status,
+          priority: task.priority,
+          dueDate: task.dueDate,
+          dueTime: task.dueTime,
+          startTime: task.scheduledStartTime,
+          endTime: task.scheduledEndTime,
+          projectId: task.projectId,
+          source: task.source,
+          description: task.description,
+          googleEventId: task.googleEventId,
+        };
+      }),
+    }),
+
     create_task: ({
       description: `Create a new task. Always set a dueDate (defaults to today if not specified). Set priority to p1 (urgent), p2 (high), p3 (medium/default), or p4 (low). If the user mentions a time, set dueTime in HH:MM format. If they mention a project, look up the project ID first with list_projects.`,
       parameters: z.object({
@@ -131,33 +156,14 @@ export function createTools(authToken: string, googleToken?: string): Record<str
           userDate: today(),
         });
 
-        // Auto-push to Google Calendar
+        // Enqueue Google Calendar sync (processed asynchronously)
         try {
-          const { pushTaskToGoogleCalendar } = await import("@/app/actions/calendarSync");
-          const result = await pushTaskToGoogleCalendar({
-            id: id as string,
-            title: args.title,
-            description: args.description,
-            dueDate,
-            dueTime,
-            durationMinutes: args.scheduledStartTime && args.scheduledEndTime
-              ? (() => {
-                  const [sh, sm] = args.scheduledStartTime!.split(":").map(Number);
-                  const [eh, em] = args.scheduledEndTime!.split(":").map(Number);
-                  const d = (eh * 60 + em) - (sh * 60 + sm);
-                  return d > 0 ? d : 60;
-                })()
-              : 60,
+          await convex.mutation(api.syncQueue.enqueue, {
+            taskId: id as Id<"tasks">,
+            action: "push",
           });
-          if (result?.googleEventId) {
-            await convex.mutation(api.tasks.update, {
-              id: id as Id<"tasks">,
-              googleEventId: result.googleEventId,
-              googleCalendarId: result.googleCalendarId || "primary",
-            });
-          }
         } catch (err) {
-          console.warn("[AI] Auto-push to Google Calendar failed:", err);
+          console.warn("[AI] Failed to enqueue sync:", err);
         }
 
         return { id, title: args.title, dueDate, created: true };
@@ -194,65 +200,17 @@ export function createTools(authToken: string, googleToken?: string): Record<str
         if (args.scheduledStartTime) updateArgs.scheduledStartTime = args.scheduledStartTime;
         if (args.scheduledEndTime) updateArgs.scheduledEndTime = args.scheduledEndTime;
 
-        // Fetch current task state before updating (for Google sync)
-        const taskBefore = await convex.query(api.tasks.getById, { id: args.id as Id<"tasks"> });
         await convex.mutation(api.tasks.update, updateArgs as Parameters<typeof convex.mutation<typeof api.tasks.update>>[1]);
 
-        // Sync to Google Calendar
-        if (taskBefore) {
-          try {
-            if (taskBefore.googleEventId) {
-              // Update existing Google event
-              const { updateGoogleEvent } = await import("@/app/actions/calendarSync");
-              const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-              const gUpdates: Record<string, unknown> = {};
-              if (args.title) gUpdates.summary = args.title;
-              if (args.description !== undefined) gUpdates.description = args.description;
-              const newDate = args.dueDate || taskBefore.dueDate || taskBefore.scheduledDate;
-              const newTime = args.dueTime || (taskBefore as any).dueTime || taskBefore.scheduledStartTime;
-              if (args.dueDate || args.dueTime || args.scheduledStartTime || args.scheduledEndTime) {
-                if (newDate && newTime) {
-                  const endTime = args.scheduledEndTime || taskBefore.scheduledEndTime;
-                  let et = endTime;
-                  if (!et) {
-                    const [h, m] = newTime.split(":").map(Number);
-                    et = `${String(Math.floor((h * 60 + m + 60) / 60) % 24).padStart(2, "0")}:${String((h * 60 + m + 60) % 60).padStart(2, "0")}`;
-                  }
-                  gUpdates.start = { dateTime: `${newDate}T${newTime}:00`, timeZone: tz };
-                  gUpdates.end = { dateTime: `${newDate}T${et}:00`, timeZone: tz };
-                } else if (newDate) {
-                  const next = new Date(newDate + "T00:00:00");
-                  next.setDate(next.getDate() + 1);
-                  gUpdates.start = { date: newDate };
-                  gUpdates.end = { date: next.toISOString().slice(0, 10) };
-                }
-              }
-              if (Object.keys(gUpdates).length > 0) {
-                await updateGoogleEvent(taskBefore.googleCalendarId || "primary", taskBefore.googleEventId, gUpdates);
-              }
-            } else if (args.dueDate || taskBefore.dueDate) {
-              // Task got a date but no Google event yet — auto-push
-              const { pushTaskToGoogleCalendar } = await import("@/app/actions/calendarSync");
-              const pushDate = args.dueDate || taskBefore.dueDate || today();
-              const pushTime = args.dueTime || (taskBefore as any).dueTime || taskBefore.scheduledStartTime;
-              const result = await pushTaskToGoogleCalendar({
-                id: args.id,
-                title: args.title || taskBefore.title,
-                dueDate: pushDate,
-                dueTime: pushTime,
-                durationMinutes: 60,
-              });
-              if (result?.googleEventId) {
-                await convex.mutation(api.tasks.update, {
-                  id: args.id as Id<"tasks">,
-                  googleEventId: result.googleEventId,
-                  googleCalendarId: result.googleCalendarId || "primary",
-                });
-              }
-            }
-          } catch (err) {
-            console.warn("[AI] Google Calendar sync failed for update:", err);
-          }
+        // Enqueue Google Calendar sync (processed asynchronously)
+        try {
+          await convex.mutation(api.syncQueue.enqueue, {
+            taskId: args.id as Id<"tasks">,
+            action: "update",
+            payload: { title: args.title, dueDate: args.dueDate, dueTime: args.dueTime },
+          });
+        } catch (err) {
+          console.warn("[AI] Failed to enqueue sync:", err);
         }
 
         return { id: args.id, updated: true };
@@ -265,21 +223,19 @@ export function createTools(authToken: string, googleToken?: string): Record<str
         id: z.string().describe("Task ID to complete"),
       }),
       execute: safe(async (args: any) => {
-        const taskBefore = await convex.query(api.tasks.getById, { id: args.id as Id<"tasks"> });
         await convex.mutation(api.tasks.toggleComplete, { id: args.id as Id<"tasks"> });
-        // Sync [Done] prefix to Google Calendar
-        if (taskBefore?.googleEventId) {
-          try {
-            const { updateGoogleEvent } = await import("@/app/actions/calendarSync");
-            const wasDone = taskBefore.status === "done";
-            const newTitle = wasDone
-              ? taskBefore.title.replace(/^\[Done\]\s*/, "")
-              : `[Done] ${taskBefore.title}`;
-            await updateGoogleEvent(taskBefore.googleCalendarId || "primary", taskBefore.googleEventId, { summary: newTitle });
-          } catch (err) {
-            console.warn("[AI] Google sync failed for complete:", err);
-          }
+
+        // Enqueue Google Calendar sync to update [Done] prefix
+        try {
+          await convex.mutation(api.syncQueue.enqueue, {
+            taskId: args.id as Id<"tasks">,
+            action: "update",
+            payload: { statusToggle: true },
+          });
+        } catch (err) {
+          console.warn("[AI] Failed to enqueue sync:", err);
         }
+
         return { id: args.id, toggled: true };
       }),
     }),
@@ -290,18 +246,26 @@ export function createTools(authToken: string, googleToken?: string): Record<str
         id: z.string().describe("Task ID to delete"),
       }),
       execute: safe(async (args: any) => {
-        // Fetch task before deleting to get Google event ID
+        // Fetch task before deleting to get Google event ID for the sync queue
         const taskBefore = await convex.query(api.tasks.getById, { id: args.id as Id<"tasks"> });
-        await convex.mutation(api.tasks.remove, { id: args.id as Id<"tasks"> });
-        // Delete from Google Calendar
+
+        // Enqueue Google Calendar delete before removing the task
         if (taskBefore?.googleEventId) {
           try {
-            const { deleteGoogleEvent } = await import("@/app/actions/calendarSync");
-            await deleteGoogleEvent(taskBefore.googleCalendarId || "primary", taskBefore.googleEventId);
+            await convex.mutation(api.syncQueue.enqueue, {
+              taskId: args.id as Id<"tasks">,
+              action: "delete",
+              payload: {
+                googleEventId: taskBefore.googleEventId,
+                googleCalendarId: taskBefore.googleCalendarId || "primary",
+              },
+            });
           } catch (err) {
-            console.warn("[AI] Google Calendar delete failed:", err);
+            console.warn("[AI] Failed to enqueue delete sync:", err);
           }
         }
+
+        await convex.mutation(api.tasks.remove, { id: args.id as Id<"tasks"> });
         return { id: args.id, deleted: true };
       }),
     }),

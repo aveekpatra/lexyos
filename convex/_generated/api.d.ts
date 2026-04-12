@@ -16,6 +16,7 @@ import type * as emails from "../emails.js";
 import type * as favorites from "../favorites.js";
 import type * as projects from "../projects.js";
 import type * as sections from "../sections.js";
+import type * as syncQueue from "../syncQueue.js";
 import type * as tasks from "../tasks.js";
 import type * as userPreferences from "../userPreferences.js";
 
@@ -34,6 +35,7 @@ declare const fullApi: ApiFromModules<{
   favorites: typeof favorites;
   projects: typeof projects;
   sections: typeof sections;
+  syncQueue: typeof syncQueue;
   tasks: typeof tasks;
   userPreferences: typeof userPreferences;
 }>;

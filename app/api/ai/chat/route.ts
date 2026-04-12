@@ -1,4 +1,4 @@
-import { generateText } from "ai";
+import { generateText, stepCountIs } from "ai";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { createTools } from "@/lib/ai/tools";
 import { auth } from "@clerk/nextjs/server";
@@ -31,9 +31,30 @@ const SYSTEM_PROMPT = `You are UniFocus AI — a personal task and calendar mana
 - Task statuses: todo, planned, in_progress, review, done.
 - When asked about unread emails, use search_emails with 'is:unread' query.
 
+## CRITICAL: Verify Every Write Operation
+This is your most important rule. You MUST verify after every write operation:
+
+1. **After create_task**: Call get_task with the returned ID to read back the task. Confirm to the user using the VERIFIED data (title, date, time, priority) from get_task — NOT from your memory of what you sent.
+2. **After update_task**: Call get_task with the task ID to read the updated state. Report the verified values.
+3. **After complete_task**: Call get_task to confirm the status is now "done" (or toggled back).
+4. **After delete_task**: You may skip verification since the task no longer exists.
+5. **After send_email / reply_to_email**: The tool result contains the sent message ID — that is sufficient verification.
+6. **After create_project / update_project**: Call list_projects to verify.
+
+NEVER tell the user "I created your task" based only on the create_task result. You MUST read it back with get_task first. Your confirmation must be based on what you READ, not what you WROTE.
+
+If get_task returns an error or unexpected data, tell the user something went wrong.
+
+## Tool Results — Zero Tolerance for Hallucination
+- ALWAYS inspect the actual tool result object before responding.
+- If a tool returned { error: "..." }, tell the user it FAILED and quote the error.
+- NEVER claim an action succeeded unless the tool result explicitly confirms it (e.g. { created: true }, { updated: true }).
+- NEVER fabricate task IDs, titles, dates, or any data. Only use data returned by tools.
+- If you are unsure whether something worked, call get_task or search_tasks to check. Do not guess.
+
 ## Response Style
 - Keep responses short and direct (1-3 sentences).
-- After creating/updating something, confirm what was done.
+- After verifying a write operation, briefly confirm what the verified state is.
 - When listing tasks, format them clearly but briefly.
 - Don't use markdown headers in responses — keep it conversational.
 - Use bullet points for lists of tasks.
@@ -41,6 +62,17 @@ const SYSTEM_PROMPT = `You are UniFocus AI — a personal task and calendar mana
 ## Today
 Today is ${new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}.
 The current time is ${new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })}.`;
+
+/** Fire-and-forget: process pending sync queue after AI tool calls */
+async function triggerSyncQueue(req: Request, cookieHeader: string | null) {
+  try {
+    const url = new URL("/api/sync/process-queue", req.url);
+    fetch(url.toString(), {
+      method: "POST",
+      headers: cookieHeader ? { Cookie: cookieHeader } : {},
+    }).catch(() => { /* fire-and-forget */ });
+  } catch { /* ignore */ }
+}
 
 export async function POST(req: Request) {
   try {
@@ -52,20 +84,44 @@ export async function POST(req: Request) {
 
     const { messages } = await req.json();
 
-    // Convert UI messages to simple format
+    // Convert UI messages to AI SDK format, preserving tool call context
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const history: any[] = (messages || [])
-      .filter((m: Record<string, unknown>) => m.role === "user" || m.role === "assistant")
-      .map((m: Record<string, unknown>) => {
+    const history: any[] = [];
+    for (const m of (messages || [])) {
+      if (m.role === "user") {
         const text = Array.isArray(m.parts)
           ? (m.parts as Array<{ type: string; text?: string }>)
-              .filter((p) => p.type === "text" && p.text)
-              .map((p) => p.text)
+              .filter((p: { type: string; text?: string }) => p.type === "text" && p.text)
+              .map((p: { type: string; text?: string }) => p.text)
               .join("")
           : typeof m.content === "string" ? m.content : "";
-        return { role: m.role as string, content: text };
-      })
-      .filter((m: { content: string }) => m.content.length > 0);
+        if (text) history.push({ role: "user", content: text });
+      } else if (m.role === "assistant") {
+        const text = Array.isArray(m.parts)
+          ? (m.parts as Array<{ type: string; text?: string }>)
+              .filter((p: { type: string; text?: string }) => p.type === "text" && p.text)
+              .map((p: { type: string; text?: string }) => p.text)
+              .join("")
+          : typeof m.content === "string" ? m.content : "";
+
+        // If this assistant message had tool calls, include them as a summary in the text
+        // so the model has context about what it previously did
+        const toolCalls = m.toolCalls as Array<{ toolName: string; input: unknown; output: unknown; error?: boolean }> | undefined;
+        let fullText = text;
+        if (toolCalls && toolCalls.length > 0) {
+          const toolSummary = toolCalls.map((tc) => {
+            const status = tc.error ? "FAILED" : "SUCCESS";
+            const outputStr = tc.output ? JSON.stringify(tc.output) : "no output";
+            return `[Tool: ${tc.toolName} → ${status}: ${outputStr}]`;
+          }).join("\n");
+          fullText = fullText
+            ? `${toolSummary}\n\n${fullText}`
+            : toolSummary;
+        }
+
+        if (fullText) history.push({ role: "assistant", content: fullText });
+      }
+    }
 
     // Pre-fetch Google OAuth token for email tools
     let googleToken: string | undefined;
@@ -79,33 +135,28 @@ export async function POST(req: Request) {
     const model = openrouter(process.env.OPENROUTER_MODEL || "google/gemini-2.5-flash-preview");
     const tools = createTools(token, googleToken);
 
-    // Manual tool loop — up to 10 rounds
-    let currentMessages = [...history];
+    // Let the AI SDK handle the full tool execution loop natively.
+    // maxSteps: 10 allows up to 10 rounds of tool calls before forcing a text response.
+    const result = await generateText({
+      model,
+      system: SYSTEM_PROMPT,
+      messages: history,
+      tools,
+      toolChoice: "auto",
+      temperature: 0,
+      stopWhen: stepCountIs(10),
+    });
+
+    // Collect all tool calls across all steps for the UI
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const toolCallLog: Array<{ toolName: string; input: any; output: any; error?: boolean }> = [];
+    let hadTaskToolCalls = false;
 
-    for (let step = 0; step < 10; step++) {
-      const result = await generateText({
-        model,
-        system: SYSTEM_PROMPT,
-        messages: currentMessages,
-        tools,
-        toolChoice: "auto",
-      });
-
-      // If model returned text (final answer), return it
-      if (result.text && result.text.trim()) {
-        return Response.json({
-          text: result.text,
-          toolCalls: toolCallLog,
-        });
-      }
-
-      // If model made tool calls, log them and continue
-      if (result.toolCalls && result.toolCalls.length > 0) {
-        for (let i = 0; i < result.toolCalls.length; i++) {
-          const tc = result.toolCalls[i];
-          const tr = result.toolResults?.[i];
+    for (const step of result.steps) {
+      if (step.toolCalls) {
+        for (let i = 0; i < step.toolCalls.length; i++) {
+          const tc = step.toolCalls[i];
+          const tr = step.toolResults?.[i];
           const output = tr?.output ?? null;
           const isError = output && typeof output === "object" && "error" in output;
           toolCallLog.push({
@@ -114,30 +165,27 @@ export async function POST(req: Request) {
             output,
             error: isError || false,
           });
+          if (["create_task", "update_task", "complete_task", "delete_task"].includes(tc.toolName)) {
+            hadTaskToolCalls = true;
+          }
         }
-
-        // Append the assistant + tool messages to continue the conversation
-        currentMessages = [
-          ...currentMessages,
-          ...(result.response.messages as typeof currentMessages),
-        ];
-        continue;
       }
-
-      // No text and no tool calls — shouldn't happen but break to avoid infinite loop
-      break;
     }
 
-    // Fallback if loop exhausted
+    // Fire-and-forget: process pending sync queue if task tools were used
+    if (hadTaskToolCalls) {
+      triggerSyncQueue(req, req.headers.get("cookie"));
+    }
+
     return Response.json({
-      text: "I processed your request but couldn't generate a response. The tool calls completed successfully.",
+      text: result.text || "Done.",
       toolCalls: toolCallLog,
     });
   } catch (err) {
     console.error("AI chat error:", err);
     return Response.json(
       { error: err instanceof Error ? err.message : "Internal error", text: "", toolCalls: [] },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

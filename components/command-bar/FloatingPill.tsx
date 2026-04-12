@@ -66,6 +66,7 @@ const FloatingPill = memo(function FloatingPill() {
           messages: updatedMessages.map((m) => ({
             role: m.role,
             parts: [{ type: "text", text: m.text }],
+            toolCalls: m.toolCalls,
           })),
         }),
       });

@@ -152,6 +152,20 @@ export default defineSchema({
     .index("by_userId_and_messageId", ["userId", "gmailMessageId"])
     .index("by_userId_and_unread", ["userId", "isUnread"]),
 
+  pendingSyncQueue: defineTable({
+    userId: v.string(),
+    taskId: v.id("tasks"),
+    action: v.union(v.literal("push"), v.literal("update"), v.literal("delete")),
+    payload: v.optional(v.any()),
+    retryCount: v.number(),
+    status: v.union(v.literal("pending"), v.literal("processing"), v.literal("failed")),
+    createdAt: v.string(),
+    lastAttemptAt: v.optional(v.string()),
+    errorMessage: v.optional(v.string()),
+  })
+    .index("by_userId_and_status", ["userId", "status"])
+    .index("by_taskId", ["taskId"]),
+
   emailSyncState: defineTable({
     lastHistoryId: v.string(),
     lastSyncedAt: v.number(),

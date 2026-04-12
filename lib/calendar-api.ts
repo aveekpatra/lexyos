@@ -192,6 +192,119 @@ export async function updateCalendarEvent(
   return res.json();
 }
 
+/**
+ * Fetch events incrementally using a syncToken.
+ * Returns { events, nextSyncToken, fullSyncRequired }.
+ * If syncToken is expired (410 Gone), returns fullSyncRequired: true.
+ */
+export async function getCalendarEventsIncremental(
+  calendarId: string,
+  syncToken: string,
+): Promise<{ events: GoogleEvent[]; nextSyncToken?: string; fullSyncRequired: boolean }> {
+  const token = await getGoogleAccessToken();
+  const params = new URLSearchParams({
+    syncToken,
+    maxResults: "250",
+  });
+
+  const res = await fetch(
+    `${GOOGLE_CALENDAR_API}/calendars/${encodeURIComponent(calendarId)}/events?${params}`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+    },
+  );
+
+  if (res.status === 410) {
+    // syncToken expired — caller must do a full sync
+    return { events: [], fullSyncRequired: true };
+  }
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Google Calendar API error (${res.status}): ${text}`);
+  }
+
+  const data = await res.json();
+  const events: GoogleEvent[] = (data.items ?? []).map((event: GoogleEvent) => ({
+    ...event,
+    calendarId,
+  }));
+
+  return {
+    events,
+    nextSyncToken: data.nextSyncToken,
+    fullSyncRequired: false,
+  };
+}
+
+/**
+ * Fetch events with full sync and return the syncToken for future incremental syncs.
+ */
+export async function getCalendarEventsWithSyncToken(
+  calendarId: string,
+  timeMin: string,
+  timeMax: string,
+  timeZone?: string,
+): Promise<{ events: GoogleEvent[]; nextSyncToken?: string }> {
+  const token = await getGoogleAccessToken();
+  const eventColorMap = await getEventColorMap();
+
+  // Get calendar info for color
+  const calendars = await getCalendarList();
+  const calendar = calendars.find((c) => c.id === calendarId);
+  const bgColor = calendar?.backgroundColor || "#039be5";
+
+  const allEvents: GoogleEvent[] = [];
+  let pageToken: string | undefined;
+  let nextSyncToken: string | undefined;
+
+  do {
+    const params = new URLSearchParams({
+      timeMin,
+      timeMax,
+      singleEvents: "true",
+      maxResults: "250",
+    });
+    if (timeZone) params.set("timeZone", timeZone);
+    if (pageToken) params.set("pageToken", pageToken);
+
+    const res = await fetch(
+      `${GOOGLE_CALENDAR_API}/calendars/${encodeURIComponent(calendarId)}/events?${params}`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      },
+    );
+
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Google Calendar API error (${res.status}): ${text}`);
+    }
+
+    const data = await res.json();
+    const events = (data.items ?? []).map((event: GoogleEvent) => ({
+      ...event,
+      calendarId,
+      calendarColor: event.colorId
+        ? (eventColorMap[event.colorId] || bgColor)
+        : bgColor,
+    }));
+    allEvents.push(...events);
+
+    pageToken = data.nextPageToken;
+    if (!pageToken) {
+      nextSyncToken = data.nextSyncToken;
+    }
+  } while (pageToken);
+
+  return { events: allEvents, nextSyncToken };
+}
+
 export async function deleteCalendarEvent(
   calendarId: string,
   eventId: string

@@ -31,6 +31,19 @@ export default function MailView() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
+  // Lazy email sync: trigger incremental sync when Mail view mounts
+  useEffect(() => {
+    const doSync = async () => {
+      try {
+        const { syncGmail } = await import("@/app/actions/gmailSync");
+        await syncGmail(false); // incremental sync (uses historyId)
+      } catch (err) {
+        console.warn("[Mail] Background email sync failed:", err);
+      }
+    };
+    doSync();
+  }, []);
+
   // Optimistic update mutation
   const updateLabelsOptimistic = useMutation(api.emails.updateLabels);
 
