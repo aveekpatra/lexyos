@@ -134,7 +134,7 @@ export async function POST(req: Request) {
     }
 
     const openrouter = createOpenRouter({ apiKey: process.env.OPENROUTER_API_KEY });
-    const model = openrouter(process.env.OPENROUTER_MODEL || "google/gemini-2.5-flash-preview");
+    const model = openrouter(process.env.OPENROUTER_MODEL || "z-ai/glm-4.7:nitro");
     const tools = createTools(token, googleToken);
 
     // Let the AI SDK handle the full tool execution loop natively.
