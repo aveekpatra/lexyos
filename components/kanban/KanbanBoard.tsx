@@ -85,7 +85,12 @@ export default function KanbanBoard() {
         sorted.sort((a, b) => {
           const da = a.dueDate || a.scheduledDate || "9999";
           const db = b.dueDate || b.scheduledDate || "9999";
-          return da.localeCompare(db);
+          const dateCmp = da.localeCompare(db);
+          if (dateCmp !== 0) return dateCmp;
+          // Same date — sort by time (dueTime or scheduledStartTime)
+          const ta = a.dueTime || a.scheduledStartTime || "23:59";
+          const tb = b.dueTime || b.scheduledStartTime || "23:59";
+          return ta.localeCompare(tb);
         });
         break;
       case "created":
