@@ -24,8 +24,8 @@ import { syncTaskUpdateToGoogle, syncTaskCompletionToGoogle, syncTaskDeletionToG
 import { TaskEditDialog } from "@/components/kanban/KanbanCard";
 import { PRIORITY_COLORS, PRIORITY_LABELS } from "@/lib/constants";
 
-const itemClass = "rounded-lg px-3 py-2 text-sm text-[#d4d4d8] hover:bg-[#1f1f28]";
-const subPopupClass = "w-[220px] rounded-xl border border-[#2a2a36] bg-[#131318] p-1.5 shadow-[0_8px_32px_rgba(0,0,0,0.5)]";
+const itemClass = "rounded-lg px-3 py-2 text-sm text-text-strong hover:bg-line";
+const subPopupClass = "w-[220px] rounded-xl border border-line-strong bg-surface-0 p-1.5 shadow-[0_8px_32px_rgba(0,0,0,0.5)]";
 
 export function TaskContextMenu({ task, children, className, style }: {
   task: Doc<"tasks">;
@@ -78,16 +78,16 @@ export function TaskContextMenu({ task, children, className, style }: {
         <ContextMenuTrigger className={className} style={style}>
           {children}
         </ContextMenuTrigger>
-        <ContextMenuPopup className="w-[220px] rounded-xl border border-[#2a2a36] bg-[#131318] p-1.5 shadow-[0_8px_32px_rgba(0,0,0,0.5)]">
+        <ContextMenuPopup className="w-[220px] rounded-xl border border-line-strong bg-surface-0 p-1.5 shadow-[0_8px_32px_rgba(0,0,0,0.5)]">
           {/* Edit */}
           <MenuItem onClick={() => setEditOpen(true)} className={itemClass}>
             <span className="flex items-center gap-2.5">
-              <HugeiconsIcon icon={Edit01Icon} size={14} className="text-[#71717a]" />
+              <HugeiconsIcon icon={Edit01Icon} size={14} className="text-text-muted" />
               Edit
             </span>
           </MenuItem>
 
-          <MenuSeparator className="my-1 border-[#1f1f28]" />
+          <MenuSeparator className="my-1 border-line" />
 
           {/* Priority submenu */}
           <MenuSub>
@@ -102,13 +102,13 @@ export function TaskContextMenu({ task, children, className, style }: {
                 <MenuItem
                   key={p}
                   onClick={() => syncUpdate({ id: task._id, priority: p })}
-                  className={`${itemClass} ${task.priority === p ? "bg-[#1f1f28]" : ""}`}
+                  className={`${itemClass} ${task.priority === p ? "bg-brand-bg text-brand-strong" : ""}`}
                 >
                   <span className="flex items-center gap-2.5">
                     <span className="size-2.5 rounded-full" style={{ backgroundColor: PRIORITY_COLORS[p] }} />
                     {PRIORITY_LABELS[p]}
                   </span>
-                  {task.priority === p && <span className="ml-auto text-[10px] text-[#71717a]">✓</span>}
+                  {task.priority === p && <span className="ml-auto text-[10px] text-text-muted">✓</span>}
                 </MenuItem>
               ))}
             </MenuSubPopup>
@@ -118,7 +118,7 @@ export function TaskContextMenu({ task, children, className, style }: {
           <MenuSub>
             <MenuSubTrigger className={itemClass}>
               <span className="flex items-center gap-2.5">
-                <HugeiconsIcon icon={Calendar03Icon} size={14} className="text-[#71717a]" />
+                <HugeiconsIcon icon={Calendar03Icon} size={14} className="text-text-muted" />
                 {task.dueDate ? format(new Date(task.dueDate + "T00:00:00"), "MMM d") : "Date"}
               </span>
             </MenuSubTrigger>
@@ -127,15 +127,15 @@ export function TaskContextMenu({ task, children, className, style }: {
                 <MenuItem
                   key={d.label}
                   onClick={() => syncUpdate({ id: task._id, dueDate: d.date })}
-                  className={`${itemClass} ${task.dueDate === d.date ? "bg-[#1f1f28]" : ""}`}
+                  className={`${itemClass} ${task.dueDate === d.date ? "bg-brand-bg text-brand-strong" : ""}`}
                 >
                   {d.label}
-                  {task.dueDate === d.date && <span className="ml-auto text-[10px] text-[#71717a]">✓</span>}
+                  {task.dueDate === d.date && <span className="ml-auto text-[10px] text-text-muted">✓</span>}
                 </MenuItem>
               ))}
               {task.dueDate && (
                 <>
-                  <MenuSeparator className="my-1 border-[#1f1f28]" />
+                  <MenuSeparator className="my-1 border-line" />
                   <MenuItem
                     onClick={() => syncUpdate({ id: task._id, clearDueDate: true } as Parameters<typeof updateTask>[0])}
                     className={`${itemClass} text-[#ef4444]`}
@@ -151,40 +151,40 @@ export function TaskContextMenu({ task, children, className, style }: {
           <MenuSub>
             <MenuSubTrigger className={itemClass}>
               <span className="flex items-center gap-2.5">
-                <HugeiconsIcon icon={Folder01Icon} size={14} className="text-[#71717a]" />
+                <HugeiconsIcon icon={Folder01Icon} size={14} className="text-text-muted" />
                 Project
               </span>
             </MenuSubTrigger>
             <MenuSubPopup className={subPopupClass}>
               <MenuItem
                 onClick={() => syncUpdate({ id: task._id, clearProjectId: true } as Parameters<typeof updateTask>[0])}
-                className={`${itemClass} ${!task.projectId ? "bg-[#1f1f28]" : ""}`}
+                className={`${itemClass} ${!task.projectId ? "bg-brand-bg text-brand-strong" : ""}`}
               >
                 No project
-                {!task.projectId && <span className="ml-auto text-[10px] text-[#71717a]">✓</span>}
+                {!task.projectId && <span className="ml-auto text-[10px] text-text-muted">✓</span>}
               </MenuItem>
               {projects?.map((p) => (
                 <MenuItem
                   key={p._id}
                   onClick={() => syncUpdate({ id: task._id, projectId: p._id })}
-                  className={`${itemClass} ${task.projectId === p._id ? "bg-[#1f1f28]" : ""}`}
+                  className={`${itemClass} ${task.projectId === p._id ? "bg-brand-bg text-brand-strong" : ""}`}
                 >
                   <span className="flex items-center gap-2.5">
                     <span className="size-2 rounded-full" style={{ backgroundColor: p.color }} />
                     {p.name}
                   </span>
-                  {task.projectId === p._id && <span className="ml-auto text-[10px] text-[#71717a]">✓</span>}
+                  {task.projectId === p._id && <span className="ml-auto text-[10px] text-text-muted">✓</span>}
                 </MenuItem>
               ))}
             </MenuSubPopup>
           </MenuSub>
 
-          <MenuSeparator className="my-1 border-[#1f1f28]" />
+          <MenuSeparator className="my-1 border-line" />
 
           {/* Mark done */}
           <MenuItem onClick={toggleComplete} className={itemClass}>
             <span className="flex items-center gap-2.5">
-              <HugeiconsIcon icon={Tick01Icon} size={14} className="text-[#71717a]" />
+              <HugeiconsIcon icon={Tick01Icon} size={14} className="text-text-muted" />
               {isDone ? "Mark undone" : "Mark done"}
             </span>
           </MenuItem>

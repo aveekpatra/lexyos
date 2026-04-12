@@ -68,8 +68,8 @@ export default function MailBulkActions({
   if (selectedIds.size === 0) return null;
 
   return (
-    <div className="flex items-center gap-1 border-b border-[#1f1f28] bg-[#131318] px-3 py-2">
-      <span className="mr-2 text-[13px] font-medium text-[#a78bfa]">
+    <div className="flex items-center gap-1 border-b border-line bg-surface-0 px-3 py-2">
+      <span className="mr-2 text-[13px] font-medium text-brand">
         {selectedIds.size} selected
       </span>
 
@@ -106,7 +106,7 @@ export default function MailBulkActions({
       <div className="flex-1" />
       <button
         onClick={onClearSelection}
-        className="text-[12px] text-[#71717a] hover:text-[#a1a1aa]"
+        className="text-[12px] text-text-muted hover:text-text-secondary"
       >
         Clear
       </button>
@@ -127,7 +127,7 @@ function BulkButton({
     <button
       onClick={onClick}
       title={label}
-      className="rounded-md p-1.5 text-[#a1a1aa] transition-colors hover:bg-[#1f1f28] hover:text-white"
+      className="rounded-md p-1.5 text-text-secondary transition-colors hover:bg-line hover:text-foreground"
     >
       <HugeiconsIcon icon={icon} size={16} strokeWidth={1.5} />
     </button>

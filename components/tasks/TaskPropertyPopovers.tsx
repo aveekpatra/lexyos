@@ -100,7 +100,7 @@ export const DatePickerPopover = memo(function DatePickerPopover({
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger render={<span role="button" tabIndex={0} draggable={false} className="inline-flex cursor-pointer" />}>
+      <PopoverTrigger nativeButton={false} render={<span role="button" tabIndex={0} draggable={false} className="inline-flex cursor-pointer" />}>
         {children}
       </PopoverTrigger>
       <PopoverPopup className={popoverClass} sideOffset={6}>
@@ -211,7 +211,7 @@ export const DurationPickerPopover = memo(function DurationPickerPopover({
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger render={<span role="button" tabIndex={0} draggable={false} className="inline-flex cursor-pointer" />}>
+      <PopoverTrigger nativeButton={false} render={<span role="button" tabIndex={0} draggable={false} className="inline-flex cursor-pointer" />}>
         {children}
       </PopoverTrigger>
       <PopoverPopup className={popoverClass} sideOffset={6}>
@@ -297,7 +297,7 @@ export const ProjectPickerPopover = memo(function ProjectPickerPopover({
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger render={<span role="button" tabIndex={0} draggable={false} className="inline-flex cursor-pointer" />}>
+      <PopoverTrigger nativeButton={false} render={<span role="button" tabIndex={0} draggable={false} className="inline-flex cursor-pointer" />}>
         {children}
       </PopoverTrigger>
       <PopoverPopup className={popoverClass} sideOffset={6}>
@@ -433,7 +433,7 @@ export const TimePickerPopover = memo(function TimePickerPopover({
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger render={<span role="button" tabIndex={0} draggable={false} className="inline-flex cursor-pointer" />}>
+      <PopoverTrigger nativeButton={false} render={<span role="button" tabIndex={0} draggable={false} className="inline-flex cursor-pointer" />}>
         {children}
       </PopoverTrigger>
       <PopoverPopup className={popoverClass} sideOffset={6}>

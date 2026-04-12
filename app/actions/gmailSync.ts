@@ -88,24 +88,46 @@ function parseMetadataToCache(raw: {
 
 // --- Full sync (initial, no history cursor) ---
 
-async function performFullSync(maxResults = 200) {
+async function performFullSync() {
   const convex = await getConvex();
 
   // Get profile for initial historyId anchor
   const profile = await getProfile();
 
-  // Fetch message IDs
-  const listResult = await listMessages({ maxResults });
-  if (!listResult.messages.length) {
+  // Paginate through all messages in Gmail (including trash/spam)
+  const allMessageIds: { id: string; threadId: string }[] = [];
+  let pageToken: string | undefined;
+
+  do {
+    const listResult = await listMessages({
+      maxResults: 500,
+      pageToken,
+      includeSpamTrash: true,
+    });
+    if (listResult.messages.length > 0) {
+      allMessageIds.push(...listResult.messages);
+    }
+    pageToken = listResult.nextPageToken;
+  } while (pageToken);
+
+  if (!allMessageIds.length) {
+    // No messages in Gmail — delete everything from cache
+    const now = Date.now();
+    await convex.mutation(api.emails.reconcile, { validGmailMessageIds: [] });
+    await convex.mutation(api.emailSyncState.upsert, {
+      lastHistoryId: profile.historyId,
+      lastSyncedAt: now,
+      lastFullSyncAt: now,
+    });
     return { method: "full" as const, count: 0, historyId: profile.historyId };
   }
 
-  // Batch fetch metadata (in chunks of 50 to avoid overwhelming)
-  const CHUNK_SIZE = 50;
+  // Batch fetch metadata (in small chunks to avoid Gmail rate limits)
+  const CHUNK_SIZE = 10;
   const allMessages: ReturnType<typeof parseMetadataToCache>[] = [];
 
-  for (let i = 0; i < listResult.messages.length; i += CHUNK_SIZE) {
-    const chunk = listResult.messages.slice(i, i + CHUNK_SIZE);
+  for (let i = 0; i < allMessageIds.length; i += CHUNK_SIZE) {
+    const chunk = allMessageIds.slice(i, i + CHUNK_SIZE);
     const metadatas = await Promise.all(
       chunk.map((m) => getMessageMetadata(m.id))
     );
@@ -122,10 +144,17 @@ async function performFullSync(maxResults = 200) {
     });
   }
 
+  // Reconcile: delete any cached emails that no longer exist in Gmail.
+  // Gmail is the single source of truth.
+  const validIds = allMessages.map((m) => m.gmailMessageId);
+  await convex.mutation(api.emails.reconcile, { validGmailMessageIds: validIds });
+
   // Save sync cursor
+  const now = Date.now();
   await convex.mutation(api.emailSyncState.upsert, {
     lastHistoryId: profile.historyId,
-    lastSyncedAt: Date.now(),
+    lastSyncedAt: now,
+    lastFullSyncAt: now,
   });
 
   return { method: "full" as const, count: allMessages.length, historyId: profile.historyId };
@@ -248,7 +277,7 @@ async function performIncrementalSync(startHistoryId: string) {
 
 // --- Main sync entry point ---
 
-export async function syncGmail(): Promise<{
+export async function syncGmail(forceFullSync = false): Promise<{
   synced: boolean;
   method: "full" | "incremental";
   error?: string;
@@ -264,14 +293,15 @@ export async function syncGmail(): Promise<{
     setGmailToken(googleToken);
 
     try {
-      // Get current sync state
       const convex = await getConvex();
       const syncState = await convex.query(api.emailSyncState.get, {});
 
-      if (!syncState?.lastHistoryId) {
+      if (!syncState?.lastHistoryId || forceFullSync) {
+        // Full sync: first time or manually forced
         const result = await performFullSync();
         return { synced: true, method: result.method };
       } else {
+        // Incremental sync: fast, uses History API
         const result = await performIncrementalSync(syncState.lastHistoryId);
         return { synced: true, method: result.method };
       }

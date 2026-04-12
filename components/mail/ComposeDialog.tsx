@@ -25,6 +25,63 @@ interface ComposeDialogProps {
   onSent: () => void;
 }
 
+function htmlToPlainText(html: string): string {
+  // Replace <br> and block-level closing tags with newlines
+  let text = html
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n")
+    .replace(/<\/div>/gi, "\n")
+    .replace(/<\/li>/gi, "\n")
+    .replace(/<\/tr>/gi, "\n")
+    .replace(/<\/h[1-6]>/gi, "\n\n");
+  // Strip all remaining tags
+  text = text.replace(/<[^>]+>/g, "");
+  // Decode common HTML entities
+  text = text
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, " ");
+  // Collapse excessive newlines
+  text = text.replace(/\n{3,}/g, "\n\n").trim();
+  return text;
+}
+
+function stripQuotedContent(text: string): string {
+  // Remove everything after common reply markers
+  const markers = [
+    /^On .+ wrote:$/m,
+    /^-{3,}\s*$/m,
+    /^>{2,}/m,
+    /^---------- Forwarded message ----------/m,
+  ];
+  let result = text;
+  for (const marker of markers) {
+    const match = result.match(marker);
+    if (match && match.index !== undefined) {
+      result = result.slice(0, match.index).trim();
+      break;
+    }
+  }
+  return result;
+}
+
+function getPlainBody(msg: GmailMessage): string {
+  let text: string;
+  if (msg.bodyHtml && (msg.bodyText.includes("<br>") || msg.bodyText.includes("<p>") || msg.bodyText.includes("</") )) {
+    // Strip gmail_quote and blockquote from HTML before converting
+    let html = msg.bodyHtml;
+    html = html.replace(/<div\s+class="gmail_quote"[\s\S]*$/gi, "");
+    html = html.replace(/<blockquote[\s\S]*?<\/blockquote>/gi, "");
+    text = htmlToPlainText(html);
+  } else {
+    text = msg.bodyText;
+  }
+  return stripQuotedContent(text);
+}
+
 function getInitialState(mode: ComposeMode) {
   switch (mode.type) {
     case "reply": {
@@ -34,7 +91,7 @@ function getInitialState(mode: ComposeMode) {
         cc: "",
         bcc: "",
         subject: msg.subject.startsWith("Re:") ? msg.subject : `Re: ${msg.subject}`,
-        body: `\n\n---\nOn ${new Date(msg.date).toLocaleDateString()}, ${msg.from.name || msg.from.email} wrote:\n> ${msg.bodyText.split("\n").join("\n> ")}`,
+        body: "",
         threadId: msg.threadId,
         inReplyTo: msg.id,
         references: msg.id,
@@ -51,7 +108,7 @@ function getInitialState(mode: ComposeMode) {
         cc: allRecipients.join(", "),
         bcc: "",
         subject: msg.subject.startsWith("Re:") ? msg.subject : `Re: ${msg.subject}`,
-        body: `\n\n---\nOn ${new Date(msg.date).toLocaleDateString()}, ${msg.from.name || msg.from.email} wrote:\n> ${msg.bodyText.split("\n").join("\n> ")}`,
+        body: "",
         threadId: msg.threadId,
         inReplyTo: msg.id,
         references: msg.id,
@@ -59,12 +116,13 @@ function getInitialState(mode: ComposeMode) {
     }
     case "forward": {
       const msg = mode.message;
+      const fwdBody = getPlainBody(msg);
       return {
         to: "",
         cc: "",
         bcc: "",
         subject: msg.subject.startsWith("Fwd:") ? msg.subject : `Fwd: ${msg.subject}`,
-        body: `\n\n---------- Forwarded message ----------\nFrom: ${msg.from.name || msg.from.email} <${msg.from.email}>\nDate: ${new Date(msg.date).toLocaleDateString()}\nSubject: ${msg.subject}\n\n${msg.bodyText}`,
+        body: `\n\n---------- Forwarded message ----------\nFrom: ${msg.from.name || msg.from.email} <${msg.from.email}>\nDate: ${new Date(msg.date).toLocaleDateString()}\nSubject: ${msg.subject}\n\n${fwdBody}`,
         threadId: undefined,
         inReplyTo: undefined,
         references: undefined,
@@ -177,7 +235,7 @@ export default function ComposeDialog({
               !showCcBcc ? (
                 <button
                   onClick={() => setShowCcBcc(true)}
-                  className="text-[12px] text-[#a78bfa] hover:text-[#c4b5fd]"
+                  className="text-[12px] text-brand hover:text-brand"
                 >
                   Cc/Bcc
                 </button>
@@ -192,6 +250,18 @@ export default function ComposeDialog({
           )}
           <ComposeField label="Subject" value={subject} onChange={setSubject} />
         </div>
+
+        {/* Reply context hint */}
+        {(mode.type === "reply" || mode.type === "replyAll") && (
+          <div className="mx-6 mt-2 rounded-md border border-line bg-surface-0 px-3 py-2">
+            <p className="text-[12px] text-text-muted">
+              {mode.message.from.name || mode.message.from.email} &middot; {new Date(mode.message.date).toLocaleDateString()}
+            </p>
+            <p className="mt-0.5 line-clamp-2 text-[13px] text-text-secondary">
+              {getPlainBody(mode.message).slice(0, 200)}
+            </p>
+          </div>
+        )}
 
         {/* Body */}
         <div className="px-6 py-2">

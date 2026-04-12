@@ -133,7 +133,9 @@ export default function MailView() {
 
   const handleSelectThread = useCallback((threadId: string) => {
     setActiveThreadId(threadId);
-  }, []);
+    const idx = messages.findIndex((m) => m.gmailThreadId === threadId);
+    if (idx >= 0) setFocusIndex(idx);
+  }, [messages]);
 
   const handleToggleSelect = useCallback(
     (messageId: string) => {
@@ -183,22 +185,23 @@ export default function MailView() {
 
       switch (e.key) {
         case "j":
-        case "ArrowDown":
+        case "ArrowDown": {
           e.preventDefault();
-          setFocusIndex((i) => Math.min(i + 1, messages.length - 1));
+          const nextIdx = Math.min(focusIndex + 1, messages.length - 1);
+          setFocusIndex(nextIdx);
+          const next = messages[nextIdx];
+          if (next) handleSelectThread(next.gmailThreadId);
           break;
+        }
         case "k":
-        case "ArrowUp":
+        case "ArrowUp": {
           e.preventDefault();
-          setFocusIndex((i) => Math.max(i - 1, 0));
+          const prevIdx = Math.max(focusIndex - 1, 0);
+          setFocusIndex(prevIdx);
+          const prev = messages[prevIdx];
+          if (prev) handleSelectThread(prev.gmailThreadId);
           break;
-        case "Enter":
-        case "o":
-          if (focused && !activeThreadId) {
-            e.preventDefault();
-            handleSelectThread(focused.gmailThreadId);
-          }
-          break;
+        }
         case "Escape":
           e.preventDefault();
           if (activeThreadId) setActiveThreadId(null);
@@ -276,7 +279,7 @@ export default function MailView() {
   return (
     <div className="flex h-full">
       {/* Sidebar */}
-      <div style={{ width: sidebar.width }} className="flex-shrink-0 overflow-hidden border-r border-[#1f1f28]">
+      <div style={{ width: sidebar.width }} className="flex-shrink-0 overflow-hidden border-r border-line">
         <MailSidebar
           activeLabel={activeLabel}
           onLabelSelect={handleLabelSelect}
@@ -289,7 +292,7 @@ export default function MailView() {
       {/* Message list */}
       <div
         style={{ width: list.width }}
-        className="flex flex-shrink-0 flex-col overflow-hidden border-r border-[#1f1f28]"
+        className="flex flex-shrink-0 flex-col overflow-hidden border-r border-line"
       >
         {syncError && (
           <div className="border-b border-red-900/50 bg-red-950/30 px-3 py-2 text-[13px] text-red-400">
@@ -308,6 +311,7 @@ export default function MailView() {
           activeThreadId={activeThreadId}
           selectedIds={selectedIds}
           searchQuery={searchQuery}
+          focusIndex={focusIndex}
           onSearchChange={setSearchQuery}
           onSelectThread={handleSelectThread}
           onToggleSelect={handleToggleSelect}
@@ -330,13 +334,13 @@ export default function MailView() {
             onRefreshList={refresh}
           />
         ) : (
-          <div className="flex flex-1 flex-col items-center justify-center gap-3 text-[#52525b]">
+          <div className="flex flex-1 flex-col items-center justify-center gap-3 text-text-faint">
             <p className="text-[15px]">Select an email to read</p>
             <p className="text-[13px]">
-              Use <kbd className="rounded border border-[#3f3f46] bg-[#1f1f28] px-1.5 py-0.5 text-[11px] text-[#a1a1aa]">j</kbd> / <kbd className="rounded border border-[#3f3f46] bg-[#1f1f28] px-1.5 py-0.5 text-[11px] text-[#a1a1aa]">k</kbd> to navigate, <kbd className="rounded border border-[#3f3f46] bg-[#1f1f28] px-1.5 py-0.5 text-[11px] text-[#a1a1aa]">Enter</kbd> to open
+              Use <kbd className="rounded border border-line-strong bg-line px-1.5 py-0.5 text-[11px] text-text-secondary">j</kbd> / <kbd className="rounded border border-line-strong bg-line px-1.5 py-0.5 text-[11px] text-text-secondary">k</kbd> to navigate, <kbd className="rounded border border-line-strong bg-line px-1.5 py-0.5 text-[11px] text-text-secondary">Enter</kbd> to open
             </p>
             {syncing && (
-              <p className="text-[12px] text-[#7c3aed]">Syncing emails...</p>
+              <p className="text-[12px] text-brand-strong">Syncing emails...</p>
             )}
           </div>
         )}

@@ -17,6 +17,7 @@ export const upsert = mutation({
   args: {
     lastHistoryId: v.string(),
     lastSyncedAt: v.number(),
+    lastFullSyncAt: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
@@ -28,15 +29,21 @@ export const upsert = mutation({
       .withIndex("by_userId", (q) => q.eq("userId", userId))
       .first();
 
+    const patch: Record<string, unknown> = {
+      lastHistoryId: args.lastHistoryId,
+      lastSyncedAt: args.lastSyncedAt,
+    };
+    if (args.lastFullSyncAt !== undefined) {
+      patch.lastFullSyncAt = args.lastFullSyncAt;
+    }
+
     if (existing) {
-      await ctx.db.patch(existing._id, {
-        lastHistoryId: args.lastHistoryId,
-        lastSyncedAt: args.lastSyncedAt,
-      });
+      await ctx.db.patch(existing._id, patch);
     } else {
       await ctx.db.insert("emailSyncState", {
         lastHistoryId: args.lastHistoryId,
         lastSyncedAt: args.lastSyncedAt,
+        lastFullSyncAt: args.lastFullSyncAt,
         userId,
       });
     }

@@ -130,14 +130,14 @@ export default function CommandBar({ onClose }: CommandBarProps) {
           <CommandPanel>
             {loading && (
               <div className="flex items-center gap-3 px-5 py-4">
-                <HugeiconsIcon icon={Loading03Icon} size={16} className="animate-spin text-[#8b5cf6]" />
+                <HugeiconsIcon icon={Loading03Icon} size={16} className="animate-spin text-brand" />
                 <span className="text-sm text-muted-foreground">Thinking...</span>
               </div>
             )}
 
             {response && !loading && (
               <div className="flex items-start gap-3 px-5 py-4">
-                <HugeiconsIcon icon={AiMagicIcon} size={16} className="mt-0.5 shrink-0 text-[#8b5cf6]" />
+                <HugeiconsIcon icon={AiMagicIcon} size={16} className="mt-0.5 shrink-0 text-brand" />
                 <p className="whitespace-pre-wrap text-sm leading-relaxed">{response}</p>
               </div>
             )}

@@ -12,16 +12,32 @@ export const list = query({
     if (!identity) return [];
     const userId = identity.subject;
 
-    const emails = await ctx.db
+    let emails = await ctx.db
       .query("emails")
       .withIndex("by_userId_and_date", (q) => q.eq("userId", userId))
       .order("desc")
       .collect();
 
-    if (!args.labelFilter) return emails;
+    if (args.labelFilter === "ARCHIVED") {
+      // Archived = no INBOX, TRASH, SPAM, or DRAFT label
+      emails = emails.filter(
+        (e) =>
+          !e.labelIds.includes("INBOX") &&
+          !e.labelIds.includes("TRASH") &&
+          !e.labelIds.includes("SPAM") &&
+          !e.labelIds.includes("DRAFT")
+      );
+    } else if (args.labelFilter) {
+      emails = emails.filter((e) => e.labelIds.includes(args.labelFilter!));
+    }
 
-    // Filter by label
-    return emails.filter((e) => e.labelIds.includes(args.labelFilter!));
+    // Deduplicate by thread — keep only the latest message per thread
+    const seen = new Set<string>();
+    return emails.filter((e) => {
+      if (seen.has(e.gmailThreadId)) return false;
+      seen.add(e.gmailThreadId);
+      return true;
+    });
   },
 });
 
@@ -70,13 +86,21 @@ export const search = query({
       .order("desc")
       .collect();
 
-    return emails.filter(
+    const matched = emails.filter(
       (e) =>
         e.subject.toLowerCase().includes(q) ||
         e.snippet.toLowerCase().includes(q) ||
         e.fromName.toLowerCase().includes(q) ||
         e.fromEmail.toLowerCase().includes(q)
     );
+
+    // Deduplicate by thread — keep only the latest message per thread
+    const seen = new Set<string>();
+    return matched.filter((e) => {
+      if (seen.has(e.gmailThreadId)) return false;
+      seen.add(e.gmailThreadId);
+      return true;
+    });
   },
 });
 
@@ -197,6 +221,34 @@ export const bulkDelete = mutation({
         await ctx.db.delete(existing._id);
       }
     }
+  },
+});
+
+// Reconcile: delete all cached emails NOT in the provided set of Gmail message IDs.
+// This ensures Gmail inbox is the single source of truth after a full sync.
+export const reconcile = mutation({
+  args: { validGmailMessageIds: v.array(v.string()) },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Not authenticated");
+    const userId = identity.subject;
+
+    const validSet = new Set(args.validGmailMessageIds);
+
+    const allCached = await ctx.db
+      .query("emails")
+      .withIndex("by_userId_and_date", (q) => q.eq("userId", userId))
+      .collect();
+
+    let deleted = 0;
+    for (const email of allCached) {
+      if (!validSet.has(email.gmailMessageId)) {
+        await ctx.db.delete(email._id);
+        deleted++;
+      }
+    }
+
+    return { deleted };
   },
 });
 

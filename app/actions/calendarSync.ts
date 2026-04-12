@@ -49,7 +49,8 @@ export async function fetchGoogleEventsForSync(
   userTimeZone?: string,
 ) {
   const tz = userTimeZone || Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const events = await getCalendarEvents(timeMin, timeMax);
+  // Google now returns dateTime values pre-converted to `tz` with DST applied.
+  const events = await getCalendarEvents(timeMin, timeMax, tz);
 
   return events.map((e) => ({
     googleEventId: e.id,
@@ -57,10 +58,10 @@ export async function fetchGoogleEventsForSync(
     title: e.summary || "(No title)",
     description: e.description,
     location: e.location,
-    // Convert to user's local timezone so the time parser gets correct hours
-    startDateTime: e.start.dateTime ? toLocalISO(e.start.dateTime, tz) : undefined,
+    // Pass through directly — Google already gave us local time in `tz`.
+    startDateTime: e.start.dateTime,
     startDate: e.start.date,
-    endDateTime: e.end.dateTime ? toLocalISO(e.end.dateTime, tz) : undefined,
+    endDateTime: e.end.dateTime,
     endDate: e.end.date,
     timeZone: tz,
     googleStatus: e.status,

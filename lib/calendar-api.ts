@@ -92,7 +92,8 @@ async function getEventColorMap(): Promise<Record<string, string>> {
 
 export async function getCalendarEvents(
   timeMin: string,
-  timeMax: string
+  timeMax: string,
+  timeZone?: string,
 ): Promise<GoogleEvent[]> {
   const [calendars, eventColorMap] = await Promise.all([
     getCalendarList(),
@@ -114,6 +115,10 @@ export async function getCalendarEvents(
           orderBy: "startTime",
           maxResults: "250",
         });
+        // Ask Google to return dateTime values pre-converted to the user's
+        // timezone (with DST applied). Avoids any client/server-side conversion
+        // ambiguity.
+        if (timeZone) params.set("timeZone", timeZone);
         const res = await googleFetch(
           `/calendars/${encodeURIComponent(calendar.id)}/events?${params}`
         );
