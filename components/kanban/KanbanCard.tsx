@@ -462,13 +462,24 @@ export function TaskEditDialog({ task, open, onOpenChange, defaultDueDate }: {
                   )}
                 </button>
               )}
-              <input
+              <textarea
+                ref={(el) => {
+                  if (el) {
+                    el.style.height = "auto";
+                    el.style.height = el.scrollHeight + "px";
+                  }
+                }}
                 value={title}
-                onChange={(e) => setTitle(e.target.value)}
+                onChange={(e) => {
+                  setTitle(e.target.value);
+                  e.target.style.height = "auto";
+                  e.target.style.height = e.target.scrollHeight + "px";
+                }}
                 onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSave(); } }}
                 placeholder="Task name"
                 autoFocus
-                className="flex-1 bg-transparent text-base font-semibold text-foreground outline-none placeholder:text-muted-foreground"
+                rows={1}
+                className="flex-1 resize-none overflow-hidden bg-transparent text-base font-semibold leading-snug text-foreground outline-none placeholder:text-muted-foreground"
               />
             </div>
 
