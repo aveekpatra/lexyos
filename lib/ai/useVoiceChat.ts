@@ -336,6 +336,7 @@ export async function playCartesiaTTS(text: string): Promise<void> {
       transcript: text,
       voice: { mode: "id", id: TTS_VOICE_ID },
       output_format: { container: "raw", encoding: "pcm_f32le", sample_rate: SAMPLE_RATE },
+      speed: "fast",
     }),
   });
 
