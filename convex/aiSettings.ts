@@ -65,7 +65,7 @@ export const upsert = mutation({
       .first();
 
     if (existing) {
-      await ctx.db.patch(existing._id, {
+      await ctx.db.patch("aiSettings", existing._id, {
         apiKey: args.apiKey,
         model: args.model,
       });

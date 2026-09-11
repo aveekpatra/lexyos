@@ -1,6 +1,32 @@
 import { v } from "convex/values";
 import { query, mutation } from "./_generated/server";
 
+// ─── "HH:MM" helpers (kept local so the Convex bundle has no app imports) ───
+const MAX_DAY_MIN = 23 * 60 + 59;
+const pad2 = (n: number) => String(n).padStart(2, "0");
+function timeToMin(t: string | undefined): number | null {
+  if (!t) return null;
+  const m = /^(\d{1,2}):(\d{2})/.exec(t);
+  if (!m) return null;
+  const h = Number(m[1]), mm = Number(m[2]);
+  if (h > 23 || mm > 59) return null;
+  return h * 60 + mm;
+}
+/** Minutes between start and end, or null when either is missing or end <= start. */
+function durationBetween(start: string | undefined, end: string | undefined): number | null {
+  const s = timeToMin(start), e = timeToMin(end);
+  if (s === null || e === null || e <= s) return null;
+  return e - s;
+}
+/** start + minutes, clamped to 23:59 on the same day. */
+function clampedEndTime(start: string, minutes: number): string {
+  const s = timeToMin(start) ?? 0;
+  const e = Math.min(MAX_DAY_MIN, s + Math.max(1, minutes));
+  return `${pad2(Math.floor(e / 60))}:${pad2(e % 60)}`;
+}
+/** Tolerance for client/server clock skew when comparing sync timestamps. */
+const SYNC_CLOCK_SKEW_MS = 30_000;
+
 export const list = query({
   args: {
     status: v.optional(
@@ -70,7 +96,7 @@ export const getById = query({
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) return null;
 
-    const task = await ctx.db.get(args.id);
+    const task = await ctx.db.get("tasks", args.id);
     if (!task || task.userId !== identity.subject) return null;
     return task;
   },
@@ -220,7 +246,7 @@ export const update = mutation({
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error("Not authenticated");
 
-    const task = await ctx.db.get(args.id);
+    const task = await ctx.db.get("tasks", args.id);
     if (!task || task.userId !== identity.subject) {
       throw new Error("Task not found");
     }
@@ -242,21 +268,30 @@ export const update = mutation({
       if (!patch.scheduledStartTime) {
         patch.scheduledStartTime = newStart;
       }
-      // If scheduledEndTime wasn't explicitly set, preserve the original duration
+      // If scheduledEndTime wasn't explicitly set, preserve the original duration.
+      // The end is clamped to 23:59 on the same day (never wrapped past midnight),
+      // matching the rule used by the grid and the Google push.
       if (!patch.scheduledEndTime && task.scheduledStartTime && task.scheduledEndTime) {
-        const [osh, osm] = task.scheduledStartTime.split(":").map(Number);
-        const [oeh, oem] = task.scheduledEndTime.split(":").map(Number);
-        const durMin = (oeh * 60 + oem) - (osh * 60 + osm);
-        if (durMin > 0) {
-          const [nsh, nsm] = newStart.split(":").map(Number);
-          const endMin = nsh * 60 + nsm + durMin;
-          // NOTE: % 24 wraps the hour but does NOT advance the date.
-          // A 23:00 + 3h event shows end time as "02:00" on the same day.
-          const endH = String(Math.floor(endMin / 60) % 24).padStart(2, "0");
-          const endM = String(endMin % 60).padStart(2, "0");
-          patch.scheduledEndTime = `${endH}:${endM}`;
+        const durMin = durationBetween(task.scheduledStartTime, task.scheduledEndTime);
+        if (durMin !== null) {
+          patch.scheduledEndTime = clampedEndTime(newStart, durMin);
         }
       }
+    }
+
+    // Reject an explicit end that is not after its start; store 23:59 instead
+    // of an inverted block that every consumer would have to special-case.
+    if (typeof patch.scheduledEndTime === "string") {
+      const start = (patch.scheduledStartTime as string | undefined) ?? task.scheduledStartTime;
+      if (start && durationBetween(start, patch.scheduledEndTime as string) === null) {
+        patch.scheduledEndTime = clampedEndTime(start, MAX_DAY_MIN);
+      }
+    }
+
+    // Linking to a Google event counts as a sync point, so the next pull does
+    // not overwrite local content with the (identical or older) Google copy.
+    if (typeof patch.googleEventId === "string" && patch.googleEventId !== task.googleEventId) {
+      patch.lastSyncedAt = Date.now();
     }
 
     // When dueDate changes, keep scheduledDate in sync
@@ -290,7 +325,7 @@ export const update = mutation({
     if (clearRecurrence) patch.recurrence = undefined;
     if (clearDescription) patch.description = undefined;
 
-    await ctx.db.patch(id, patch);
+    await ctx.db.patch("tasks", id, patch);
   },
 });
 
@@ -300,18 +335,18 @@ export const toggleComplete = mutation({
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error("Not authenticated");
 
-    const task = await ctx.db.get(args.id);
+    const task = await ctx.db.get("tasks", args.id);
     if (!task || task.userId !== identity.subject) {
       throw new Error("Task not found");
     }
 
     if (task.status === "done") {
-      await ctx.db.patch(args.id, {
+      await ctx.db.patch("tasks", args.id, {
         status: "todo",
         completedAt: undefined,
       });
     } else {
-      await ctx.db.patch(args.id, {
+      await ctx.db.patch("tasks", args.id, {
         status: "done",
         completedAt: Date.now(),
       });
@@ -328,7 +363,7 @@ export const remove = mutation({
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error("Not authenticated");
 
-    const task = await ctx.db.get(args.id);
+    const task = await ctx.db.get("tasks", args.id);
     if (!task || task.userId !== identity.subject) {
       throw new Error("Task not found");
     }
@@ -339,10 +374,10 @@ export const remove = mutation({
       .withIndex("by_parentTaskId", (q) => q.eq("parentTaskId", args.id))
       .collect();
     for (const subtask of subtasks) {
-      await ctx.db.delete(subtask._id);
+      await ctx.db.delete("tasks", subtask._id);
     }
 
-    await ctx.db.delete(args.id);
+    await ctx.db.delete("tasks", args.id);
 
     // Return google info so the UI can handle Google Calendar deletion if needed
     return { googleEventId: task.googleEventId, googleCalendarId: task.googleCalendarId };
@@ -359,9 +394,9 @@ export const bulkUpdateStatus = mutation({
     if (!identity) throw new Error("Not authenticated");
 
     for (const id of args.ids) {
-      const task = await ctx.db.get(id);
+      const task = await ctx.db.get("tasks", id);
       if (task && task.userId === identity.subject) {
-        await ctx.db.patch(id, {
+        await ctx.db.patch("tasks", id, {
           status: args.status,
           completedAt: args.status === "done" ? Date.now() : undefined,
         });
@@ -473,8 +508,10 @@ export const upsertFromGoogle = mutation({
     if (!identity) throw new Error("Not authenticated");
     const userId = identity.subject;
 
-    // Skip cancelled events
+    // Skip cancelled events and events with no start at all (they could never
+    // be rendered and would linger as undated rows).
     if (args.googleStatus === "cancelled") return null;
+    if (!args.startDateTime && !args.startDate) return null;
 
     // Check if task already exists for this Google event
     const existing = await ctx.db
@@ -507,7 +544,7 @@ export const upsertFromGoogle = mutation({
         scheduledEndTime: parsed.scheduledEndTime,
       };
 
-      await ctx.db.patch(existing._id, patch);
+      await ctx.db.patch("tasks", existing._id, patch);
       return existing._id;
     } else {
       // Create new task from Google event
@@ -561,11 +598,16 @@ export const bulkUpsertFromGoogle = mutation({
         unifocusTaskId: v.optional(v.string()),
       })
     ),
+    // When the events were read from Google (ms). lastSyncedAt is stamped with
+    // this, not with the mutation time, so a Google edit made between the fetch
+    // and this write is still seen as "newer than our sync" on the next pull.
+    fetchedAt: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error("Not authenticated");
     const userId = identity.subject;
+    const syncStamp = args.fetchedAt ?? Date.now();
 
     // Get all existing tasks with googleEventId for quick lookup
     const existingTasks = await ctx.db
@@ -586,8 +628,9 @@ export const bulkUpsertFromGoogle = mutation({
 
     let upserted = 0;
     for (const event of args.events) {
-      // Skip cancelled events
+      // Skip cancelled events and events with no start at all
       if (event.googleStatus === "cancelled") continue;
+      if (!event.startDateTime && !event.startDate) continue;
 
       // Try matching by googleEventId first, then by unifocusTaskId (round-trip from pushed local tasks)
       let existing = existingByGoogleId.get(event.googleEventId);
@@ -612,7 +655,7 @@ export const bulkUpsertFromGoogle = mutation({
           htmlLink: event.htmlLink,
           timeZone: event.timeZone,
           googleUpdatedAt: event.googleUpdatedAt,
-          lastSyncedAt: Date.now(),
+          lastSyncedAt: syncStamp,
         };
 
         // Only overwrite content fields if Google's version is newer (user didn't edit since last sync)
@@ -628,7 +671,7 @@ export const bulkUpsertFromGoogle = mutation({
           patch.scheduledEndTime = parsed.scheduledEndTime;
         }
 
-        await ctx.db.patch(existing._id, patch);
+        await ctx.db.patch("tasks", existing._id, patch);
       } else {
         // Create new task
         await ctx.db.insert("tasks", {
@@ -650,7 +693,7 @@ export const bulkUpsertFromGoogle = mutation({
           htmlLink: event.htmlLink,
           timeZone: event.timeZone,
           googleUpdatedAt: event.googleUpdatedAt,
-          lastSyncedAt: Date.now(),
+          lastSyncedAt: syncStamp,
           sortOrder: 0,
           userId,
         });
@@ -670,8 +713,13 @@ export const bulkUpsertFromGoogle = mutation({
 export const removeDeletedGoogleEvents = mutation({
   args: {
     knownGoogleEventIds: v.array(v.string()),
-    syncRangeStart: v.string(), // ISO date
-    syncRangeEnd: v.string(),   // ISO date
+    syncRangeStart: v.string(), // local "YYYY-MM-DD", inclusive
+    syncRangeEnd: v.string(),   // local "YYYY-MM-DD", inclusive
+    // When the caller started reading from Google (ms). Rows synced at or after
+    // this instant (e.g. inserted by the background incremental pull while the
+    // caller's fetch was in flight) are NOT deleted, since the caller's snapshot
+    // cannot know about them.
+    fetchStartedAt: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
@@ -684,21 +732,56 @@ export const removeDeletedGoogleEvents = mutation({
       .collect();
 
     const knownSet = new Set(args.knownGoogleEventIds);
+    const cutoff = args.fetchStartedAt !== undefined ? args.fetchStartedAt - SYNC_CLOCK_SKEW_MS : null;
     let removed = 0;
 
     for (const task of allTasks) {
       if (task.source !== "google_calendar" || !task.googleEventId) continue;
-      // Only consider tasks within the synced date range
-      const taskDate = task.dueDate || task.scheduledDate;
-      if (!taskDate) continue;
-      if (taskDate < args.syncRangeStart || taskDate > args.syncRangeEnd) continue;
-      // If Google didn't return this event, it was deleted
-      if (!knownSet.has(task.googleEventId)) {
-        await ctx.db.delete(task._id);
-        removed++;
+      if (knownSet.has(task.googleEventId)) continue;
+      // Rows written after the caller's snapshot was taken are out of its view.
+      if (cutoff !== null) {
+        const seenAt = Math.max(task.lastSyncedAt ?? 0, task._creationTime);
+        if (seenAt >= cutoff) continue;
       }
+      // Only consider tasks within the synced date range. Undated Google rows can
+      // never render, so they are removed whenever Google no longer lists them.
+      const taskDate = task.dueDate || task.scheduledDate;
+      if (taskDate && (taskDate < args.syncRangeStart || taskDate > args.syncRangeEnd)) continue;
+      await ctx.db.delete("tasks", task._id);
+      removed++;
     }
 
+    return { removed };
+  },
+});
+
+/**
+ * Remove tasks for specific Google events (used by the incremental pull when
+ * Google reports an event as cancelled).
+ */
+export const removeGoogleEventsByIds = mutation({
+  args: { googleEventIds: v.array(v.string()) },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Not authenticated");
+    const userId = identity.subject;
+    let removed = 0;
+    for (const googleEventId of args.googleEventIds) {
+      const task = await ctx.db
+        .query("tasks")
+        .withIndex("by_userId_and_googleEventId", (q) =>
+          q.eq("userId", userId).eq("googleEventId", googleEventId)
+        )
+        .first();
+      if (!task) continue;
+      if (task.source === "google_calendar") {
+        await ctx.db.delete("tasks", task._id);
+      } else {
+        // A local task whose Google copy was deleted: unlink, keep the task.
+        await ctx.db.patch("tasks", task._id, { googleEventId: undefined, googleCalendarId: undefined });
+      }
+      removed++;
+    }
     return { removed };
   },
 });
@@ -727,7 +810,7 @@ export const cleanupGoogleCalendarDone = mutation({
       if (!needsFix) continue;
 
       const cleanTitle = task.title?.replace(/^\[Done\]\s*/, "") || task.title;
-      await ctx.db.patch(task._id, {
+      await ctx.db.patch("tasks", task._id, {
         title: cleanTitle,
         status: "planned",
         completedAt: undefined,

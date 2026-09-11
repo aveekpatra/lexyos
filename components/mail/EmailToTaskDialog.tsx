@@ -79,7 +79,7 @@ export default function EmailToTaskDialog({
         <DialogPanel>
           <div className="space-y-3">
             <div>
-              <label className="mb-1 block text-[12px] text-muted-foreground">
+              <label className="mb-1 block text-[12px] text-text-muted">
                 Title
               </label>
               <Input
@@ -89,14 +89,14 @@ export default function EmailToTaskDialog({
               />
             </div>
             <div>
-              <label className="mb-1 block text-[12px] text-muted-foreground">
+              <label className="mb-1 block text-[12px] text-text-muted">
                 Description
               </label>
               <textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 rows={6}
-                className="w-full resize-none rounded-lg border border-border bg-background px-3 py-2 text-[13px] leading-relaxed text-foreground outline-none focus:border-primary"
+                className="w-full resize-none rounded-[13px] border border-line bg-surface-2 px-3 py-2 text-[13px] leading-relaxed text-text-strong outline-none transition-colors focus:border-brand"
               />
             </div>
           </div>
@@ -127,7 +127,7 @@ export function EmailTaskBadge({ threadId }: { threadId: string }) {
   if (!existingTask) return null;
 
   return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-primary/20 px-2 py-0.5 text-[11px] font-medium text-primary">
+    <span className="inline-flex items-center gap-1 rounded-full bg-brand-bg px-2 py-0.5 text-[11px] font-medium text-brand">
       Task linked
     </span>
   );

@@ -235,7 +235,7 @@ export default function ComposeDialog({
               !showCcBcc ? (
                 <button
                   onClick={() => setShowCcBcc(true)}
-                  className="text-[12px] text-brand hover:text-brand"
+                  className="text-[12px] font-medium text-brand transition-colors hover:text-brand-strong"
                 >
                   Cc/Bcc
                 </button>
@@ -253,7 +253,7 @@ export default function ComposeDialog({
 
         {/* Reply context hint */}
         {(mode.type === "reply" || mode.type === "replyAll") && (
-          <div className="mx-6 mt-2 rounded-md border border-line bg-surface-0 px-3 py-2">
+          <div className="mx-6 mt-2 rounded-[13px] bg-surface-2 px-3 py-2">
             <p className="text-[12px] text-text-muted">
               {mode.message.from.name || mode.message.from.email} &middot; {new Date(mode.message.date).toLocaleDateString()}
             </p>
@@ -270,12 +270,12 @@ export default function ComposeDialog({
             onChange={(e) => setBody(e.target.value)}
             placeholder="Write your message..."
             rows={12}
-            className="w-full resize-none bg-transparent text-[14px] leading-relaxed text-foreground placeholder-muted-foreground outline-none"
+            className="w-full resize-none bg-transparent text-[14px] leading-relaxed text-text-strong placeholder-text-faint outline-none"
           />
         </div>
 
         {error && (
-          <div className="px-6 pb-2 text-[13px] text-red-400">{error}</div>
+          <div className="px-6 pb-2 text-[13px] text-red-500 dark:text-red-400">{error}</div>
         )}
 
         <DialogFooter>
@@ -306,15 +306,15 @@ function ComposeField({
   rightAction?: React.ReactNode;
 }) {
   return (
-    <div className="flex items-center gap-2 border-b border-border/50 py-2">
-      <label className="w-14 flex-shrink-0 text-[13px] text-muted-foreground">
+    <div className="flex items-center gap-2 border-b border-line py-2">
+      <label className="w-14 flex-shrink-0 text-[13px] text-text-muted">
         {label}
       </label>
       <input
         type="text"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="flex-1 bg-transparent text-[14px] text-foreground outline-none"
+        className="flex-1 bg-transparent text-[14px] text-text-strong placeholder-text-faint outline-none"
       />
       {rightAction}
     </div>

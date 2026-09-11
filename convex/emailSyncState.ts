@@ -2,6 +2,7 @@ import { v } from "convex/values";
 import { query, mutation } from "./_generated/server";
 
 export const get = query({
+  args: {},
   handler: async (ctx) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) return null;
@@ -38,7 +39,7 @@ export const upsert = mutation({
     }
 
     if (existing) {
-      await ctx.db.patch(existing._id, patch);
+      await ctx.db.patch("emailSyncState", existing._id, patch);
     } else {
       await ctx.db.insert("emailSyncState", {
         lastHistoryId: args.lastHistoryId,
@@ -51,6 +52,7 @@ export const upsert = mutation({
 });
 
 export const clear = mutation({
+  args: {},
   handler: async (ctx) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error("Not authenticated");
@@ -61,7 +63,7 @@ export const clear = mutation({
       .first();
 
     if (existing) {
-      await ctx.db.delete(existing._id);
+      await ctx.db.delete("emailSyncState", existing._id);
     }
   },
 });

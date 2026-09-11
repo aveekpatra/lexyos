@@ -55,13 +55,21 @@ export async function POST() {
           await fullSyncCalendar(convex, calendar.id, tz);
           method = "full (token expired)";
         } else {
-          // Process incremental changes
+          // Process incremental changes: upserts for live events, deletes for
+          // cancelled ones (the whole point of an incremental feed).
           if (result.events.length > 0) {
+            const fetchedAt = Date.now();
+            const cancelledIds = result.events
+              .filter((e) => e.status === "cancelled")
+              .map((e) => e.id);
             const mapped = mapEventsToTaskFormat(result.events, tz);
             if (mapped.length > 0) {
-              await convex.mutation(api.tasks.bulkUpsertFromGoogle, { events: mapped });
+              await convex.mutation(api.tasks.bulkUpsertFromGoogle, { events: mapped, fetchedAt });
             }
-            totalEvents += mapped.length;
+            if (cancelledIds.length > 0) {
+              await convex.mutation(api.tasks.removeGoogleEventsByIds, { googleEventIds: cancelledIds });
+            }
+            totalEvents += mapped.length + cancelledIds.length;
           }
 
           // Save new syncToken
@@ -106,6 +114,7 @@ async function fullSyncCalendar(
   const timeMin = new Date(now.getTime() - 30 * 86400000).toISOString();
   const timeMax = new Date(now.getTime() + 60 * 86400000).toISOString();
 
+  const fetchedAt = Date.now();
   const result = await getCalendarEventsWithSyncToken(
     calendarId,
     timeMin,
@@ -116,7 +125,7 @@ async function fullSyncCalendar(
   if (result.events.length > 0) {
     const mapped = mapEventsToTaskFormat(result.events, tz);
     if (mapped.length > 0) {
-      await convex.mutation(api.tasks.bulkUpsertFromGoogle, { events: mapped });
+      await convex.mutation(api.tasks.bulkUpsertFromGoogle, { events: mapped, fetchedAt });
     }
   }
 

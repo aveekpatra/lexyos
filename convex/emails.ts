@@ -57,6 +57,7 @@ export const getByThreadId = query({
 });
 
 export const unreadCount = query({
+  args: {},
   handler: async (ctx) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) return 0;
@@ -143,7 +144,7 @@ export const bulkUpsert = mutation({
         .first();
 
       if (existing) {
-        await ctx.db.patch(existing._id, {
+        await ctx.db.patch("emails", existing._id, {
           labelIds: msg.labelIds,
           snippet: msg.snippet,
           subject: msg.subject,
@@ -192,7 +193,7 @@ export const bulkUpdateLabels = mutation({
         .first();
 
       if (existing) {
-        await ctx.db.patch(existing._id, {
+        await ctx.db.patch("emails", existing._id, {
           labelIds: update.labelIds,
           isUnread: update.isUnread,
           isStarred: update.isStarred,
@@ -218,7 +219,7 @@ export const bulkDelete = mutation({
         .first();
 
       if (existing) {
-        await ctx.db.delete(existing._id);
+        await ctx.db.delete("emails", existing._id);
       }
     }
   },
@@ -243,7 +244,7 @@ export const reconcile = mutation({
     let deleted = 0;
     for (const email of allCached) {
       if (!validSet.has(email.gmailMessageId)) {
-        await ctx.db.delete(email._id);
+        await ctx.db.delete("emails", email._id);
         deleted++;
       }
     }
@@ -282,7 +283,7 @@ export const updateLabels = mutation({
       }
     }
 
-    await ctx.db.patch(existing._id, {
+    await ctx.db.patch("emails", existing._id, {
       labelIds,
       isUnread: labelIds.includes("UNREAD"),
       isStarred: labelIds.includes("STARRED"),

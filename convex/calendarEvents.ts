@@ -127,7 +127,7 @@ export const upsertFromGoogle = mutation({
 
     if (existing) {
       // Update, but preserve linkedTaskId
-      await ctx.db.patch(existing._id, {
+      await ctx.db.patch("calendarEvents", existing._id, {
         ...data,
         linkedTaskId: existing.linkedTaskId,
       });
@@ -196,7 +196,7 @@ export const update = mutation({
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error("Not authenticated");
 
-    const event = await ctx.db.get(args.id);
+    const event = await ctx.db.get("calendarEvents", args.id);
     if (!event || event.userId !== identity.subject) {
       throw new Error("Event not found");
     }
@@ -207,7 +207,7 @@ export const update = mutation({
       Object.entries(updates).filter(([, v]) => v !== undefined)
     );
 
-    await ctx.db.patch(id, cleanUpdates);
+    await ctx.db.patch("calendarEvents", id, cleanUpdates);
     return id;
   },
 });
@@ -218,12 +218,12 @@ export const remove = mutation({
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error("Not authenticated");
 
-    const event = await ctx.db.get(args.id);
+    const event = await ctx.db.get("calendarEvents", args.id);
     if (!event || event.userId !== identity.subject) {
       throw new Error("Event not found");
     }
 
-    await ctx.db.delete(args.id);
+    await ctx.db.delete("calendarEvents", args.id);
   },
 });
 
@@ -236,12 +236,12 @@ export const linkToTask = mutation({
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error("Not authenticated");
 
-    const event = await ctx.db.get(args.id);
+    const event = await ctx.db.get("calendarEvents", args.id);
     if (!event || event.userId !== identity.subject) {
       throw new Error("Event not found");
     }
 
-    await ctx.db.patch(args.id, { linkedTaskId: args.taskId });
+    await ctx.db.patch("calendarEvents", args.id, { linkedTaskId: args.taskId });
   },
 });
 
@@ -294,7 +294,7 @@ export const bulkUpsertFromGoogle = mutation({
       };
 
       if (existing) {
-        await ctx.db.patch(existing._id, {
+        await ctx.db.patch("calendarEvents", existing._id, {
           ...data,
           linkedTaskId: existing.linkedTaskId, // preserve task link
         });
@@ -329,7 +329,7 @@ export const updateSyncState = mutation({
       .first();
 
     if (existing) {
-      await ctx.db.patch(existing._id, {
+      await ctx.db.patch("calendarSyncState", existing._id, {
         ...args,
         lastSyncedAt: Date.now(),
       });

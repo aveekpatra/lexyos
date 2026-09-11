@@ -2,6 +2,7 @@ import { v } from "convex/values";
 import { query, mutation } from "./_generated/server";
 
 export const list = query({
+  args: {},
   handler: async (ctx) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) return [];
@@ -54,11 +55,11 @@ export const remove = mutation({
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error("Not authenticated");
 
-    const favorite = await ctx.db.get(args.id);
+    const favorite = await ctx.db.get("favorites", args.id);
     if (!favorite || favorite.userId !== identity.subject) {
       throw new Error("Favorite not found");
     }
 
-    await ctx.db.delete(args.id);
+    await ctx.db.delete("favorites", args.id);
   },
 });

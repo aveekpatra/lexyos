@@ -35,7 +35,7 @@ export const set = mutation({
     if (args.projectSort !== undefined) patch.projectSort = args.projectSort;
 
     if (existing) {
-      await ctx.db.patch(existing._id, patch);
+      await ctx.db.patch("userPreferences", existing._id, patch);
       return existing._id;
     }
 

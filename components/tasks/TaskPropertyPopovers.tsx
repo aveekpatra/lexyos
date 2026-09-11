@@ -16,6 +16,20 @@ import {
   format, addDays, startOfWeek, endOfWeek, addWeeks, endOfMonth, getWeek,
 } from "date-fns";
 
+/**
+ * Runs `reset` when `open` transitions from true to false, using React's
+ * canonical "adjust state during render" pattern (prev-tracking) instead of a
+ * synchronous setState inside an effect, which react-hooks/set-state-in-effect
+ * flags as a cascading-render risk.
+ */
+function useResetOnClose(open: boolean, reset: () => void) {
+  const [prevOpen, setPrevOpen] = useState(open);
+  if (prevOpen !== open) {
+    setPrevOpen(open);
+    if (!open) reset();
+  }
+}
+
 /* ────────────────────────────────────────────────────────
  * Shared styles
  * ──────────────────────────────────────────────────────── */
@@ -45,9 +59,9 @@ export const DatePickerPopover = memo(function DatePickerPopover({
   const [search, setSearch] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
+  useResetOnClose(open, () => setSearch(""));
   useEffect(() => {
     if (open) setTimeout(() => inputRef.current?.focus(), 50);
-    else setSearch("");
   }, [open]);
 
   const now = new Date();
@@ -181,9 +195,9 @@ export const DurationPickerPopover = memo(function DurationPickerPopover({
   const [search, setSearch] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
+  useResetOnClose(open, () => setSearch(""));
   useEffect(() => {
     if (open) setTimeout(() => inputRef.current?.focus(), 50);
-    else setSearch("");
   }, [open]);
 
   const filtered = search.trim()
@@ -277,9 +291,9 @@ export const ProjectPickerPopover = memo(function ProjectPickerPopover({
   const projects = useQuery(api.projects.list, { status: "active" });
   const inputRef = useRef<HTMLInputElement>(null);
 
+  useResetOnClose(open, () => setSearch(""));
   useEffect(() => {
     if (open) setTimeout(() => inputRef.current?.focus(), 50);
-    else setSearch("");
   }, [open]);
 
   const filtered = useMemo(() => {
@@ -396,30 +410,28 @@ export const TimePickerPopover = memo(function TimePickerPopover({
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
+  useResetOnClose(open, () => setSearch(""));
   useEffect(() => {
-    if (open) {
-      setTimeout(() => inputRef.current?.focus(), 50);
-      // Scroll to current value, or to current hour if no value set
-      setTimeout(() => {
-        if (!listRef.current) return;
-        if (value) {
-          const idx = TIME_PRESETS.findIndex((t) => t.value === value);
-          if (idx >= 0) {
-            listRef.current.scrollTop = Math.max(0, idx * 36 - 72);
-          }
-        } else {
-          // Scroll to current hour
-          const now = new Date();
-          const hh = now.getHours().toString().padStart(2, "0");
-          const idx = TIME_PRESETS.findIndex((t) => t.value === `${hh}:00`);
-          if (idx >= 0) {
-            listRef.current.scrollTop = Math.max(0, idx * 36 - 72);
-          }
+    if (!open) return;
+    setTimeout(() => inputRef.current?.focus(), 50);
+    // Scroll to current value, or to current hour if no value set
+    setTimeout(() => {
+      if (!listRef.current) return;
+      if (value) {
+        const idx = TIME_PRESETS.findIndex((t) => t.value === value);
+        if (idx >= 0) {
+          listRef.current.scrollTop = Math.max(0, idx * 36 - 72);
         }
-      }, 80);
-    } else {
-      setSearch("");
-    }
+      } else {
+        // Scroll to current hour
+        const now = new Date();
+        const hh = now.getHours().toString().padStart(2, "0");
+        const idx = TIME_PRESETS.findIndex((t) => t.value === `${hh}:00`);
+        if (idx >= 0) {
+          listRef.current.scrollTop = Math.max(0, idx * 36 - 72);
+        }
+      }
+    }, 80);
   }, [open, value]);
 
   const filtered = search.trim()
@@ -489,10 +501,10 @@ export const TaskChip = memo(function TaskChip({ children, active, className = "
   return (
     <span
       onClick={onClick}
-      className={`inline-flex cursor-pointer items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] font-medium transition-colors duration-100 ${
+      className={`inline-flex cursor-pointer items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium transition-colors duration-100 ${
         active
-          ? "border-blue-200 bg-blue-50 text-blue-700 shadow-3d-sm hover:border-blue-300 hover:bg-blue-100 dark:border-brand-border dark:bg-brand-bg dark:text-brand"
-          : "border-line bg-surface-1 text-text-muted shadow-3d-sm hover:border-line-strong hover:bg-surface-2 hover:text-text-strong"
+          ? "bg-brand-bg text-brand hover:bg-brand-border/50"
+          : "bg-black/[0.04] text-text-muted hover:bg-black/[0.07] hover:text-foreground dark:bg-white/[0.06] dark:hover:bg-white/[0.1]"
       } ${className}`}
     >
       {children}

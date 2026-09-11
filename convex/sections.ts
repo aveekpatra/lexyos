@@ -2,6 +2,7 @@ import { v } from "convex/values";
 import { query, mutation } from "./_generated/server";
 
 export const list = query({
+  args: {},
   handler: async (ctx) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) return [];
@@ -47,7 +48,7 @@ export const update = mutation({
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error("Not authenticated");
 
-    const section = await ctx.db.get(args.id);
+    const section = await ctx.db.get("sections", args.id);
     if (!section || section.userId !== identity.subject) {
       throw new Error("Section not found");
     }
@@ -57,7 +58,7 @@ export const update = mutation({
       Object.entries(updates).filter(([, v]) => v !== undefined)
     );
 
-    await ctx.db.patch(id, filtered);
+    await ctx.db.patch("sections", id, filtered);
   },
 });
 
@@ -67,7 +68,7 @@ export const remove = mutation({
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error("Not authenticated");
 
-    const section = await ctx.db.get(args.id);
+    const section = await ctx.db.get("sections", args.id);
     if (!section || section.userId !== identity.subject) {
       throw new Error("Section not found");
     }
@@ -80,9 +81,9 @@ export const remove = mutation({
       )
       .collect();
     for (const task of tasks) {
-      await ctx.db.patch(task._id, { sectionId: undefined });
+      await ctx.db.patch("tasks", task._id, { sectionId: undefined });
     }
 
-    await ctx.db.delete(args.id);
+    await ctx.db.delete("sections", args.id);
   },
 });

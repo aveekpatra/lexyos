@@ -48,7 +48,7 @@ export default function MailContextMenu({
     <>
       <div className="fixed inset-0 z-50" onClick={onClose} />
       <div
-        className="fixed z-50 w-[220px] rounded-xl border border-line-strong bg-surface-0 p-1.5 shadow-[0_8px_32px_rgba(0,0,0,0.5)]"
+        className="fixed z-50 w-[220px] rounded-[16px] glass-surface p-1.5 shadow-[0_12px_40px_rgba(15,23,42,0.18)] dark:shadow-[0_12px_40px_rgba(0,0,0,0.5)]"
         style={{ left: position.x, top: position.y }}
       >
         <MenuItem
@@ -119,7 +119,7 @@ function MenuItem({
   return (
     <button
       onClick={onClick}
-      className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-[13px] text-text-strong transition-colors hover:bg-line"
+      className="flex w-full items-center justify-between rounded-[10px] px-3 py-2 text-[13px] text-text-strong transition-colors hover:bg-hover"
     >
       <span>{label}</span>
       {shortcut && (

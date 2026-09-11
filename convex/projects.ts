@@ -31,7 +31,7 @@ export const getById = query({
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) return null;
-    const project = await ctx.db.get(args.id);
+    const project = await ctx.db.get("projects", args.id);
     if (!project || project.userId !== identity.subject) return null;
     return project;
   },
@@ -42,7 +42,7 @@ export const getTaskCounts = query({
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) return null;
-    const project = await ctx.db.get(args.id);
+    const project = await ctx.db.get("projects", args.id);
     if (!project || project.userId !== identity.subject) return null;
 
     const tasks = await ctx.db
@@ -127,14 +127,14 @@ export const update = mutation({
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error("Not authenticated");
-    const project = await ctx.db.get(args.id);
+    const project = await ctx.db.get("projects", args.id);
     if (!project || project.userId !== identity.subject) throw new Error("Project not found");
 
     const { id, ...updates } = args;
     const filtered = Object.fromEntries(
       Object.entries(updates).filter(([, v]) => v !== undefined)
     );
-    await ctx.db.patch(id, filtered);
+    await ctx.db.patch("projects", id, filtered);
   },
 });
 
@@ -144,7 +144,7 @@ export const duplicate = mutation({
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error("Not authenticated");
     const userId = identity.subject;
-    const project = await ctx.db.get(args.id);
+    const project = await ctx.db.get("projects", args.id);
     if (!project || project.userId !== userId) throw new Error("Project not found");
 
     const existing = await ctx.db
@@ -181,9 +181,9 @@ export const reorder = mutation({
     const userId = identity.subject;
 
     for (let i = 0; i < args.orderedIds.length; i++) {
-      const project = await ctx.db.get(args.orderedIds[i]);
+      const project = await ctx.db.get("projects", args.orderedIds[i]);
       if (project && project.userId === userId) {
-        await ctx.db.patch(args.orderedIds[i], { sortOrder: i });
+        await ctx.db.patch("projects", args.orderedIds[i], { sortOrder: i });
       }
     }
   },
@@ -194,7 +194,7 @@ export const remove = mutation({
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error("Not authenticated");
-    const project = await ctx.db.get(args.id);
+    const project = await ctx.db.get("projects", args.id);
     if (!project || project.userId !== identity.subject) throw new Error("Project not found");
 
     const tasks = await ctx.db
@@ -204,8 +204,8 @@ export const remove = mutation({
       )
       .collect();
     for (const task of tasks) {
-      await ctx.db.patch(task._id, { projectId: undefined });
+      await ctx.db.patch("tasks", task._id, { projectId: undefined });
     }
-    await ctx.db.delete(args.id);
+    await ctx.db.delete("projects", args.id);
   },
 });

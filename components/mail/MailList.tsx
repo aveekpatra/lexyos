@@ -1,12 +1,7 @@
 "use client";
 
 import React, { useCallback, useState, useEffect, useRef } from "react";
-import { HugeiconsIcon } from "@hugeicons/react";
-import {
-  StarIcon,
-  Search01Icon,
-  Attachment01Icon,
-} from "@hugeicons/core-free-icons";
+import { IoStar, IoStarOutline, IoSearch, IoAttach } from "react-icons/io5";
 import type { Doc } from "@/convex/_generated/dataModel";
 import { relativeDate } from "@/lib/gmail-utils";
 import { starMessage, unstarMessage } from "@/app/actions/gmail";
@@ -50,10 +45,14 @@ export default function MailList({
   const PAGE_SIZE = 25;
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
 
-  // Reset visible count when messages change (label switch, search)
-  useEffect(() => {
+  // Reset visible count when messages change (label switch, search) using
+  // render-phase prev-tracking instead of a setState-in-effect.
+  const listKey = `${messages.length}|${searchQuery}`;
+  const [prevListKey, setPrevListKey] = useState(listKey);
+  if (prevListKey !== listKey) {
+    setPrevListKey(listKey);
     setVisibleCount(PAGE_SIZE);
-  }, [messages.length, searchQuery]);
+  }
 
   const visibleMessages = messages.slice(0, visibleCount);
   const hasMore = messages.length > visibleCount;
@@ -83,39 +82,34 @@ export default function MailList({
 
   return (
     <div className="flex h-full flex-col">
-      {/* Search bar */}
-      <div className="px-5 pt-4 pb-2">
-        <div className="flex items-center gap-2 rounded-[10px] border border-line-strong bg-surface-1 px-3 py-2 shadow-3d">
-          <HugeiconsIcon
-            icon={Search01Icon}
-            size={16}
-            strokeWidth={1.5}
-            className="text-text-faint"
-          />
+      {/* Search — a flat recessed capsule (content layer) */}
+      <div className="px-4 pt-4 pb-2">
+        <div className="flex items-center gap-2 rounded-full bg-black/[0.04] px-3.5 py-2 transition-colors focus-within:bg-black/[0.06] dark:bg-white/[0.06] dark:focus-within:bg-white/[0.09]">
+          <IoSearch size={15} className="shrink-0 text-text-faint" />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
             placeholder="Search emails..."
-            className="flex-1 bg-transparent text-[14px] text-text-strong placeholder-text-faint outline-none"
+            className="flex-1 bg-transparent text-[13.5px] text-text-strong placeholder-text-faint outline-none"
           />
           {syncing && (
-            <div className="h-4 w-4 animate-spin rounded-full border-2 border-blue-400 border-t-transparent" />
+            <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-brand border-t-transparent" />
           )}
         </div>
       </div>
 
       {/* Message list */}
-      <div className="flex flex-1 flex-col gap-1.5 overflow-y-auto px-5 pb-4">
+      <div className="flex flex-1 flex-col overflow-y-auto px-2 pb-4">
         {loading && messages.length === 0 ? (
-          <>
+          <div className="flex flex-col gap-1 px-2">
             {Array.from({ length: 8 }).map((_, i) => (
               <div
                 key={i}
-                className="h-20 animate-pulse rounded-[10px] bg-line/50"
+                className="h-[70px] animate-pulse rounded-[10px] bg-surface-2"
               />
             ))}
-          </>
+          </div>
         ) : messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-2 py-16 text-text-faint">
             <p className="text-[15px]">
@@ -146,7 +140,7 @@ export default function MailList({
             {hasMore && (
               <button
                 onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}
-                className="py-3 text-center text-[13px] text-text-muted transition-colors hover:text-foreground"
+                className="py-3 text-center text-[13px] text-text-muted transition-colors hover:text-text-strong"
               >
                 Load more ({messages.length - visibleCount} remaining)
               </button>
@@ -182,27 +176,27 @@ const MessageRow = React.memo(React.forwardRef<HTMLDivElement, {
       ref={ref}
       onClick={onSelect}
       onContextMenu={onContextMenu}
-      className={`group flex cursor-pointer items-start gap-2.5 rounded-[10px] border px-3.5 py-2.5 shadow-3d transition-all active:translate-y-[1px] active:shadow-3d-sm ${
+      className={`group flex cursor-pointer items-start gap-2.5 rounded-[10px] px-3 py-2.5 transition-colors ${
         isActive
-          ? "border-blue-300 bg-blue-50 dark:border-blue-500/40 dark:bg-blue-950/50"
+          ? "bg-brand-bg"
           : isSelected
-            ? "border-blue-200 bg-blue-50/60 dark:border-blue-500/30 dark:bg-blue-950/30"
-            : "border-line bg-surface-1 hover:border-blue-200 hover:bg-blue-50/60 dark:border-white/10 dark:hover:border-blue-500/40 dark:hover:bg-blue-950/30"
+            ? "bg-hover"
+            : "hover:bg-hover"
       }`}
     >
-      {/* Checkbox */}
-      <div onClick={onToggleSelect} className="mt-1 flex-shrink-0">
+      {/* Selection — iOS circle checkbox */}
+      <div onClick={onToggleSelect} className="mt-0.5 flex-shrink-0">
         <div
-          className={`flex h-4 w-4 items-center justify-center rounded border transition-colors ${
+          className={`flex size-[18px] items-center justify-center rounded-full border transition-all ${
             isSelected
-              ? "border-blue-400 bg-blue-400"
-              : "border-line-strong hover:border-blue-300"
+              ? "border-brand bg-brand text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.18)]"
+              : "border-line-strong bg-surface-1 hover:border-brand-border"
           }`}
         >
           {isSelected && (
             <svg
               viewBox="0 0 12 12"
-              className="h-3 w-3 text-white"
+              className="h-2.5 w-2.5"
               fill="none"
               stroke="currentColor"
               strokeWidth={2.5}
@@ -215,17 +209,17 @@ const MessageRow = React.memo(React.forwardRef<HTMLDivElement, {
 
       {/* Unread indicator */}
       {message.isUnread && (
-        <div className="mt-2 h-2 w-2 flex-shrink-0 rounded-full bg-blue-500" />
+        <div className="mt-[7px] h-1.5 w-1.5 flex-shrink-0 rounded-full bg-brand" />
       )}
 
-      {/* Content */}
+      {/* Content — unread emphasis carried by font weight, not colour */}
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span
             className={`truncate text-[13px] ${
               message.isUnread
-                ? "font-semibold text-foreground"
-                : "font-medium text-text-strong"
+                ? "font-semibold text-text-strong"
+                : "font-normal text-text-secondary"
             }`}
           >
             {message.fromName || message.fromEmail}
@@ -237,7 +231,9 @@ const MessageRow = React.memo(React.forwardRef<HTMLDivElement, {
         <div className="flex items-center gap-1.5">
           <span
             className={`truncate text-[12.5px] ${
-              message.isUnread ? "font-medium text-text-strong" : "text-text-secondary"
+              message.isUnread
+                ? "font-medium text-text-strong"
+                : "text-text-secondary"
             }`}
           >
             {message.subject || "(no subject)"}
@@ -248,10 +244,8 @@ const MessageRow = React.memo(React.forwardRef<HTMLDivElement, {
             {message.snippet}
           </span>
           {message.hasAttachments && (
-            <HugeiconsIcon
-              icon={Attachment01Icon}
+            <IoAttach
               size={13}
-              strokeWidth={1.5}
               className="flex-shrink-0 text-text-muted"
             />
           )}
@@ -260,16 +254,14 @@ const MessageRow = React.memo(React.forwardRef<HTMLDivElement, {
 
       {/* Star */}
       <button onClick={onStarClick} className="mt-0.5 flex-shrink-0 p-0.5">
-        <HugeiconsIcon
-          icon={StarIcon}
-          size={16}
-          strokeWidth={1.5}
-          className={
-            message.isStarred
-              ? "fill-[#eab308] text-[#eab308]"
-              : "text-line-strong hover:text-text-muted"
-          }
-        />
+        {message.isStarred ? (
+          <IoStar size={15} className="text-[#eab308]" />
+        ) : (
+          <IoStarOutline
+            size={15}
+            className="text-text-faint transition-colors hover:text-text-muted"
+          />
+        )}
       </button>
     </div>
   );

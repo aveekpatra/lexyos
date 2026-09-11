@@ -23,6 +23,7 @@ export function useResizablePanel(
       if (stored) {
         const parsed = parseInt(stored, 10);
         if (!isNaN(parsed) && parsed >= minWidth && parsed <= maxWidth) {
+          // eslint-disable-next-line react-hooks/set-state-in-effect -- read after mount on purpose: a render-phase localStorage read would be impure and cause a hydration mismatch on the panel width
           setWidth(parsed);
         }
       }

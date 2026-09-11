@@ -1,23 +1,23 @@
 "use client";
 
 import React, { useCallback } from "react";
+import type { IconType } from "react-icons";
 import { useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
-import { HugeiconsIcon } from "@hugeicons/react";
 import {
-  Archive01Icon,
-  Delete02Icon,
-  Mail01Icon,
-  MailOpenIcon,
-  StarIcon,
-} from "@hugeicons/core-free-icons";
+  IoArchive,
+  IoTrash,
+  IoMail,
+  IoMailOpen,
+  IoStar,
+} from "react-icons/io5";
+import { glassIconButton, softPill } from "@/lib/ui/chrome";
 import {
   archiveMessages,
   trashMessages,
   markMessagesAsRead,
   markMessagesAsUnread,
   starMessages,
-  unstarMessages,
 } from "@/app/actions/gmail";
 
 interface MailBulkActionsProps {
@@ -68,46 +68,39 @@ export default function MailBulkActions({
   if (selectedIds.size === 0) return null;
 
   return (
-    <div className="flex items-center gap-1 border-b border-line bg-surface-0 px-3 py-2">
-      <span className="mr-2 text-[13px] font-medium text-brand">
+    <div className="flex items-center gap-1.5 border-b border-line bg-surface-1 px-3 py-2">
+      <span className="mr-1 text-[13px] font-medium text-brand">
         {selectedIds.size} selected
       </span>
 
       <BulkButton
-        icon={Archive01Icon}
+        icon={IoArchive}
         label="Archive"
         onClick={() => doBulkAction(undefined, ["INBOX"], archiveMessages)}
       />
       <BulkButton
-        icon={Delete02Icon}
+        icon={IoTrash}
         label="Trash"
         onClick={() => doBulkAction(["TRASH"], ["INBOX"], trashMessages)}
       />
       <BulkButton
-        icon={MailOpenIcon}
+        icon={IoMailOpen}
         label="Mark read"
-        onClick={() =>
-          doBulkAction(undefined, ["UNREAD"], markMessagesAsRead)
-        }
+        onClick={() => doBulkAction(undefined, ["UNREAD"], markMessagesAsRead)}
       />
       <BulkButton
-        icon={Mail01Icon}
+        icon={IoMail}
         label="Mark unread"
-        onClick={() =>
-          doBulkAction(["UNREAD"], undefined, markMessagesAsUnread)
-        }
+        onClick={() => doBulkAction(["UNREAD"], undefined, markMessagesAsUnread)}
       />
       <BulkButton
-        icon={StarIcon}
+        icon={IoStar}
         label="Star"
         onClick={() => doBulkAction(["STARRED"], undefined, starMessages)}
       />
 
       <div className="flex-1" />
-      <button
-        onClick={onClearSelection}
-        className="text-[12px] text-text-muted hover:text-text-secondary"
-      >
+      <button onClick={onClearSelection} className={softPill}>
         Clear
       </button>
     </div>
@@ -115,21 +108,17 @@ export default function MailBulkActions({
 }
 
 function BulkButton({
-  icon,
+  icon: Icon,
   label,
   onClick,
 }: {
-  icon: typeof Archive01Icon;
+  icon: IconType;
   label: string;
   onClick: () => void;
 }) {
   return (
-    <button
-      onClick={onClick}
-      title={label}
-      className="rounded-md p-1.5 text-text-secondary transition-colors hover:bg-line hover:text-foreground"
-    >
-      <HugeiconsIcon icon={icon} size={16} strokeWidth={1.5} />
+    <button onClick={onClick} title={label} aria-label={label} className={glassIconButton}>
+      <Icon size={15} />
     </button>
   );
 }

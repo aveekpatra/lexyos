@@ -5,20 +5,19 @@ import { usePathname, useRouter } from "next/navigation";
 import { UserButton } from "@clerk/nextjs";
 import { useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
-import { HugeiconsIcon } from "@hugeicons/react";
+import type { IconType } from "react-icons";
 import {
-  InboxIcon,
-  Calendar01Icon,
-  FolderLibraryIcon,
-  Mail01Icon,
-  Settings01Icon,
-  Clock01Icon,
-  HelpCircleIcon,
-  Search01Icon,
-  Refresh01Icon,
-  Sun01Icon,
-  Moon02Icon,
-} from "@hugeicons/core-free-icons";
+  IoFileTrayFull,
+  IoCalendar,
+  IoAlbums,
+  IoMail,
+  IoSettingsSharp,
+  IoTime,
+  IoHelpCircle,
+  IoSyncSharp,
+  IoSunny,
+  IoMoon,
+} from "react-icons/io5";
 import { useTheme } from "@/components/ThemeProvider";
 import {
   Tooltip,
@@ -30,11 +29,11 @@ import FloatingPill from "@/components/command-bar/FloatingPill";
 import { ThemeSyncer } from "@/components/ThemeSyncer";
 import { HelpDialog, useHelpShortcut } from "@/components/HelpDialog";
 
-const NAV_ITEMS = [
-  { icon: InboxIcon, label: "Inbox", href: "/timeline" },
-  { icon: Calendar01Icon, label: "Planner", href: "/planner" },
-  { icon: FolderLibraryIcon, label: "Projects", href: "/projects" },
-  { icon: Mail01Icon, label: "Mail", href: "/mail" },
+const NAV_ITEMS: { icon: IconType; label: string; href: string }[] = [
+  { icon: IoFileTrayFull, label: "Inbox", href: "/timeline" },
+  { icon: IoCalendar, label: "Planner", href: "/planner" },
+  { icon: IoAlbums, label: "Projects", href: "/projects" },
+  { icon: IoMail, label: "Mail", href: "/mail" },
 ];
 
 export default function AppLayout({ children }: { children: ReactNode }) {
@@ -56,9 +55,9 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <div className="flex h-svh overflow-hidden">
-      {/* Icon rail */}
-      <aside className="flex w-12 shrink-0 flex-col items-center border-r border-line bg-surface-0 py-3">
+    <div className="flex h-svh gap-1.5 overflow-hidden bg-layout-shell p-1.5">
+      {/* Icon rail — a floating island on the desk */}
+      <aside className="flex w-14 shrink-0 flex-col items-center rounded-[24px] bg-surface-0 py-3 island">
         <div className="mb-4">
           <UserButton
             appearance={{
@@ -67,7 +66,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           />
         </div>
 
-        <nav className="flex flex-col items-center gap-1">
+        <nav className="flex flex-col items-center gap-1.5">
           {NAV_ITEMS.map((item) => (
             <RailButton
               key={item.label}
@@ -79,20 +78,20 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           ))}
         </nav>
 
-        <div className="my-2 h-px w-6 bg-line" />
+        <div className="my-2.5 h-px w-6 bg-line" />
         <SyncButton />
 
         <div className="flex-1" />
 
-        <nav className="flex flex-col items-center gap-1">
+        <nav className="flex flex-col items-center gap-1.5">
           <ThemeToggleButton />
-          <RailButton icon={Settings01Icon} label="Settings" />
-          <RailButton icon={Clock01Icon} label="Activity" />
-          <RailButton icon={HelpCircleIcon} label="Help  ?" onClick={() => setHelpOpen(true)} />
+          <RailButton icon={IoSettingsSharp} label="Settings" />
+          <RailButton icon={IoTime} label="Activity" />
+          <RailButton icon={IoHelpCircle} label="Help  ?" onClick={() => setHelpOpen(true)} />
         </nav>
       </aside>
 
-      <main className="flex flex-1 flex-col overflow-hidden">
+      <main className="flex flex-1 flex-col overflow-hidden rounded-[24px] bg-surface-0 island">
         {children}
       </main>
 
@@ -114,11 +113,11 @@ function ThemeToggleButton() {
         render={
           <button
             onClick={toggleTheme}
-            className="flex size-9 items-center justify-center rounded-lg text-text-faint transition-colors hover:bg-surface-1 hover:text-text-secondary"
+            className="flex size-9 items-center justify-center rounded-[13px] text-text-faint transition-colors hover:bg-hover hover:text-text-secondary"
           />
         }
       >
-        <HugeiconsIcon icon={theme === "dark" ? Sun01Icon : Moon02Icon} size={18} />
+        {theme === "dark" ? <IoSunny size={18} /> : <IoMoon size={18} />}
       </TooltipTrigger>
       <TooltipPopup side="right">{theme === "dark" ? "Light mode" : "Dark mode"}</TooltipPopup>
     </Tooltip>
@@ -126,12 +125,12 @@ function ThemeToggleButton() {
 }
 
 function RailButton({
-  icon,
+  icon: Icon,
   label,
   isActive,
   onClick,
 }: {
-  icon: typeof InboxIcon;
+  icon: IconType;
   label: string;
   isActive?: boolean;
   onClick?: () => void;
@@ -142,15 +141,15 @@ function RailButton({
         render={
           <button
             onClick={onClick}
-            className={`flex size-9 items-center justify-center rounded-lg transition-all ${
+            className={`flex size-9 items-center justify-center rounded-[13px] transition-colors ${
               isActive
-                ? "border border-blue-200 bg-blue-100 text-blue-700 shadow-3d dark:border-blue-500/40 dark:bg-blue-950/50 dark:text-blue-400"
-                : "border border-transparent text-text-faint hover:border-line hover:bg-surface-1 hover:text-text-secondary hover:shadow-3d-sm"
+                ? "bg-black/[0.06] text-foreground dark:bg-white/[0.1]"
+                : "text-text-faint hover:bg-hover hover:text-text-secondary"
             }`}
           />
         }
       >
-        <HugeiconsIcon icon={icon} size={18} />
+        <Icon size={19} />
       </TooltipTrigger>
       <TooltipPopup side="right">{label}</TooltipPopup>
     </Tooltip>
@@ -167,22 +166,18 @@ function SyncButton() {
     if (syncing) return;
     setSyncing(true);
     try {
-      // Sync Calendar first, then Email (sequential to avoid Gmail rate limits)
-      const { fetchGoogleEventsForSync } = await import("@/app/actions/calendarSync");
-      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      // Sync Calendar first, then Email (sequential to avoid Gmail rate limits).
+      // runCalendarSync serializes with the planner's own sync and never infers
+      // deletions from a partial fetch.
+      const { runCalendarSync } = await import("@/lib/calendar-sync-client");
       const now = new Date();
-      const timeMin = new Date(now.getTime() - 30 * 86400000).toISOString();
-      const timeMax = new Date(now.getTime() + 60 * 86400000).toISOString();
-      const events = await fetchGoogleEventsForSync(timeMin, timeMax, tz);
-      if (events.length > 0) {
-        await bulkUpsert({ events });
+      const result = await runCalendarSync(
+        { from: new Date(now.getTime() - 30 * 86400000), to: new Date(now.getTime() + 60 * 86400000) },
+        { bulkUpsert, removeDeleted },
+      );
+      if (!result.complete) {
+        console.warn("Calendar sync incomplete; calendars failed:", result.failedCalendarIds);
       }
-      const knownIds = events.map((e) => e.googleEventId);
-      await removeDeleted({
-        knownGoogleEventIds: knownIds,
-        syncRangeStart: timeMin.slice(0, 10),
-        syncRangeEnd: timeMax.slice(0, 10),
-      });
       // Also push unlinked local tasks to Google Calendar
       try {
         await fetch("/api/sync/push-all", { method: "POST" });
@@ -215,19 +210,15 @@ function SyncButton() {
           <button
             onClick={handleSync}
             disabled={syncing}
-            className={`flex size-9 items-center justify-center rounded-lg transition-colors ${
+            className={`flex size-9 items-center justify-center rounded-[13px] transition-colors ${
               syncing
                 ? "text-brand"
-                : "text-text-faint hover:bg-surface-1 hover:text-text-secondary"
+                : "text-text-faint hover:bg-hover hover:text-text-secondary"
             }`}
           />
         }
       >
-        <HugeiconsIcon
-          icon={Refresh01Icon}
-          size={18}
-          className={syncing ? "animate-spin" : ""}
-        />
+        <IoSyncSharp size={18} className={syncing ? "animate-spin" : ""} />
       </TooltipTrigger>
       <TooltipPopup side="right">{tooltipText}</TooltipPopup>
     </Tooltip>

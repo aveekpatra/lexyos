@@ -21,13 +21,13 @@ const STORAGE_KEY = "unifocus-theme";
  * Reads/writes localStorage only. Convex sync is handled by <ThemeSyncer />.
  */
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>("light");
-
-  // Hydrate from localStorage on mount
-  useEffect(() => {
+  // Lazy init from localStorage (SSR-safe: falls back to "light" on the server).
+  // The inline script in app/layout.tsx sets the class before paint, so there is no flash.
+  const [theme, setThemeState] = useState<Theme>(() => {
+    if (typeof window === "undefined") return "light";
     const stored = localStorage.getItem(STORAGE_KEY) as Theme | null;
-    if (stored === "light" || stored === "dark") setThemeState(stored);
-  }, []);
+    return stored === "light" || stored === "dark" ? stored : "light";
+  });
 
   // Apply class to <html>
   useEffect(() => {

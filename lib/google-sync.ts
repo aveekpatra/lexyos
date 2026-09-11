@@ -12,6 +12,13 @@
  */
 
 import type { Doc } from "@/convex/_generated/dataModel";
+import {
+  DEFAULT_EVENT_MINUTES,
+  addDaysToDateStr,
+  durationMinutes,
+  endTimeFor,
+  localDateStr,
+} from "@/lib/time-utils";
 
 /** Should changes to this task be synced back to Google Calendar? */
 export function shouldSyncToGoogle(task: Doc<"tasks">): boolean {
@@ -44,8 +51,8 @@ export async function syncTaskUpdateToGoogle(
 
   // clearDueDate resets to today in Convex — update the Google event to today too
   if ("clearDueDate" in changes && changes.clearDueDate && task.googleEventId) {
-    const today = new Date().toISOString().slice(0, 10);
-    const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+    const today = (changes.userDate as string) || localDateStr(new Date());
+    const tomorrow = addDaysToDateStr(today, 1);
     try {
       const { updateGoogleEvent } = await import("@/app/actions/calendarSync");
       // Reset to all-day event on today
@@ -76,50 +83,35 @@ export async function syncTaskUpdateToGoogle(
     }
 
     // Date or time change — rebuild start/end
+    const timeCleared = !!changes.clearDueTime || !!changes.clearScheduledStartTime;
     const dateChanged = "dueDate" in changes || "dueTime" in changes ||
-      "scheduledStartTime" in changes || "scheduledEndTime" in changes;
+      "scheduledStartTime" in changes || "scheduledEndTime" in changes || timeCleared;
 
     if (dateChanged) {
       const newDate = (changes.dueDate as string) || task.dueDate || task.scheduledDate;
-      const newStartTime = (changes.dueTime as string) || (changes.scheduledStartTime as string) ||
-        (task as Record<string, unknown>).dueTime as string || task.scheduledStartTime;
-      const newEndTime = (changes.scheduledEndTime as string) || task.scheduledEndTime;
+      const startChanged = "dueTime" in changes || "scheduledStartTime" in changes;
+      const newStartTime = timeCleared ? undefined :
+        (changes.scheduledStartTime as string) || (changes.dueTime as string) ||
+        task.scheduledStartTime || (task as Record<string, unknown>).dueTime as string;
+      // Only trust an end time that was sent explicitly, or the stored one when the
+      // start did not move. A moved start must never be paired with the old end.
+      const explicitEnd = changes.scheduledEndTime as string | undefined;
+      const storedEnd = startChanged ? undefined : task.scheduledEndTime;
 
       if (newDate) {
         if (newStartTime) {
-          // Timed event
-          const startISO = toISO(newDate, newStartTime);
-          let endTime = newEndTime;
-          if (!endTime) {
-            const origStart = task.scheduledStartTime;
-            const origEnd = task.scheduledEndTime;
-            if (origStart && origEnd) {
-              const [osh, osm] = origStart.split(":").map(Number);
-              const [oeh, oem] = origEnd.split(":").map(Number);
-              const durationMin = (oeh * 60 + oem) - (osh * 60 + osm);
-              if (durationMin > 0) {
-                const [nsh, nsm] = newStartTime.split(":").map(Number);
-                const endMin = nsh * 60 + nsm + durationMin;
-                // NOTE: % 24 wraps the hour but does NOT advance the date.
-                endTime = `${String(Math.floor(endMin / 60) % 24).padStart(2, "0")}:${String(endMin % 60).padStart(2, "0")}`;
-              }
-            }
-          }
-          if (!endTime) {
-            const [hh, mm] = newStartTime.split(":").map(Number);
-            const endMin = hh * 60 + mm + 60;
-            // NOTE: % 24 wraps the hour but does NOT advance the date.
-            endTime = `${String(Math.floor(endMin / 60) % 24).padStart(2, "0")}:${String(endMin % 60).padStart(2, "0")}`;
-          }
-          updates.start = { dateTime: startISO, timeZone: tz };
-          updates.end = { dateTime: toISO(newDate, endTime), timeZone: tz };
+          // Timed event: keep the original duration (or the default), clamped to 23:59.
+          const dur =
+            durationMinutes(newStartTime, explicitEnd) ??
+            durationMinutes(newStartTime, storedEnd) ??
+            durationMinutes(task.scheduledStartTime, task.scheduledEndTime) ??
+            DEFAULT_EVENT_MINUTES;
+          updates.start = { dateTime: toISO(newDate, newStartTime), timeZone: tz };
+          updates.end = { dateTime: toISO(newDate, endTimeFor(newStartTime, dur)), timeZone: tz };
         } else {
-          // All-day event (date only, no time)
-          const nextDay = new Date(newDate + "T00:00:00");
-          nextDay.setDate(nextDay.getDate() + 1);
-          const endDate = nextDay.toISOString().slice(0, 10);
+          // All-day event (date only, no time). Google's end date is exclusive.
           updates.start = { date: newDate };
-          updates.end = { date: endDate };
+          updates.end = { date: addDaysToDateStr(newDate, 1) };
         }
       }
     }
@@ -134,10 +126,14 @@ export async function syncTaskUpdateToGoogle(
   const newDate = (changes.dueDate as string) || task.dueDate || task.scheduledDate;
   if (!newDate) return null;
 
-  // Auto-push as a new Google Calendar event
+  // Auto-push as a new Google Calendar event, using the post-update times so the
+  // event reflects what the user just did (not the stale pre-update snapshot).
   const result = await pushLocalTaskToGoogle({
     ...task,
     dueDate: newDate,
+    ...(typeof changes.dueTime === "string" ? { dueTime: changes.dueTime } : {}),
+    ...(typeof changes.scheduledStartTime === "string" ? { scheduledStartTime: changes.scheduledStartTime } : {}),
+    ...(typeof changes.scheduledEndTime === "string" ? { scheduledEndTime: changes.scheduledEndTime } : {}),
   } as Doc<"tasks">);
   return result;
 }
@@ -186,14 +182,8 @@ export async function pushLocalTaskToGoogle(
   if (!dateStr) return null;
 
   const { pushTaskToGoogleCalendar } = await import("@/app/actions/calendarSync");
-  const dueTime = (task as Record<string, unknown>).dueTime as string | undefined || task.scheduledStartTime;
-  let durationMinutes = 60;
-  if (task.scheduledStartTime && task.scheduledEndTime) {
-    const [sh, sm] = task.scheduledStartTime.split(":").map(Number);
-    const [eh, em] = task.scheduledEndTime.split(":").map(Number);
-    const dur = (eh * 60 + em) - (sh * 60 + sm);
-    if (dur > 0) durationMinutes = dur;
-  }
+  const dueTime = task.scheduledStartTime || (task as Record<string, unknown>).dueTime as string | undefined;
+  const minutes = durationMinutes(task.scheduledStartTime, task.scheduledEndTime) ?? DEFAULT_EVENT_MINUTES;
 
   const result = await pushTaskToGoogleCalendar({
     id: task._id,
@@ -201,7 +191,10 @@ export async function pushLocalTaskToGoogle(
     description: task.description,
     dueDate: dateStr,
     dueTime: dueTime,
-    durationMinutes,
+    durationMinutes: minutes,
+    // The server action runs in the server's timezone (UTC in production);
+    // without this the event lands at the wrong wall-clock time.
+    timeZone: getUserTz(),
   });
 
   return {

@@ -1,30 +1,30 @@
 "use client";
 
 import React, { useMemo } from "react";
-import { HugeiconsIcon } from "@hugeicons/react";
+import type { IconType } from "react-icons";
 import {
-  InboxIcon,
-  StarIcon,
-  SentIcon,
-  FileEditIcon,
-  Delete02Icon,
-  Tag01Icon,
-  QuillWrite01Icon,
-  Archive01Icon,
-  Alert02Icon,
-} from "@hugeicons/core-free-icons";
+  IoFileTrayFull,
+  IoStar,
+  IoSend,
+  IoDocumentText,
+  IoArchive,
+  IoWarning,
+  IoTrash,
+  IoPricetag,
+  IoCreate,
+} from "react-icons/io5";
 import type { GmailLabel } from "@/lib/gmail-types";
 import { useUnreadCount } from "./useGmailMessages";
 
-const SYSTEM_LABELS = [
-  { id: "INBOX", name: "Inbox", icon: InboxIcon },
-  { id: "STARRED", name: "Starred", icon: StarIcon },
-  { id: "SENT", name: "Sent", icon: SentIcon },
-  { id: "DRAFT", name: "Drafts", icon: FileEditIcon },
-  { id: "ARCHIVED", name: "Archived", icon: Archive01Icon },
-  { id: "SPAM", name: "Spam", icon: Alert02Icon },
-  { id: "TRASH", name: "Trash", icon: Delete02Icon },
-] as const;
+const SYSTEM_LABELS: { id: string; name: string; icon: IconType }[] = [
+  { id: "INBOX", name: "Inbox", icon: IoFileTrayFull },
+  { id: "STARRED", name: "Starred", icon: IoStar },
+  { id: "SENT", name: "Sent", icon: IoSend },
+  { id: "DRAFT", name: "Drafts", icon: IoDocumentText },
+  { id: "ARCHIVED", name: "Archived", icon: IoArchive },
+  { id: "SPAM", name: "Spam", icon: IoWarning },
+  { id: "TRASH", name: "Trash", icon: IoTrash },
+];
 
 interface MailSidebarProps {
   activeLabel: string;
@@ -60,39 +60,30 @@ export default function MailSidebar({
 
   return (
     <div className="flex h-full flex-col py-3">
-      {/* Compose button */}
+      {/* Compose — the single saturated blue capsule */}
       <div className="px-3 pb-3">
         <button
           onClick={onCompose}
-          className="flex w-full items-center justify-center gap-2 rounded-[10px] border border-blue-300 bg-blue-100 px-3 py-2 text-sm font-semibold text-blue-700 shadow-3d transition-all hover:bg-blue-200 active:translate-y-[1px] active:shadow-3d-sm dark:border-blue-500/40 dark:bg-blue-950/50 dark:text-blue-400 dark:hover:bg-blue-900/50"
+          className="flex w-full items-center justify-center gap-2 rounded-full bg-brand px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-brand-strong active:translate-y-px shadow-[0_1px_3px_rgba(15,23,42,0.18),inset_0_1px_0_rgba(255,255,255,0.2)]"
         >
-          <HugeiconsIcon icon={QuillWrite01Icon} size={16} strokeWidth={1.5} />
+          <IoCreate size={16} />
           Compose
         </button>
       </div>
 
       <div className="mx-3 mb-3 h-px bg-line" />
 
-      {/* System labels */}
-      <nav className="flex flex-col gap-1.5 px-3">
+      {/* System labels — flat rows, calm hover, active = tinted brand wash */}
+      <nav className="flex flex-col gap-0.5 px-3">
         {SYSTEM_LABELS.map((item) => (
-          <button
+          <NavItem
             key={item.id}
+            icon={item.icon}
+            label={item.name}
+            active={activeLabel === item.id}
+            count={unreadCounts[item.id]}
             onClick={() => onLabelSelect(item.id)}
-            className={`flex items-center gap-2.5 rounded-[10px] border px-3 py-1.5 text-[13px] shadow-3d transition-all active:translate-y-[1px] active:shadow-3d-sm ${
-              activeLabel === item.id
-                ? "border-blue-300 bg-blue-100 text-blue-700 dark:border-blue-500/40 dark:bg-blue-950/50 dark:text-blue-400"
-                : "border-line bg-surface-1 text-text-secondary hover:border-blue-200 hover:bg-blue-50/60 hover:text-text-strong dark:border-white/10 dark:hover:border-blue-500/40 dark:hover:bg-blue-950/30"
-            }`}
-          >
-            <HugeiconsIcon icon={item.icon} size={14} strokeWidth={1.5} />
-            <span className="flex-1 text-left">{item.name}</span>
-            {unreadCounts[item.id] ? (
-              <span className="text-[11px] font-semibold text-blue-700 dark:text-blue-400">
-                {unreadCounts[item.id]}
-              </span>
-            ) : null}
-          </button>
+          />
         ))}
       </nav>
 
@@ -100,32 +91,72 @@ export default function MailSidebar({
       {userLabels.length > 0 && (
         <>
           <div className="my-3 mx-3 h-px bg-line" />
-          <div className="px-4 pb-2 text-[11px] font-semibold uppercase tracking-wider text-text-faint">
+          <div className="px-3 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-text-faint">
             Labels
           </div>
-          <nav className="flex flex-col gap-1.5 overflow-y-auto px-3 pb-1">
+          <nav className="flex flex-col gap-0.5 overflow-y-auto px-3 pb-1">
             {userLabels.map((label) => (
-              <button
+              <NavItem
                 key={label.id}
+                icon={IoPricetag}
+                label={label.name}
+                active={activeLabel === label.id}
+                count={unreadCounts[label.id]}
                 onClick={() => onLabelSelect(label.id)}
-                className={`flex items-center gap-2.5 rounded-[10px] border px-3 py-1.5 text-[13px] shadow-3d transition-all active:translate-y-[1px] active:shadow-3d-sm ${
-                  activeLabel === label.id
-                    ? "border-blue-300 bg-blue-100 text-blue-700 dark:border-blue-500/40 dark:bg-blue-950/50 dark:text-blue-400"
-                    : "border-line bg-surface-1 text-text-secondary hover:border-blue-200 hover:bg-blue-50/60 hover:text-text-strong dark:border-white/10 dark:hover:border-blue-500/40 dark:hover:bg-blue-950/30"
-                }`}
-              >
-                <HugeiconsIcon icon={Tag01Icon} size={14} strokeWidth={1.5} />
-                <span className="flex-1 truncate text-left">{label.name}</span>
-                {unreadCounts[label.id] ? (
-                  <span className="text-[11px] font-semibold text-blue-700 dark:text-blue-400">
-                    {unreadCounts[label.id]}
-                  </span>
-                ) : null}
-              </button>
+                truncate
+              />
             ))}
           </nav>
         </>
       )}
     </div>
+  );
+}
+
+function NavItem({
+  icon: Icon,
+  label,
+  active,
+  count,
+  onClick,
+  truncate,
+}: {
+  icon: IconType;
+  label: string;
+  active: boolean;
+  count?: number;
+  onClick: () => void;
+  truncate?: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`group flex items-center gap-2.5 rounded-[10px] px-3 py-1.5 text-[13px] transition-colors ${
+        active
+          ? "bg-brand-bg text-brand font-medium"
+          : "text-text-secondary hover:bg-hover hover:text-text-strong"
+      }`}
+    >
+      <Icon
+        size={15}
+        className={
+          active
+            ? "text-brand"
+            : "text-text-faint transition-colors group-hover:text-text-secondary"
+        }
+      />
+      <span className={`flex-1 text-left ${truncate ? "truncate" : ""}`}>
+        {label}
+      </span>
+      {count ? (
+        <span
+          className={`text-[11px] font-semibold ${
+            active ? "text-brand" : "text-text-muted"
+          }`}
+        >
+          {count}
+        </span>
+      ) : null}
+    </button>
   );
 }

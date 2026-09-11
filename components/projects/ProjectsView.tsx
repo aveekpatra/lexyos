@@ -17,6 +17,8 @@ import {
   Dialog, DialogPopup, DialogHeader, DialogTitle, DialogPanel, DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Segmented } from "@/components/ui/segmented";
+import { glassAction, glassIconButton, bluePill } from "@/lib/ui/chrome";
 import {
   Menu, MenuTrigger, MenuPopup, MenuItem, MenuSeparator,
 } from "@/components/ui/menu";
@@ -72,16 +74,19 @@ export default function ProjectsView() {
   const [showCreate, setShowCreate] = useState(false);
   const { width: sidebarWidth, onMouseDown: handleResize } = useResizablePanel("projects-sidebar", 220);
 
-  // Hydrate selected project from localStorage, or fall back to first project
+  // Hydrate selected project from localStorage, or fall back to first project.
+  // Reads localStorage (an external store) once project data has loaded, so it
+  // belongs in an effect rather than render phase.
   useEffect(() => {
     if (!activeProjects || activeProjects.length === 0) return;
     if (selectedProjectId) return; // already selected
     const stored = localStorage.getItem("unifocus:projects:lastProject");
-    if (stored && activeProjects.some((p) => p._id === stored)) {
-      setSelectedProjectIdRaw(stored as Id<"projects">);
-    } else {
-      setSelectedProjectIdRaw(activeProjects[0]._id);
-    }
+    const next =
+      stored && activeProjects.some((p) => p._id === stored)
+        ? (stored as Id<"projects">)
+        : activeProjects[0]._id;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot init from an external store (localStorage) after async data loads
+    setSelectedProjectIdRaw(next);
   }, [activeProjects, selectedProjectId]);
 
   if (projects === undefined) {
@@ -132,9 +137,9 @@ export default function ProjectsView() {
               {(projects?.length ?? 0) === 0 ? "Create your first project" : "Select a project"}
             </span>
             {!showArchived && (projects?.length ?? 0) === 0 && (
-              <Button size="sm" onClick={() => setShowCreate(true)}>
+              <button className={bluePill} onClick={() => setShowCreate(true)}>
                 <HugeiconsIcon icon={Add01Icon} size={14} /> New Project
-              </Button>
+              </button>
             )}
           </div>
         </div>
@@ -201,10 +206,15 @@ function ProjectSidebar({ projects, selectedId, onSelect, onCreate, showArchived
     return (localStorage.getItem("unifocus:projects:sort") as ProjectSort) || "manual";
   });
 
-  // Hydrate from Convex once loaded
+  // Hydrate sort from Convex once loaded: sync state during render
+  // (prev-tracking), and persist to localStorage in an effect (side-effect).
+  const [prevPrefsSort, setPrevPrefsSort] = useState(prefs?.projectSort);
+  if (prefs?.projectSort && prefs.projectSort !== prevPrefsSort) {
+    setPrevPrefsSort(prefs.projectSort);
+    setSortRaw(prefs.projectSort as ProjectSort);
+  }
   useEffect(() => {
     if (prefs?.projectSort) {
-      setSortRaw(prefs.projectSort as ProjectSort);
       try { localStorage.setItem("unifocus:projects:sort", prefs.projectSort); } catch {}
     }
   }, [prefs?.projectSort]);
@@ -232,30 +242,21 @@ function ProjectSidebar({ projects, selectedId, onSelect, onCreate, showArchived
 
   return (
     <div className="flex h-full flex-col py-3">
-      {/* Header with add + sort + archive toggle */}
-      <div className="flex items-center justify-between px-4 pb-2">
-        <span className="text-[11px] font-semibold uppercase tracking-wider text-text-faint">
-          {showArchived ? "Archived" : "Projects"}
-        </span>
-        <div className="flex items-center gap-1">
-          {!showArchived && (
-            <button
-              onClick={onCreate}
-              className="flex size-6 items-center justify-center rounded-md text-text-faint transition-colors hover:text-text-secondary"
-              title="New project"
-            >
-              <HugeiconsIcon icon={Add01Icon} size={14} strokeWidth={1.5} />
-            </button>
-          )}
+      {/* Header: Active/Archived switcher, sort, create */}
+      <div className="flex items-center justify-between gap-2 px-3 pb-2.5">
+        <Segmented
+          layoutId="projects-scope"
+          size="sm"
+          value={showArchived ? "archived" : "active"}
+          onChange={(v) => { if ((v === "archived") !== showArchived) onToggleArchived(); }}
+          items={[
+            { value: "active", label: "Active", title: "Active projects" },
+            { value: "archived", label: "Archived", title: "Archived projects" },
+          ]}
+        />
+        <div className="flex shrink-0 items-center gap-1.5">
           <Menu>
-            <MenuTrigger
-              render={
-                <button
-                  className="flex size-6 items-center justify-center rounded-md text-text-faint transition-colors hover:text-text-secondary"
-                  title="Sort projects"
-                />
-              }
-            >
+            <MenuTrigger render={<button className={glassIconButton} title="Sort projects" />}>
               <HugeiconsIcon icon={SortingAZ01Icon} size={13} />
             </MenuTrigger>
             <MenuPopup>
@@ -267,17 +268,11 @@ function ProjectSidebar({ projects, selectedId, onSelect, onCreate, showArchived
               ))}
             </MenuPopup>
           </Menu>
-          <button
-            onClick={onToggleArchived}
-            className={`flex size-6 items-center justify-center rounded-md transition-colors ${
-              showArchived
-                ? "text-blue-700"
-                : "text-text-faint hover:text-text-secondary"
-            }`}
-            title={showArchived ? "Show active" : "Show archived"}
-          >
-            <HugeiconsIcon icon={showArchived ? ArrowLeft01Icon : FolderLibraryIcon} size={13} />
-          </button>
+          {!showArchived && (
+            <button onClick={onCreate} className={bluePill} title="New project">
+              <HugeiconsIcon icon={Add01Icon} size={14} />
+            </button>
+          )}
         </div>
       </div>
 
@@ -320,10 +315,10 @@ function ProjectSidebar({ projects, selectedId, onSelect, onCreate, showArchived
               onClick={() => onSelect(project._id)}
               className={`flex w-full cursor-pointer items-center gap-2.5 rounded-[10px] border px-3 py-2.5 text-left text-[13px] shadow-3d transition-all active:translate-y-[1px] active:shadow-3d-sm ${
                 dragOverId === project._id
-                  ? "border-brand bg-brand-bg"
+                  ? "border-brand bg-brand-bg text-brand"
                   : selectedId === project._id
-                    ? "border-blue-300 bg-blue-100 text-blue-700 dark:border-blue-500/40 dark:bg-blue-950/50 dark:text-blue-400"
-                    : "border-line bg-surface-1 text-text-secondary hover:border-blue-200 hover:bg-blue-50/60 hover:text-text-strong dark:border-white/10 dark:hover:border-blue-500/40 dark:hover:bg-blue-950/30"
+                    ? "border-brand-border bg-brand-bg text-brand"
+                    : "border-line bg-surface-1 text-text-secondary hover:border-line-strong hover:bg-hover hover:text-text-strong"
               } ${draggedId === project._id ? "opacity-40" : ""}`}
             >
               <HugeiconsIcon icon={HashtagIcon} size={14} color={project.color} />
@@ -402,15 +397,15 @@ function ArchivedProjectView({ project }: { project: Doc<"projects"> }) {
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
-      <div className="flex items-center justify-between border-b border-line-strong px-6 py-3">
+      <div className="flex items-center justify-between border-b border-line px-5 py-2.5">
         <div className="flex items-center gap-3">
           <HugeiconsIcon icon={HashtagIcon} size={18} color={project.color} />
-          <h1 className="text-[15px] font-bold text-foreground">{project.name}</h1>
+          <h1 className="text-[15px] font-bold tracking-tight text-text-strong">{project.name}</h1>
           <Badge variant="secondary" size="sm">Archived</Badge>
         </div>
-        <Button size="sm" variant="outline" onClick={() => updateProject({ id: project._id, status: "active" })}>
+        <button className={glassAction} onClick={() => updateProject({ id: project._id, status: "active" })}>
           <HugeiconsIcon icon={ArrowLeft01Icon} size={14} /> Restore
-        </Button>
+        </button>
       </div>
       <div className="flex-1 overflow-y-auto p-6">
         {tasks && tasks.length > 0 ? (
@@ -473,10 +468,11 @@ function ProjectBoard({ project }: { project: Doc<"projects"> }) {
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-line-strong px-6 py-3">
+      <div className="flex items-center justify-between border-b border-line px-5 py-2.5">
         {/* Left: name */}
-        <div className="flex items-center gap-3">
-          <span className="text-[15px] font-semibold text-foreground">{project.name}</span>
+        <div className="flex items-center gap-2.5">
+          <HugeiconsIcon icon={HashtagIcon} size={18} color={project.color} />
+          <span className="text-[15px] font-bold tracking-tight text-text-strong">{project.name}</span>
         </div>
 
         {/* Right: dates + menu */}
@@ -487,7 +483,7 @@ function ProjectBoard({ project }: { project: Doc<"projects"> }) {
             dueDate={project.dueDate}
           />
           <Menu>
-            <MenuTrigger render={<Button variant="ghost" size="icon-xs" />}>
+            <MenuTrigger render={<button className={glassIconButton} title="Project options" />}>
               <HugeiconsIcon icon={MoreHorizontalIcon} size={16} />
             </MenuTrigger>
             <MenuPopup>
@@ -581,7 +577,7 @@ function GTDColumn({ column, tasks, allTasks, projectId, isLast, isAdding, onSta
 
   return (
     <div
-      className={`relative flex min-w-[260px] flex-1 flex-col ${!isLast ? "border-r border-dashed border-line-strong" : ""}`}
+      className={`relative flex min-w-[260px] flex-1 flex-col ${!isLast ? "border-r border-line" : ""}`}
       onDragEnter={(e) => { e.preventDefault(); dragCounter.current++; setIsOver(true); }}
       onDragLeave={() => { dragCounter.current--; if (dragCounter.current <= 0) { dragCounter.current = 0; setIsOver(false); } }}
       onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
@@ -592,14 +588,16 @@ function GTDColumn({ column, tasks, allTasks, projectId, isLast, isAdding, onSta
         <div className="pointer-events-none absolute inset-2 z-20 rounded-xl border-2 border-dashed border-brand/60 bg-brand/5" />
       )}
 
-      <div className="flex items-center gap-2 px-5 pb-3 pt-4">
-        <span className="text-[15px] font-bold text-brand">{column.label}</span>
-        <span className="text-[13px] font-medium text-text-secondary">{tasks.length}</span>
+      <div className="flex items-baseline gap-2 px-5 pb-3 pt-4">
+        <span className="text-[15px] font-bold tracking-tight text-text-strong">{column.label}</span>
+        <span className="text-[13px] font-medium text-text-muted">{tasks.length}</span>
       </div>
       <div
         onClick={() => { if (!isAdding) onStartAdd(); }}
-        className={`mx-5 mb-3 flex items-center justify-between rounded-[10px] border px-3.5 py-2.5 transition-colors ${
-          isAdding ? "border-line-strong bg-surface-1" : "cursor-pointer border-line-strong bg-surface-0 hover:border-line-strong hover:bg-surface-1"
+        className={`mx-5 mb-3 flex items-center justify-between rounded-[13px] px-3.5 py-2.5 transition-colors ${
+          isAdding
+            ? "bg-brand-bg ring-1 ring-inset ring-brand-border"
+            : "cursor-pointer bg-black/[0.03] hover:bg-black/[0.06] active:translate-y-px dark:bg-white/[0.04] dark:hover:bg-white/[0.07]"
         }`}
       >
         {isAdding ? (
@@ -624,7 +622,7 @@ function GTDColumn({ column, tasks, allTasks, projectId, isLast, isAdding, onSta
         ) : (
           <div className="mt-auto flex items-center gap-2 pb-2">
             <span className="text-[12px] tracking-wide text-text-faint">No tasks</span>
-            <span className="flex size-[18px] items-center justify-center rounded-[5px] border border-line-strong bg-surface-1 text-[10px] font-bold text-text-faint shadow-3d">0</span>
+            <span className="flex size-[18px] items-center justify-center rounded-[6px] bg-black/[0.05] text-[10px] font-bold text-text-faint dark:bg-white/[0.08]">0</span>
           </div>
         )}
       </div>
@@ -643,13 +641,7 @@ function ProjectDatePicker({ projectId, startDate, dueDate }: {
   return (
     <Popover>
       <PopoverTrigger
-        render={
-          <button className={`flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-[12px] font-medium transition-all ${
-            hasAnyDate
-              ? "border border-line-strong bg-surface-0 text-text-secondary hover:border-line-strong hover:bg-surface-1"
-              : "text-text-faint hover:text-text-secondary"
-          }`} />
-        }
+        render={<button className={glassAction} />}
       >
         <HugeiconsIcon icon={Calendar01Icon} size={13} />
         {hasAnyDate ? (

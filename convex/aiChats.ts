@@ -39,7 +39,7 @@ export const save = mutation({
       .first();
 
     if (existing) {
-      await ctx.db.patch(existing._id, { messages: args.messages });
+      await ctx.db.patch("aiChats", existing._id, { messages: args.messages });
     } else {
       await ctx.db.insert("aiChats", { messages: args.messages, userId });
     }
@@ -56,7 +56,7 @@ export const clear = mutation({
       .withIndex("by_userId", (q) => q.eq("userId", identity.subject))
       .first();
     if (existing) {
-      await ctx.db.patch(existing._id, { messages: [] });
+      await ctx.db.patch("aiChats", existing._id, { messages: [] });
     }
   },
 });

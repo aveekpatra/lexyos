@@ -308,7 +308,7 @@ export default function MailView() {
         className="flex flex-shrink-0 flex-col overflow-hidden border-r border-line"
       >
         {syncError && (
-          <div className="border-b border-red-900/50 bg-red-950/30 px-3 py-2 text-[13px] text-red-400">
+          <div className="border-b border-line bg-red-50 px-3 py-2 text-[13px] text-red-600 dark:bg-red-950/30 dark:text-red-400">
             Sync error: {syncError}
           </div>
         )}
@@ -350,10 +350,10 @@ export default function MailView() {
           <div className="flex flex-1 flex-col items-center justify-center gap-3 text-text-faint">
             <p className="text-[15px]">Select an email to read</p>
             <p className="text-[13px]">
-              Use <kbd className="rounded border border-line-strong bg-line px-1.5 py-0.5 text-[11px] text-text-secondary">j</kbd> / <kbd className="rounded border border-line-strong bg-line px-1.5 py-0.5 text-[11px] text-text-secondary">k</kbd> to navigate, <kbd className="rounded border border-line-strong bg-line px-1.5 py-0.5 text-[11px] text-text-secondary">Enter</kbd> to open
+              Use <kbd className="rounded-md bg-surface-2 px-1.5 py-0.5 text-[11px] font-medium text-text-secondary">j</kbd> / <kbd className="rounded-md bg-surface-2 px-1.5 py-0.5 text-[11px] font-medium text-text-secondary">k</kbd> to navigate, <kbd className="rounded-md bg-surface-2 px-1.5 py-0.5 text-[11px] font-medium text-text-secondary">Enter</kbd> to open
             </p>
             {syncing && (
-              <p className="text-[12px] text-brand-strong">Syncing emails...</p>
+              <p className="text-[12px] text-brand">Syncing emails...</p>
             )}
           </div>
         )}

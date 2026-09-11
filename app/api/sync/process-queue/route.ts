@@ -71,6 +71,9 @@ export async function POST() {
               dueDate: task.dueDate || task.scheduledDate || new Date().toISOString().slice(0, 10),
               dueTime,
               durationMinutes,
+              // Server runs in UTC; use the task's own zone when it has one so
+              // the event lands at the right wall-clock time.
+              timeZone: task.timeZone || undefined,
             });
 
             if (result?.googleEventId) {

@@ -5,6 +5,7 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { z } from "zod";
+// AI SDK v5+ renamed the tool schema key from `parameters` to `inputSchema`.
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
@@ -73,7 +74,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
 
     list_tasks: ({
       description: `List tasks with optional filters. Returns task id, title, status, priority, dueDate, dueTime, scheduledStartTime, scheduledEndTime, projectId, source. Use this to answer questions about the user's tasks, what's planned, what's overdue, etc.`,
-      parameters: z.object({
+      inputSchema: z.object({
         status: z.enum(["todo", "planned", "in_progress", "review", "done"]).optional()
           .describe("Filter by status"),
         projectId: z.string().optional()
@@ -105,7 +106,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
 
     get_task: ({
       description: `Get a single task by its ID. Returns full task details including title, status, priority, dates, times, project, and description. Use this to verify a task exists and read its current state after creating or updating it.`,
-      parameters: z.object({
+      inputSchema: z.object({
         id: z.string().describe("Task ID to retrieve"),
       }),
       execute: safe(async (args: any) => {
@@ -130,7 +131,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
 
     create_task: ({
       description: `Create a new task. Always set a dueDate (defaults to today if not specified). Set priority to p1 (urgent), p2 (high), p3 (medium/default), or p4 (low). If the user mentions a time, set dueTime in HH:MM format. If they mention a project, look up the project ID first with list_projects.`,
-      parameters: z.object({
+      inputSchema: z.object({
         title: z.string().describe("Task title"),
         description: z.string().optional().describe("Task description/notes"),
         dueDate: z.string().optional().describe("Due date in YYYY-MM-DD format. Defaults to today."),
@@ -173,7 +174,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
 
     update_task: ({
       description: `Update an existing task. Only include the fields you want to change. Use this for rescheduling, changing priority, renaming, adding descriptions, moving to a project, etc.`,
-      parameters: z.object({
+      inputSchema: z.object({
         id: z.string().describe("Task ID to update"),
         title: z.string().optional().describe("New title"),
         description: z.string().optional().describe("New description"),
@@ -220,7 +221,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
 
     complete_task: ({
       description: `Mark a task as done (or toggle it back to todo if already done). Use when the user says they finished something, completed a task, or want to mark it done.`,
-      parameters: z.object({
+      inputSchema: z.object({
         id: z.string().describe("Task ID to complete"),
       }),
       execute: safe(async (args: any) => {
@@ -243,7 +244,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
 
     delete_task: ({
       description: `Permanently delete a task. IMPORTANT: This is irreversible — confirm with the user BEFORE calling this tool. Don't use this for completing tasks — use complete_task instead.`,
-      parameters: z.object({
+      inputSchema: z.object({
         id: z.string().describe("Task ID to delete"),
       }),
       execute: safe(async (args: any) => {
@@ -273,7 +274,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
 
     search_tasks: ({
       description: `Search tasks by title text. Use when the user refers to a task by name and you need to find its ID. Returns matching tasks.`,
-      parameters: z.object({
+      inputSchema: z.object({
         query: z.string().describe("Search text to match against task titles"),
       }),
       execute: safe(async (args: any) => {
@@ -298,7 +299,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
 
     list_projects: ({
       description: `List all active projects. Returns project id, name, color, priority, dates. Use this to find project IDs when the user mentions a project by name.`,
-      parameters: z.object({}),
+      inputSchema: z.object({}),
       execute: safe(async (_args: any) => {
         const projects = await convex.query(api.projects.list, { status: "active" });
         return projects.map((p) => ({
@@ -314,7 +315,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
 
     create_project: ({
       description: `Create a new project. Projects organize tasks into groups.`,
-      parameters: z.object({
+      inputSchema: z.object({
         name: z.string().describe("Project name"),
         color: z.string().optional().describe("Hex color (e.g. '#3b82f6')"),
         priority: z.enum(["urgent", "high", "medium", "low"]).optional().describe("Project priority"),
@@ -335,7 +336,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
 
     update_project: ({
       description: `Update an existing project's properties.`,
-      parameters: z.object({
+      inputSchema: z.object({
         id: z.string().describe("Project ID"),
         name: z.string().optional().describe("New name"),
         color: z.string().optional().describe("New hex color"),
@@ -362,7 +363,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
 
     get_today_summary: ({
       description: `Get a summary of today's schedule: overdue tasks, today's tasks, calendar events, and upcoming deadlines this week. Use this when the user asks "what's on my plate", "what do I have today", "give me a rundown", etc.`,
-      parameters: z.object({}),
+      inputSchema: z.object({}),
       execute: safe(async (_args: any) => {
         const allTasks = await convex.query(api.tasks.list, {});
         const todayStr = today();
@@ -410,7 +411,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
 
     plan_day: ({
       description: `Get all tasks and events for a specific date, organized by time. Use when the user asks to plan a day, see their schedule, or wants a time-blocked view.`,
-      parameters: z.object({
+      inputSchema: z.object({
         date: z.string().optional().describe("Date to plan (YYYY-MM-DD). Defaults to today."),
       }),
       execute: safe(async (args: any) => {
@@ -462,7 +463,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
 
     find_free_time: ({
       description: `Find free time slots on a given date. Use when the user asks "when am I free", "find me a slot", "when can I schedule X". Returns available time blocks between 9am-6pm.`,
-      parameters: z.object({
+      inputSchema: z.object({
         date: z.string().describe("Date to check (YYYY-MM-DD)"),
         durationMinutes: z.number().optional().describe("Minimum slot duration in minutes (default: 30)"),
       }),
@@ -516,7 +517,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
 
     search_emails: ({
       description: `Search emails using Gmail search syntax. Use when the user asks about emails, wants to find a message, check unread mail, etc. Returns subject, from, date, snippet, and IDs. Supports Gmail search operators: from:, to:, subject:, is:unread, is:starred, has:attachment, after:, before:, label:, etc.`,
-      parameters: z.object({
+      inputSchema: z.object({
         query: z.string().describe("Gmail search query (e.g. 'from:john subject:meeting is:unread', 'after:2024/01/01')"),
         maxResults: z.number().optional().describe("Max results to return (default: 10)"),
       }),
@@ -544,7 +545,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
 
     read_email: ({
       description: `Read the full content of a specific email by its message ID. Use after search_emails to get the full body text of a message.`,
-      parameters: z.object({
+      inputSchema: z.object({
         messageId: z.string().describe("Gmail message ID"),
       }),
       execute: safe(async (args: any) => {
@@ -573,7 +574,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
 
     send_email: ({
       description: `Compose and send a new email. IMPORTANT: This is irreversible — always confirm the recipient, subject, and body with the user BEFORE calling this tool.`,
-      parameters: z.object({
+      inputSchema: z.object({
         to: z.string().describe("Recipient email address"),
         subject: z.string().describe("Email subject"),
         body: z.string().describe("Email body (plain text)"),
@@ -596,7 +597,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
 
     reply_to_email: ({
       description: `Reply to an email thread. IMPORTANT: This is irreversible — confirm the reply content with the user BEFORE calling this tool. Requires the message ID to reply to (get it from search_emails or read_email first).`,
-      parameters: z.object({
+      inputSchema: z.object({
         messageId: z.string().describe("The message ID to reply to"),
         body: z.string().describe("Reply body (plain text)"),
         replyAll: z.boolean().optional().describe("If true, reply to all recipients (default: false)"),
@@ -623,7 +624,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
 
     save_draft: ({
       description: `Save an email as a draft in Gmail. The user can review and send it later from Gmail. Use this when the user asks to "draft", "write a draft", "save for later", or "prepare an email" — anything that implies they want to review before sending. Do NOT ask for confirmation — just save the draft.`,
-      parameters: z.object({
+      inputSchema: z.object({
         to: z.string().describe("Recipient email address"),
         subject: z.string().describe("Email subject"),
         body: z.string().describe("Email body (plain text)"),
@@ -646,7 +647,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
 
     save_reply_draft: ({
       description: `Save a reply as a draft in Gmail (in the same thread). Use when the user asks to "draft a reply", "prepare a reply", or wants to reply but review it first. Do NOT ask for confirmation — just save the draft.`,
-      parameters: z.object({
+      inputSchema: z.object({
         messageId: z.string().describe("The message ID to reply to"),
         body: z.string().describe("Reply body (plain text)"),
         replyAll: z.boolean().optional().describe("If true, reply to all recipients (default: false)"),
@@ -671,7 +672,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
 
     archive_email: ({
       description: `Archive an email (remove from inbox). Use when the user wants to archive a message.`,
-      parameters: z.object({
+      inputSchema: z.object({
         messageId: z.string().describe("Gmail message ID to archive"),
       }),
       execute: safe(async (args: any) => {
@@ -684,7 +685,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
 
     trash_email: ({
       description: `Move an email to trash. Use when the user wants to delete a message.`,
-      parameters: z.object({
+      inputSchema: z.object({
         messageId: z.string().describe("Gmail message ID to trash"),
       }),
       execute: safe(async (args: any) => {
@@ -697,7 +698,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
 
     toggle_email_star: ({
       description: `Star or unstar an email. Use when the user wants to star/flag or unstar a message.`,
-      parameters: z.object({
+      inputSchema: z.object({
         messageId: z.string().describe("Gmail message ID"),
         star: z.boolean().describe("true to star, false to unstar"),
       }),
@@ -715,7 +716,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
 
     toggle_email_read: ({
       description: `Mark an email as read or unread.`,
-      parameters: z.object({
+      inputSchema: z.object({
         messageId: z.string().describe("Gmail message ID"),
         read: z.boolean().describe("true to mark as read, false to mark as unread"),
       }),

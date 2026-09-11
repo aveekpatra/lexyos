@@ -34,7 +34,7 @@ export const enqueue = mutation({
         ? args.payload // delete payload has googleEventId/calendarId
         : { ...(existing.payload as Record<string, unknown> || {}), ...(args.payload as Record<string, unknown> || {}) };
 
-      await ctx.db.patch(existing._id, {
+      await ctx.db.patch("pendingSyncQueue", existing._id, {
         action: mergedAction,
         payload: mergedPayload,
         createdAt: new Date().toISOString(),
@@ -83,9 +83,9 @@ export const markProcessing = mutation({
   handler: async (ctx, args) => {
     const now = new Date().toISOString();
     for (const id of args.ids) {
-      const item = await ctx.db.get(id);
+      const item = await ctx.db.get("pendingSyncQueue", id);
       if (item && item.status === "pending") {
-        await ctx.db.patch(id, { status: "processing", lastAttemptAt: now });
+        await ctx.db.patch("pendingSyncQueue", id, { status: "processing", lastAttemptAt: now });
       }
     }
   },
@@ -95,7 +95,7 @@ export const markProcessing = mutation({
 export const markDone = mutation({
   args: { id: v.id("pendingSyncQueue") },
   handler: async (ctx, args) => {
-    await ctx.db.delete(args.id);
+    await ctx.db.delete("pendingSyncQueue", args.id);
   },
 });
 
@@ -108,11 +108,11 @@ export const markFailed = mutation({
     errorMessage: v.string(),
   },
   handler: async (ctx, args) => {
-    const item = await ctx.db.get(args.id);
+    const item = await ctx.db.get("pendingSyncQueue", args.id);
     if (!item) return;
 
     const newRetryCount = item.retryCount + 1;
-    await ctx.db.patch(args.id, {
+    await ctx.db.patch("pendingSyncQueue", args.id, {
       retryCount: newRetryCount,
       errorMessage: args.errorMessage,
       status: newRetryCount >= 5 ? "failed" : "pending",
@@ -131,7 +131,7 @@ export const clearForTask = mutation({
       .collect();
 
     for (const item of items) {
-      await ctx.db.delete(item._id);
+      await ctx.db.delete("pendingSyncQueue", item._id);
     }
   },
 });

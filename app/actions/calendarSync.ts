@@ -1,14 +1,14 @@
 "use server";
 
 import {
-  getCalendarEvents,
+  getCalendarEventsDetailed,
   getCalendarList,
   createCalendarEvent,
   updateCalendarEvent,
   deleteCalendarEvent,
-  type GoogleEvent,
   type CreateEventInput,
 } from "@/lib/calendar-api";
+import { addDaysToDateStr, endTimeFor, DEFAULT_EVENT_MINUTES } from "@/lib/time-utils";
 
 /**
  * Fetch events from Google Calendar and return them in the format
@@ -19,40 +19,34 @@ import {
  * - startDateTime -> parsed into dueDate, dueTime, scheduledStartTime
  * - endDateTime -> parsed into scheduledEndTime
  */
-/**
- * Convert an ISO datetime to a specific timezone.
- * Handles UTC ("Z"), offset ("+01:00"), and bare datetimes.
- * Returns an ISO string in the target timezone WITHOUT offset suffix
- * so the downstream regex parser extracts the correct local time.
- */
-function toLocalISO(iso: string, tz: string): string {
-  try {
-    const dt = new Date(iso);
-    if (isNaN(dt.getTime())) return iso;
-    // Format in the target timezone
-    const parts = new Intl.DateTimeFormat("en-CA", {
-      timeZone: tz,
-      year: "numeric", month: "2-digit", day: "2-digit",
-      hour: "2-digit", minute: "2-digit", second: "2-digit",
-      hour12: false,
-    }).formatToParts(dt);
-    const get = (type: string) => parts.find((p) => p.type === type)?.value || "00";
-    return `${get("year")}-${get("month")}-${get("day")}T${get("hour")}:${get("minute")}:${get("second")}`;
-  } catch {
-    return iso;
-  }
+export interface GoogleEventsForSync {
+  events: ReturnType<typeof mapEventForSync>[];
+  /** false when at least one calendar failed: the list is partial and must not
+   *  be used to infer deletions. */
+  complete: boolean;
+  failedCalendarIds: string[];
 }
 
 export async function fetchGoogleEventsForSync(
   timeMin: string,
   timeMax: string,
   userTimeZone?: string,
-) {
+): Promise<GoogleEventsForSync> {
   const tz = userTimeZone || Intl.DateTimeFormat().resolvedOptions().timeZone;
-  // Google now returns dateTime values pre-converted to `tz` with DST applied.
-  const events = await getCalendarEvents(timeMin, timeMax, tz);
+  // Google returns dateTime values pre-converted to `tz` with DST applied.
+  const { events, failedCalendarIds } = await getCalendarEventsDetailed(timeMin, timeMax, tz);
+  return {
+    events: events.map((e) => mapEventForSync(e, tz)),
+    complete: failedCalendarIds.length === 0,
+    failedCalendarIds,
+  };
+}
 
-  return events.map((e) => ({
+function mapEventForSync(
+  e: Awaited<ReturnType<typeof getCalendarEventsDetailed>>["events"][number],
+  tz: string,
+) {
+  return {
     googleEventId: e.id,
     googleCalendarId: e.calendarId || "primary",
     title: e.summary || "(No title)",
@@ -71,7 +65,7 @@ export async function fetchGoogleEventsForSync(
     googleUpdatedAt: e.updated || undefined,
     // Pass through the Convex task ID if set via extendedProperties (round-trip identification)
     unifocusTaskId: e.extendedProperties?.private?.unifocus_id || undefined,
-  }));
+  };
 }
 
 /**
@@ -159,16 +153,12 @@ export async function pushTaskToGoogleCalendar(task: {
   let event: CreateEventInput;
 
   if (task.dueTime) {
-    // Timed event
+    // Timed event. The end is clamped to 23:59 on the same day, matching the
+    // rule Convex and the grid use, so the three never disagree.
     const time = task.dueTime;
-    const duration = task.durationMinutes || 60;
+    const duration = task.durationMinutes || DEFAULT_EVENT_MINUTES;
     const startISO = `${task.dueDate}T${time}:00`;
-    const [h, m] = time.split(":").map(Number);
-    const endTotalMin = h * 60 + m + duration;
-    // NOTE: % 24 wraps the hour but does NOT advance the date.
-    const endH = String(Math.floor(endTotalMin / 60) % 24).padStart(2, "0");
-    const endM = String(endTotalMin % 60).padStart(2, "0");
-    const endISO = `${task.dueDate}T${endH}:${endM}:00`;
+    const endISO = `${task.dueDate}T${endTimeFor(time, duration)}:00`;
 
     event = {
       summary: task.title,
@@ -178,10 +168,8 @@ export async function pushTaskToGoogleCalendar(task: {
       calendarId: task.calendarId || "primary",
     };
   } else {
-    // All-day event (no time specified)
-    const nextDay = new Date(task.dueDate + "T00:00:00");
-    nextDay.setDate(nextDay.getDate() + 1);
-    const endDate = nextDay.toISOString().slice(0, 10);
+    // All-day event (no time specified). Google's end date is exclusive.
+    const endDate = addDaysToDateStr(task.dueDate, 1);
 
     event = {
       summary: task.title,

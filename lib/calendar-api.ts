@@ -90,11 +90,23 @@ async function getEventColorMap(): Promise<Record<string, string>> {
   }
 }
 
-export async function getCalendarEvents(
+export interface CalendarEventsResult {
+  events: GoogleEvent[];
+  /** Calendars whose fetch failed. When non-empty the event list is partial and
+   *  MUST NOT be used to infer deletions. */
+  failedCalendarIds: string[];
+}
+
+/**
+ * Fetch every event in [timeMin, timeMax) across all selected calendars.
+ * Follows `nextPageToken` so the result is complete, and reports per-calendar
+ * failures instead of silently dropping them.
+ */
+export async function getCalendarEventsDetailed(
   timeMin: string,
   timeMax: string,
   timeZone?: string,
-): Promise<GoogleEvent[]> {
+): Promise<CalendarEventsResult> {
   const [calendars, eventColorMap] = await Promise.all([
     getCalendarList(),
     getEventColorMap(),
@@ -104,44 +116,61 @@ export async function getCalendarEvents(
   );
 
   const allEvents: GoogleEvent[] = [];
+  const failedCalendarIds: string[] = [];
 
   await Promise.all(
     selectedCalendars.map(async (calendar) => {
       try {
-        const params = new URLSearchParams({
-          timeMin,
-          timeMax,
-          singleEvents: "true",
-          orderBy: "startTime",
-          maxResults: "250",
-        });
-        // Ask Google to return dateTime values pre-converted to the user's
-        // timezone (with DST applied). Avoids any client/server-side conversion
-        // ambiguity.
-        if (timeZone) params.set("timeZone", timeZone);
-        const res = await googleFetch(
-          `/calendars/${encodeURIComponent(calendar.id)}/events?${params}`
-        );
-        const data = await res.json();
-        const events = (data.items ?? []).map((event: GoogleEvent) => ({
-          ...event,
-          calendarId: calendar.id,
-          calendarColor: event.colorId
-            ? (eventColorMap[event.colorId] || calendar.backgroundColor)
-            : calendar.backgroundColor,
-        }));
-        allEvents.push(...events);
-      } catch {
-        // Skip calendars that fail
+        let pageToken: string | undefined;
+        do {
+          const params = new URLSearchParams({
+            timeMin,
+            timeMax,
+            singleEvents: "true",
+            orderBy: "startTime",
+            maxResults: "2500",
+          });
+          // Ask Google to return dateTime values pre-converted to the user's
+          // timezone (with DST applied). Avoids any client/server-side conversion
+          // ambiguity.
+          if (timeZone) params.set("timeZone", timeZone);
+          if (pageToken) params.set("pageToken", pageToken);
+          const res = await googleFetch(
+            `/calendars/${encodeURIComponent(calendar.id)}/events?${params}`
+          );
+          const data = await res.json();
+          const events = (data.items ?? []).map((event: GoogleEvent) => ({
+            ...event,
+            calendarId: calendar.id,
+            calendarColor: event.colorId
+              ? (eventColorMap[event.colorId] || calendar.backgroundColor)
+              : calendar.backgroundColor,
+          }));
+          allEvents.push(...events);
+          pageToken = data.nextPageToken || undefined;
+        } while (pageToken);
+      } catch (err) {
+        console.warn(`[calendar-api] fetch failed for calendar ${calendar.id}:`, err);
+        failedCalendarIds.push(calendar.id);
       }
     })
   );
 
-  return allEvents.sort((a, b) => {
+  allEvents.sort((a, b) => {
     const aTime = a.start.dateTime || a.start.date || "";
     const bTime = b.start.dateTime || b.start.date || "";
     return aTime.localeCompare(bTime);
   });
+  return { events: allEvents, failedCalendarIds };
+}
+
+/** Convenience wrapper that returns only the events (partial on failure). */
+export async function getCalendarEvents(
+  timeMin: string,
+  timeMax: string,
+  timeZone?: string,
+): Promise<GoogleEvent[]> {
+  return (await getCalendarEventsDetailed(timeMin, timeMax, timeZone)).events;
 }
 
 export interface CreateEventInput {
@@ -202,42 +231,46 @@ export async function getCalendarEventsIncremental(
   syncToken: string,
 ): Promise<{ events: GoogleEvent[]; nextSyncToken?: string; fullSyncRequired: boolean }> {
   const token = await getGoogleAccessToken();
-  const params = new URLSearchParams({
-    syncToken,
-    maxResults: "250",
-  });
+  const events: GoogleEvent[] = [];
+  let pageToken: string | undefined;
+  let nextSyncToken: string | undefined;
 
-  const res = await fetch(
-    `${GOOGLE_CALENDAR_API}/calendars/${encodeURIComponent(calendarId)}/events?${params}`,
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
+  // Google only returns nextSyncToken on the LAST page, so the whole change
+  // set must be paged through or the token never advances.
+  do {
+    const params = new URLSearchParams({ maxResults: "2500" });
+    if (pageToken) params.set("pageToken", pageToken);
+    else params.set("syncToken", syncToken);
+
+    const res = await fetch(
+      `${GOOGLE_CALENDAR_API}/calendars/${encodeURIComponent(calendarId)}/events?${params}`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
       },
-    },
-  );
+    );
 
-  if (res.status === 410) {
-    // syncToken expired — caller must do a full sync
-    return { events: [], fullSyncRequired: true };
-  }
+    if (res.status === 410) {
+      // syncToken expired — caller must do a full sync
+      return { events: [], fullSyncRequired: true };
+    }
 
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Google Calendar API error (${res.status}): ${text}`);
-  }
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Google Calendar API error (${res.status}): ${text}`);
+    }
 
-  const data = await res.json();
-  const events: GoogleEvent[] = (data.items ?? []).map((event: GoogleEvent) => ({
-    ...event,
-    calendarId,
-  }));
+    const data = await res.json();
+    for (const event of data.items ?? []) {
+      events.push({ ...(event as GoogleEvent), calendarId });
+    }
+    pageToken = data.nextPageToken || undefined;
+    if (!pageToken) nextSyncToken = data.nextSyncToken;
+  } while (pageToken);
 
-  return {
-    events,
-    nextSyncToken: data.nextSyncToken,
-    fullSyncRequired: false,
-  };
+  return { events, nextSyncToken, fullSyncRequired: false };
 }
 
 /**

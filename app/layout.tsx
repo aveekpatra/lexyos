@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Poppins } from "next/font/google";
+import { Poppins, Inter } from "next/font/google";
 import "./globals.css";
 import ConvexClientProvider from "@/components/ConvexClientProvider";
 import { ThemeProvider } from "@/components/ThemeProvider";
@@ -9,6 +9,12 @@ const poppins = Poppins({
   variable: "--font-sans",
   weight: ["300", "400", "500", "600", "700"],
   subsets: ["latin", "latin-ext"],
+});
+
+// Inter — used by the AI chat panel so its type matches the Linear reference.
+const inter = Inter({
+  variable: "--font-inter",
+  subsets: ["latin"],
 });
 
 export const metadata: Metadata = {
@@ -32,15 +38,10 @@ export default function RootLayout({
         />
       </head>
       <body
-        className={`${poppins.variable} antialiased`}
+        className={`${poppins.variable} ${inter.variable} antialiased`}
       >
         <ThemeProvider>
-          <ClerkProvider
-            dynamic
-            appearance={{
-              baseTheme: undefined,
-            }}
-          >
+          <ClerkProvider dynamic>
             <ConvexClientProvider>{children}</ConvexClientProvider>
           </ClerkProvider>
         </ThemeProvider>

@@ -3,8 +3,7 @@
 import {
   SignInButton,
   SignUpButton,
-  SignedIn,
-  SignedOut,
+  Show,
 } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
@@ -28,10 +27,10 @@ function RedirectToTimeline() {
 export default function Home() {
   return (
     <>
-      <SignedIn>
+      <Show when="signed-in">
         <RedirectToTimeline />
-      </SignedIn>
-      <SignedOut>
+      </Show>
+      <Show when="signed-out">
         <div className="flex min-h-svh flex-col items-center justify-center">
           <div className="flex max-w-sm flex-col items-center gap-8 text-center">
             <div className="flex flex-col items-center gap-2">
@@ -64,7 +63,7 @@ export default function Home() {
             </p>
           </div>
         </div>
-      </SignedOut>
+      </Show>
     </>
   );
 }

@@ -10,8 +10,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   Menu, MenuTrigger, MenuPopup, MenuItem, MenuSeparator, MenuCheckboxItem,
 } from "@/components/ui/menu";
-import { HugeiconsIcon } from "@hugeicons/react";
-import { FilterIcon, SortingAZ01Icon } from "@hugeicons/core-free-icons";
+import { IoArrowDownCircle, IoFilterCircle, IoCheckmarkCircle } from "react-icons/io5";
+import { Segmented } from "@/components/ui/segmented";
+import { glassAction, glassActionActive, bluePill } from "@/lib/ui/chrome";
 import {
   format, isToday, startOfWeek, endOfWeek, addWeeks, addDays,
   isWithinInterval, startOfMonth, endOfMonth,
@@ -316,44 +317,31 @@ export default function KanbanBoard() {
   }
 
   const isFiltered = filterPriority.size < 4 || filterProject !== null;
+  const filterCount = (filterPriority.size < 4 ? 1 : 0) + (filterProject !== null ? 1 : 0);
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
       {/* Header */}
-      <div className="flex shrink-0 items-center justify-between border-b border-line-strong px-6 py-3">
-        <div className="flex items-center gap-4">
-          <h1 className="text-[15px] font-bold tracking-tight text-foreground">Upcoming</h1>
-          <div className="relative flex items-center rounded-[10px] border border-line-strong bg-surface-0 p-[3px] shadow-3d">
-            {views.map((v) => (
-              <button
-                key={v.id}
-                onClick={() => setView(v.id)}
-                className={`relative z-10 rounded-[7px] px-2.5 py-1 text-xs font-medium transition-colors ${
-                  view === v.id ? "text-foreground" : "text-text-muted hover:text-text-secondary"
-                }`}
-              >
-                {view === v.id && (
-                  <motion.div
-                    layoutId="view-tab-indicator"
-                    className="absolute inset-0 rounded-[7px] border border-line-strong bg-brand-bg shadow-3d-sm"
-                    transition={{ type: "spring", stiffness: 400, damping: 30 }}
-                  />
-                )}
-                <span className="relative z-10">{v.label}</span>
-              </button>
-            ))}
-          </div>
+      <div className="flex shrink-0 items-center justify-between px-5 py-2">
+        <div className="flex items-center gap-3.5">
+          <h1 className="text-[15px] font-bold tracking-tight text-text-strong">Upcoming</h1>
+          <Segmented
+            layoutId="kanban-view"
+            value={view}
+            onChange={setView}
+            items={views.map((v) => ({ value: v.id, label: v.label, title: v.label }))}
+          />
         </div>
 
         {/* Sort + Filter */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           {/* Sort */}
           <Menu>
             <MenuTrigger render={
-              <button className="inline-flex h-7 items-center gap-1.5 rounded-[10px] border border-line-strong bg-surface-0 px-2.5 text-xs font-medium text-text-secondary shadow-3d transition-colors hover:border-line-strong hover:text-foreground" />
+              <button className={glassAction} />
             }>
-              <HugeiconsIcon icon={SortingAZ01Icon} size={13} />
-              <span>{SORT_LABELS[sortBy]}</span>
+              <IoArrowDownCircle className="size-[15px]" />
+              <span>Sort</span>
             </MenuTrigger>
             <MenuPopup>
               {(Object.keys(SORT_LABELS) as SortBy[]).map((s) => (
@@ -368,12 +356,15 @@ export default function KanbanBoard() {
           {/* Filter */}
           <Menu>
             <MenuTrigger render={
-              <button className={`inline-flex h-7 items-center gap-1.5 rounded-[10px] border bg-surface-0 px-2.5 text-xs font-medium shadow-3d transition-colors hover:border-line-strong hover:text-foreground ${
-                isFiltered ? "border-brand/30 text-brand" : "border-line-strong text-text-secondary"
-              }`} />
+              <button className={`${glassAction} ${isFiltered ? glassActionActive : ""}`} />
             }>
-              <HugeiconsIcon icon={FilterIcon} size={13} />
-              <span>{isFiltered ? "Filtered" : "Filter"}</span>
+              <IoFilterCircle className="size-[15px]" />
+              <span>Filter</span>
+              {filterCount > 0 && (
+                <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-brand px-1 text-[10px] font-semibold tabular-nums text-white">
+                  {filterCount}
+                </span>
+              )}
             </MenuTrigger>
             <MenuPopup>
               <MenuItem className="text-xs font-semibold text-muted-foreground pointer-events-none">Priority</MenuItem>
@@ -415,16 +406,13 @@ export default function KanbanBoard() {
             </MenuPopup>
           </Menu>
 
-          {/* Show done toggle */}
+          {/* Show-done toggle — brand fill when on for clear on/off feedback */}
           <button
             onClick={() => setShowDone(!showDone)}
-            className={`inline-flex h-7 items-center gap-1.5 rounded-[10px] border bg-surface-0 px-2.5 text-xs font-medium shadow-3d transition-colors hover:border-line-strong hover:text-foreground ${
-              showDone ? "border-brand/30 text-brand" : "border-line-strong text-text-secondary"
-            }`}
+            aria-pressed={showDone}
+            className={showDone ? bluePill : glassAction}
           >
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
-              <path d="M2 6l3 3 5-5" />
-            </svg>
+            <IoCheckmarkCircle className="size-[15px]" />
             <span>Done</span>
           </button>
         </div>
@@ -433,17 +421,16 @@ export default function KanbanBoard() {
       {/* Columns — week/month views scroll horizontally with hidden scrollbar */}
       <div
         ref={scrollContainerRef}
-        className={`flex flex-1 overflow-hidden ${
+        className={`flex flex-1 gap-2.5 overflow-hidden px-3 pb-3 pt-1 ${
           view === "w" || view === "m"
             ? "overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
             : ""
         }`}
       >
-        {columns.map((col, idx) => (
+        {columns.map((col) => (
           <UpcomingColumn
             key={col.id}
             column={col}
-            isLast={idx === columns.length - 1}
             isAdding={activeAdd === col.id}
             onStartAdd={() => setActiveAdd(col.id)}
             onStopAdd={() => setActiveAdd(null)}
@@ -534,8 +521,8 @@ function DayViewHourBlocks({ tasks, columnId }: { tasks: Doc<"tasks">[]; columnI
 }
 
 /* ─── Column ─── */
-function UpcomingColumn({ column, isLast, isAdding, onStartAdd, onStopAdd, applySort, view, showDone, allTasks }: {
-  column: Col; isLast: boolean; isAdding: boolean;
+function UpcomingColumn({ column, isAdding, onStartAdd, onStopAdd, applySort, view, showDone, allTasks }: {
+  column: Col; isAdding: boolean;
   onStartAdd: () => void; onStopAdd: () => void;
   applySort: (list: Doc<"tasks">[]) => Doc<"tasks">[];
   view: string;
@@ -550,9 +537,9 @@ function UpcomingColumn({ column, isLast, isAdding, onStartAdd, onStopAdd, apply
   const dragCounter = useRef(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // isAdding is now only a focus signal (e.g. from the number-key shortcut).
   useEffect(() => {
     if (isAdding) requestAnimationFrame(() => inputRef.current?.focus());
-    else setNewTitle("");
   }, [isAdding]);
 
   // Compute default due date for this column
@@ -702,7 +689,6 @@ function UpcomingColumn({ column, isLast, isAdding, onStartAdd, onStopAdd, apply
   const sortedTasks = applySort(column.tasks);
   const sortedOverdue = applySort(column.overdueTasks);
 
-  const totalTasks = sortedTasks.length + sortedOverdue.length;
   const hasOverdue = sortedOverdue.length > 0;
 
   // Week/month views: fixed width per column (4 visible = 25% each)
@@ -711,7 +697,7 @@ function UpcomingColumn({ column, isLast, isAdding, onStartAdd, onStopAdd, apply
   return (
     <div
       data-column-id={column.id}
-      className={`relative flex flex-col overflow-hidden ${widthClass} ${!isLast ? "border-r border-dashed border-line-strong" : ""}`}
+      className={`relative flex flex-col overflow-hidden rounded-[18px] bg-black/[0.035] dark:bg-white/[0.04] ${widthClass}`}
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}
       onDragOver={handleDragOver}
@@ -729,49 +715,35 @@ function UpcomingColumn({ column, isLast, isAdding, onStartAdd, onStopAdd, apply
       )}
 
       {/* Header */}
-      <div className="flex items-center gap-2 px-5 pb-3 pt-4">
-        <span className="text-[15px] font-bold text-brand">{column.title}</span>
-        {column.subtitle && <span className="text-sm text-text-secondary">{column.subtitle}</span>}
+      <div className="flex items-baseline gap-2 px-3 pb-2.5 pt-3.5">
+        <span className="text-[14px] font-bold tracking-tight text-text-strong">{column.title}</span>
+        {column.subtitle && <span className="text-[12px] font-medium text-text-muted">{column.subtitle}</span>}
       </div>
 
-      {/* Add task — click opens inline quick-add, Tab opens full dialog */}
-      <div
-        onClick={() => { if (!isAdding) onStartAdd(); }}
-        className={`mx-5 mb-3 flex items-center justify-between rounded-[10px] border px-3.5 py-2.5 transition-all ${
-          isAdding
-            ? "border-blue-300 bg-blue-50 shadow-3d dark:border-blue-500/40 dark:bg-blue-950/30"
-            : "cursor-pointer border-line-strong bg-surface-1 shadow-3d hover:border-blue-200 hover:bg-blue-50/60 hover:shadow-3d active:translate-y-[1px] active:shadow-3d-sm dark:border-white/10 dark:hover:border-blue-500/40 dark:hover:bg-blue-950/30"
-        }`}
-      >
-        {isAdding ? (
-          <input
-            ref={inputRef} value={newTitle} onChange={(e) => setNewTitle(e.target.value)}
-            placeholder="Enter = quick add, Tab = full editor, Esc = cancel"
-            onKeyDown={(e) => {
-              if (e.key === "Enter") { e.preventDefault(); handleQuickAdd(); }
-              if (e.key === "Tab") { e.preventDefault(); onStopAdd(); setCreateDialogOpen(true); }
-              if (e.key === "Escape") onStopAdd();
-            }}
-            onBlur={() => { if (!newTitle.trim()) onStopAdd(); }}
-            className="flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-text-muted"
-          />
-        ) : (
-          <>
-            <span className="flex items-center gap-2.5 text-sm text-text-faint">
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><circle cx="8" cy="8" r="6.5" /><path d="M8 5v6M5 8h6" /></svg>
-              Add new task
-            </span>
-            {column.shortcut && (
-              <span className="flex size-[22px] items-center justify-center rounded-[5px] bg-line-strong text-[11px] font-bold text-text-secondary shadow-3d-sm">
-                {column.shortcut}
-              </span>
-            )}
-          </>
+      {/* Add task — a persistent pill text input (Enter adds, Tab opens full editor) */}
+      <div className="mx-3 mb-2.5 flex items-center gap-2 rounded-full bg-surface-0 px-3.5 py-2 transition-shadow focus-within:ring-1 focus-within:ring-inset focus-within:ring-line-strong dark:bg-white/[0.05] dark:focus-within:ring-white/[0.14]">
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="shrink-0 text-text-faint"><circle cx="8" cy="8" r="6.5" /><path d="M8 5v6M5 8h6" /></svg>
+        <input
+          ref={inputRef} value={newTitle} onChange={(e) => setNewTitle(e.target.value)}
+          placeholder="Add task"
+          onFocus={onStartAdd}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") { e.preventDefault(); handleQuickAdd(); }
+            if (e.key === "Tab") { e.preventDefault(); setCreateDialogOpen(true); }
+            if (e.key === "Escape") { e.currentTarget.blur(); onStopAdd(); }
+          }}
+          onBlur={() => { if (!newTitle.trim()) onStopAdd(); }}
+          className="flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-text-faint"
+        />
+        {column.shortcut && (
+          <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-black/[0.05] text-[10px] font-bold text-text-faint dark:bg-white/[0.08]">
+            {column.shortcut}
+          </span>
         )}
       </div>
 
       {/* Tasks */}
-      <div className="flex flex-1 flex-col overflow-y-auto px-5 pb-4 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+      <div className="flex flex-1 flex-col overflow-y-auto px-3 pb-3 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
         {hasOverdue && (
           <div className="mb-4">
             <div className="mb-2 flex items-center justify-between">
@@ -814,12 +786,6 @@ function UpcomingColumn({ column, isLast, isAdding, onStartAdd, onStopAdd, apply
           </div>
         )}
 
-        {totalTasks === 0 && !showDone && (
-          <div className="mt-auto flex items-center gap-2 pb-1">
-            <span className="text-[12px] tracking-wide text-text-faint">No tasks</span>
-            <span className="flex size-[18px] items-center justify-center rounded-[5px] border border-line-strong bg-surface-1 text-[10px] font-bold text-text-faint shadow-3d">0</span>
-          </div>
-        )}
       </div>
 
       {/* Full create dialog */}

@@ -26,6 +26,7 @@ import { format, parseISO, isPast, isToday } from "date-fns";
 import { isGoogleCalEvent } from "@/lib/task-utils";
 import { syncTaskUpdateToGoogle, syncTaskCompletionToGoogle } from "@/lib/google-sync";
 import { PRIORITY_COLORS, PRIORITY_LABELS } from "@/lib/constants";
+import { setDraggingTaskId } from "@/lib/drag-store";
 
 interface KanbanCardProps {
   task: Doc<"tasks">;
@@ -87,10 +88,12 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue, context = "
     e.dataTransfer.setData("text/plain", task._id);
     e.dataTransfer.setData("application/source-date", dateStr || "");
     e.dataTransfer.effectAllowed = "move";
+    setDraggingTaskId(task._id);
     setIsDragging(true);
   }, [task._id, dateStr]);
 
   const handleDragEnd = useCallback(() => {
+    setDraggingTaskId(null);
     setIsDragging(false);
   }, []);
 
@@ -111,12 +114,12 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue, context = "
         draggable
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
-        className={`group flex w-full cursor-grab flex-col gap-1.5 rounded-[10px] px-3.5 py-2.5 transition-all active:cursor-grabbing ${
+        className={`group flex w-full cursor-grab flex-col gap-1.5 rounded-[13px] px-3.5 py-2.5 transition-colors active:cursor-grabbing active:translate-y-px ${
           isDragging ? "opacity-40" : ""
         } ${
           isOverdue
-            ? "border border-rose-300/60 bg-rose-50 shadow-3d hover:border-blue-200 hover:bg-blue-50/60 active:translate-y-[1px] active:shadow-3d-sm dark:border-[#4a2040] dark:bg-[#1e1020] dark:hover:bg-[#281428]"
-            : "border border-line bg-surface-1 shadow-3d hover:border-blue-200 hover:bg-blue-50/60 active:translate-y-[1px] active:shadow-3d-sm dark:border-white/10 dark:hover:border-blue-500/40 dark:hover:bg-blue-950/30"
+            ? "bg-rose-50 shadow-3d-sm hover:shadow-3d dark:bg-rose-950/25 dark:hover:bg-rose-950/35"
+            : "bg-surface-0 shadow-3d-sm hover:shadow-3d dark:bg-white/[0.06] dark:hover:bg-white/[0.09]"
         }`}
       >
         {/* Row 1: Priority circle + Title */}
@@ -228,7 +231,7 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue, context = "
                 onChange={(pid) => syncUpdateTask({ id: task._id, ...(pid ? { projectId: pid } : { clearProjectId: true }) })}
               >
                 <TaskChip active>
-                  <span className="max-w-[160px] truncate text-blue-800">{project.name}</span>
+                  <span className="max-w-[160px] truncate text-text-secondary">{project.name}</span>
                 </TaskChip>
               </ProjectPickerPopover>
             )}
@@ -256,11 +259,17 @@ const RECURRENCE_OPTIONS = [
   { value: "yearly", label: "Yearly" },
 ];
 
-export function TaskEditDialog({ task, open, onOpenChange, defaultDueDate }: {
+export function TaskEditDialog({
+  task, open, onOpenChange, defaultDueDate, defaultTitle, defaultStartTime, defaultEndTime,
+}: {
   task?: Doc<"tasks"> | null;
   open: boolean;
   onOpenChange: (o: boolean) => void;
   defaultDueDate?: string;
+  /** Pre-filled values for the create form (planner quick-add / click-to-create). */
+  defaultTitle?: string;
+  defaultStartTime?: string;
+  defaultEndTime?: string;
 }) {
   const createTask = useMutation(api.tasks.create);
   const updateTaskMut = useMutation(api.tasks.update);
@@ -314,17 +323,17 @@ export function TaskEditDialog({ task, open, onOpenChange, defaultDueDate }: {
       setProjectId(task.projectId || "");
       setRecurrence((task as Record<string, unknown>).recurrence as string || "");
     } else {
-      setTitle("");
+      setTitle(defaultTitle || "");
       setNotes("");
       setPriority("p3");
       setDueDate(defaultDueDate || "");
-      setDueTime("");
-      setStartTime("");
-      setEndTime("");
+      setDueTime(defaultStartTime || "");
+      setStartTime(defaultStartTime || "");
+      setEndTime(defaultEndTime || "");
       setProjectId("");
       setRecurrence("");
     }
-  }, [open, task, defaultDueDate]);
+  }, [open, task, defaultDueDate, defaultTitle, defaultStartTime, defaultEndTime]);
 
   async function handleSave() {
     if (!title.trim()) return;
@@ -379,8 +388,8 @@ export function TaskEditDialog({ task, open, onOpenChange, defaultDueDate }: {
     }
   }
 
-  const chipClass = "inline-flex h-7 items-center gap-1.5 rounded-md border border-input bg-secondary px-2.5 text-xs font-medium text-secondary-foreground transition-colors hover:bg-accent hover:text-accent-foreground";
-  const chipEmptyClass = "inline-flex h-7 items-center gap-1.5 rounded-md border border-dashed border-input px-2.5 text-xs text-muted-foreground transition-colors hover:border-ring hover:text-foreground";
+  const chipClass = "inline-flex h-7 items-center gap-1.5 rounded-full bg-black/[0.04] px-3 text-xs font-medium text-foreground/85 transition-colors hover:bg-black/[0.07] hover:text-foreground dark:bg-white/[0.06] dark:hover:bg-white/[0.1]";
+  const chipEmptyClass = "inline-flex h-7 items-center gap-1.5 rounded-full border border-dashed border-line-strong px-3 text-xs text-text-muted transition-colors hover:border-brand-border hover:text-foreground";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
