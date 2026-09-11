@@ -7,7 +7,6 @@ import { api } from "@/convex/_generated/api";
 import type { Doc } from "@/convex/_generated/dataModel";
 import KanbanCard, { TaskEditDialog } from "./KanbanCard";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Kbd } from "@/components/ui/kbd";
 import {
   Menu, MenuTrigger, MenuPopup, MenuItem, MenuSeparator, MenuCheckboxItem,
 } from "@/components/ui/menu";
@@ -722,7 +721,7 @@ function UpcomingColumn({ column, isAdding, onStartAdd, onStopAdd, applySort, vi
       </div>
 
       {/* Add task — a persistent pill text input (Enter adds, Tab opens full editor) */}
-      <div className="mx-3 mb-2.5 flex items-center gap-2 rounded-full bg-surface-0 px-3.5 py-2 transition-shadow focus-within:ring-1 focus-within:ring-inset focus-within:ring-line-strong dark:bg-white/[0.05] dark:focus-within:ring-white/[0.14]">
+      <div className="mx-3 mb-2.5 flex items-center gap-2 overflow-hidden rounded-full bg-surface-0 px-3.5 py-2 transition-shadow focus-within:ring-1 focus-within:ring-inset focus-within:ring-line-strong dark:bg-white/[0.05] dark:focus-within:ring-white/[0.14]">
         <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="shrink-0 text-text-faint"><circle cx="8" cy="8" r="6.5" /><path d="M8 5v6M5 8h6" /></svg>
         <input
           ref={inputRef} value={newTitle} onChange={(e) => setNewTitle(e.target.value)}
@@ -734,9 +733,13 @@ function UpcomingColumn({ column, isAdding, onStartAdd, onStopAdd, applySort, vi
             if (e.key === "Escape") { e.currentTarget.blur(); onStopAdd(); }
           }}
           onBlur={() => { if (!newTitle.trim()) onStopAdd(); }}
-          className="flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-text-faint"
+          className="w-0 min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-text-faint"
         />
-        {column.shortcut && <Kbd className="shrink-0">{column.shortcut}</Kbd>}
+        {column.shortcut && (
+          <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-black/[0.05] text-[10px] font-bold text-text-faint dark:bg-white/[0.08]">
+            {column.shortcut}
+          </span>
+        )}
       </div>
 
       {/* Tasks */}
