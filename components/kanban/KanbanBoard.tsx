@@ -7,6 +7,7 @@ import { api } from "@/convex/_generated/api";
 import type { Doc } from "@/convex/_generated/dataModel";
 import KanbanCard, { TaskEditDialog } from "./KanbanCard";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Kbd } from "@/components/ui/kbd";
 import {
   Menu, MenuTrigger, MenuPopup, MenuItem, MenuSeparator, MenuCheckboxItem,
 } from "@/components/ui/menu";
@@ -735,11 +736,7 @@ function UpcomingColumn({ column, isAdding, onStartAdd, onStopAdd, applySort, vi
           onBlur={() => { if (!newTitle.trim()) onStopAdd(); }}
           className="flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-text-faint"
         />
-        {column.shortcut && (
-          <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-black/[0.05] text-[10px] font-bold text-text-faint dark:bg-white/[0.08]">
-            {column.shortcut}
-          </span>
-        )}
+        {column.shortcut && <Kbd className="shrink-0">{column.shortcut}</Kbd>}
       </div>
 
       {/* Tasks */}

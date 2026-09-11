@@ -3,6 +3,7 @@ import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { createTools } from "@/lib/ai/tools";
 import { auth } from "@clerk/nextjs/server";
 import { getGoogleAccessToken } from "@/app/actions/google-auth";
+import { AGENT_MODEL, AGENT_MODEL_SETTINGS } from "@/lib/ai/agent-model";
 
 export const maxDuration = 60;
 
@@ -134,18 +135,17 @@ export async function POST(req: Request) {
     }
 
     const openrouter = createOpenRouter({ apiKey: process.env.OPENROUTER_API_KEY });
-    const model = openrouter(process.env.OPENROUTER_MODEL || "z-ai/glm-4.7:nitro");
+    const model = openrouter(AGENT_MODEL, AGENT_MODEL_SETTINGS);
     const tools = createTools(token, googleToken);
 
     // Let the AI SDK handle the full tool execution loop natively.
-    // maxSteps: 10 allows up to 10 rounds of tool calls before forcing a text response.
+    // stepCountIs(10) allows up to 10 rounds of tool calls before forcing a text response.
     const result = await generateText({
       model,
       system: SYSTEM_PROMPT,
       messages: history,
       tools,
       toolChoice: "auto",
-      temperature: 0,
       stopWhen: stepCountIs(10),
     });
 
