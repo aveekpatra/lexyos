@@ -8,7 +8,7 @@
  * NOTE: the `calendarEvents` table is intentionally left in schema.ts — Convex
  * errors if an existing table is removed from the schema. The table is unused.
  */
-import { query, mutation } from "./_generated/server";
+import { query, mutation, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
 
 // Update sync state
@@ -57,5 +57,20 @@ export const getSyncState = query({
       .query("calendarSyncState")
       .withIndex("by_userId", (q) => q.eq("userId", userId))
       .collect();
+  },
+});
+
+/**
+ * Operator tool: drop every incremental cursor so the next pull does a full
+ * window sync per calendar. Used once after the series-collapse deploy so
+ * existing flattened copies get folded without waiting for Google to report
+ * a change on each series. Run with `npx convex run calendarEvents:resetSyncCursors`.
+ */
+export const resetSyncCursors = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const rows = await ctx.db.query("calendarSyncState").collect();
+    for (const r of rows) await ctx.db.patch("calendarSyncState", r._id, { syncToken: undefined });
+    return { reset: rows.length };
   },
 });
