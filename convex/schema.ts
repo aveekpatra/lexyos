@@ -132,19 +132,6 @@ export default defineSchema({
 
   // One Google account per user. Tokens are encrypted by the Next server
   // before they get here (see lib/google-oauth.ts); Convex only stores ciphertext.
-  googleConnections: defineTable({
-    userId: v.string(),
-    email: v.optional(v.string()),
-    scope: v.string(),
-    accessTokenEnc: v.string(),
-    refreshTokenEnc: v.string(),
-    /** Epoch ms when accessToken expires. */
-    expiresAt: v.number(),
-    connectedAt: v.number(),
-    /** Set when Google refused a refresh; the UI asks to reconnect. */
-    lastError: v.optional(v.string()),
-  }).index("by_userId", ["userId"]),
-
   userPreferences: defineTable({
     theme: v.optional(v.string()),
     projectSort: v.optional(v.string()),

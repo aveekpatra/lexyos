@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useQuery } from "convex/react";
+import { useUser } from "@clerk/nextjs";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { api } from "@/convex/_generated/api";
+import { GOOGLE_CALENDAR_SCOPE } from "@/lib/google-oauth";
 import {
   Dialog,
   DialogPopup,
@@ -25,9 +25,63 @@ export type GoogleStatus =
   | { connected: false }
   | { connected: true; email?: string; connectedAt: number; needsReconnect: boolean; lastError?: string };
 
-/** Live connection status; `undefined` while loading. */
+/*
+ * Google Calendar access comes from the Clerk Google sign-in. The status is
+ * read from the server (which asks Clerk) and shared by every subscriber.
+ */
+let cached: GoogleStatus | undefined;
+const listeners = new Set<(s: GoogleStatus) => void>();
+let inflight: Promise<void> | null = null;
+
+export function refreshGoogleConnection(): Promise<void> {
+  if (inflight) return inflight;
+  inflight = fetch("/api/google/status")
+    .then((r) => r.json())
+    .then((s: GoogleStatus) => { cached = s; listeners.forEach((l) => l(s)); })
+    .catch(() => {})
+    .finally(() => { inflight = null; });
+  return inflight;
+}
+
+/** Live connection status; `undefined` while loading. Re-checked on focus and every 5 minutes. */
 export function useGoogleConnection(): GoogleStatus | undefined {
-  return useQuery(api.googleConnections.status, {}) as GoogleStatus | undefined;
+  const [status, setStatus] = useState<GoogleStatus | undefined>(cached);
+  useEffect(() => {
+    listeners.add(setStatus);
+    if (!cached) void refreshGoogleConnection();
+    const onFocus = () => void refreshGoogleConnection();
+    window.addEventListener("focus", onFocus);
+    const id = setInterval(onFocus, 5 * 60 * 1000);
+    return () => { listeners.delete(setStatus); window.removeEventListener("focus", onFocus); clearInterval(id); };
+  }, []);
+  return status;
+}
+
+/**
+ * Sends the browser through Google consent for the calendar scope, on the
+ * Clerk-linked Google account (or links one). Returns to `/timeline?google=connected`.
+ */
+export function useConnectGoogle() {
+  const { user } = useUser();
+  const [busy, setBusy] = useState(false);
+  const connect = async () => {
+    if (!user || busy) return;
+    setBusy(true);
+    try {
+      const redirectUrl = `${window.location.origin}/timeline?google=connected`;
+      const existing = user.externalAccounts.find((a) => a.provider === "google");
+      const account = existing
+        ? await existing.reauthorize({ additionalScopes: [GOOGLE_CALENDAR_SCOPE], redirectUrl })
+        : await user.createExternalAccount({ strategy: "oauth_google", additionalScopes: [GOOGLE_CALENDAR_SCOPE], redirectUrl });
+      const url = account.verification?.externalVerificationRedirectURL;
+      if (url) window.location.href = url.toString();
+      else setBusy(false);
+    } catch (err) {
+      console.error("[google] connect failed", err);
+      setBusy(false);
+    }
+  };
+  return { connect, busy };
 }
 
 function readSnoozed(): boolean {
@@ -55,22 +109,19 @@ export function ConnectGoogleDialog({
   const params = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
-  const [autoOpen, setAutoOpen] = useState(false);
-  const [disconnecting, setDisconnecting] = useState(false);
+  const [snoozed, setSnoozed] = useState<boolean>(() => (typeof window === "undefined" ? true : readSnoozed()));
+  const { connect, busy } = useConnectGoogle();
 
   const result = params.get("google");
   const reason = params.get("reason");
 
   // Auto-open when not connected (or needs reconnect) and not snoozed.
-  useEffect(() => {
-    if (status === undefined) return;
-    const broken = !status.connected || status.needsReconnect;
-    setAutoOpen(broken && !readSnoozed());
-  }, [status]);
+  const autoOpen = status !== undefined && (!status.connected || status.needsReconnect) && !snoozed;
 
-  // Clear the ?google=... marker once we have shown it.
+  // Clear the ?google=... marker once we have shown it, and re-check the connection.
   useEffect(() => {
     if (!result) return;
+    void refreshGoogleConnection();
     const t = setTimeout(() => router.replace(pathname), 4000);
     return () => clearTimeout(t);
   }, [result, pathname, router]);
@@ -80,21 +131,12 @@ export function ConnectGoogleDialog({
     if (snooze) {
       try { localStorage.setItem(SNOOZE_KEY, String(Date.now() + SNOOZE_MS)); } catch { /* ignore */ }
     }
-    setAutoOpen(false);
+    setSnoozed(true);
     onOpenChange(false);
   };
 
   const connected = status?.connected === true;
   const needsReconnect = connected && status.needsReconnect;
-
-  const disconnect = async () => {
-    setDisconnecting(true);
-    try {
-      await fetch("/api/google/disconnect", { method: "POST" });
-    } finally {
-      setDisconnecting(false);
-    }
-  };
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) close(false); }}>
@@ -127,28 +169,28 @@ export function ConnectGoogleDialog({
           )}
           <ul className="flex flex-col gap-1.5 text-[13px] text-text-secondary">
             <li>Read and write events on your calendars</li>
-            <li>See which Google account is connected</li>
-            <li>Tokens are stored encrypted and can be revoked here any time</li>
+            <li>Uses the Google account you sign in with</li>
+            <li>Revoke any time from your Google account permissions</li>
           </ul>
         </DialogPanel>
         <DialogFooter>
           {connected ? (
             <>
-              <button onClick={disconnect} disabled={disconnecting} className={`${softPill} text-rose-600 disabled:opacity-50`}>
-                {disconnecting ? "Disconnecting" : "Disconnect"}
-              </button>
-              <a href="/api/google/connect" className={bluePill}>
-                <IoLogoGoogle className="size-3.5" />
-                {needsReconnect ? "Reconnect" : "Switch account"}
-              </a>
+              <button onClick={() => close(false)} className={softPill}>Close</button>
+              {needsReconnect && (
+                <button onClick={connect} disabled={busy} className={`${bluePill} disabled:opacity-50`}>
+                  <IoLogoGoogle className="size-3.5" />
+                  {busy ? "Opening Google" : "Grant calendar access"}
+                </button>
+              )}
             </>
           ) : (
             <>
               <button onClick={() => close(true)} className={softPill}>Not now</button>
-              <a href="/api/google/connect" className={bluePill}>
+              <button onClick={connect} disabled={busy} className={`${bluePill} disabled:opacity-50`}>
                 <IoLogoGoogle className="size-3.5" />
-                Connect Google
-              </a>
+                {busy ? "Opening Google" : "Connect Google"}
+              </button>
             </>
           )}
         </DialogFooter>

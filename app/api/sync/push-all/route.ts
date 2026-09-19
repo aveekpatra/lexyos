@@ -1,5 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { isGoogleNotConnected } from "@/lib/google-oauth";
+import { getGoogleAccessToken } from "@/app/actions/google-auth";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "@/convex/_generated/api";
 
@@ -21,8 +22,9 @@ export async function POST(req: Request) {
     convex.setAuth(token);
 
     // Nothing to do without a Google account; also avoids marking queue items failed.
-    if (!(await convex.query(api.googleConnections.getEncrypted, {}))) {
-      return Response.json({ error: "google_not_connected" }, { status: 409 });
+    try { await getGoogleAccessToken(); } catch (err) {
+      if (isGoogleNotConnected(err)) return Response.json({ error: "google_not_connected" }, { status: 409 });
+      throw err;
     }
 
     // Get all tasks that have a date but no Google event

@@ -1,21 +1,11 @@
 /**
- * Access token for Google Calendar calls, from OUR OAuth connection (not Clerk).
- * Loads the encrypted row from Convex, refreshes when close to expiry, and
- * throws GoogleNotConnectedError when the user has not connected an account.
+ * Google access for the signed-in user, via Clerk. Clerk stores the Google
+ * refresh token from sign-in and returns a live access token here.
  */
 import "server-only";
-import { auth } from "@clerk/nextjs/server";
+import { auth, clerkClient } from "@clerk/nextjs/server";
 import { ConvexHttpClient } from "convex/browser";
-import { api } from "@/convex/_generated/api";
-import {
-  GoogleNotConnectedError,
-  decryptToken,
-  encryptToken,
-  refreshAccessToken,
-} from "@/lib/google-oauth";
-
-/** Refresh this long before the recorded expiry to absorb clock skew and slow requests. */
-const REFRESH_MARGIN_MS = 2 * 60 * 1000;
+import { GOOGLE_CALENDAR_SCOPE, GoogleNotConnectedError } from "@/lib/google-oauth";
 
 export async function convexForCurrentUser(): Promise<ConvexHttpClient> {
   const { userId, getToken } = await auth();
@@ -27,25 +17,51 @@ export async function convexForCurrentUser(): Promise<ConvexHttpClient> {
   return convex;
 }
 
-export async function getGoogleAccessToken(opts: { forceRefresh?: boolean } = {}): Promise<string> {
-  const convex = await convexForCurrentUser();
-  const row = await convex.query(api.googleConnections.getEncrypted, {});
-  if (!row) throw new GoogleNotConnectedError();
+export type GoogleConnection =
+  | { connected: false }
+  | { connected: true; email?: string; connectedAt: number; needsReconnect: boolean; lastError?: string };
 
-  const fresh = row.expiresAt - Date.now() > REFRESH_MARGIN_MS;
-  if (fresh && !opts.forceRefresh) return decryptToken(row.accessTokenEnc);
-
-  try {
-    const next = await refreshAccessToken(decryptToken(row.refreshTokenEnc));
-    await convex.mutation(api.googleConnections.setAccessToken, {
-      accessTokenEnc: encryptToken(next.accessToken),
-      expiresAt: next.expiresAt,
-    });
-    return next.accessToken;
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    // invalid_grant means the refresh token was revoked or expired: needs a reconnect.
-    await convex.mutation(api.googleConnections.setError, { message }).catch(() => {});
-    throw new GoogleNotConnectedError(`Google connection needs to be renewed: ${message}`);
+/** Connection state for the UI: is a Google account linked, and does it carry the calendar scope? */
+export async function getGoogleConnection(): Promise<GoogleConnection> {
+  const { userId } = await auth();
+  if (!userId) return { connected: false };
+  const client = await clerkClient();
+  const user = await client.users.getUser(userId);
+  const google = user.externalAccounts.find((a) => a.provider === "oauth_google" && a.verification?.status === "verified");
+  if (!google) return { connected: false };
+  const scopes = (google.approvedScopes ?? "").split(/\s+/);
+  const hasCalendar = scopes.includes(GOOGLE_CALENDAR_SCOPE);
+  let lastError: string | undefined;
+  if (hasCalendar) {
+    try {
+      const tokens = await client.users.getUserOauthAccessToken(userId, "google");
+      if (!tokens.data[0]?.token) lastError = "Google returned no access token";
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err);
+    }
   }
+  return {
+    connected: true,
+    email: google.emailAddress,
+    connectedAt: user.createdAt,
+    needsReconnect: !hasCalendar || !!lastError,
+    lastError: hasCalendar ? lastError : "Calendar access was not granted",
+  };
+}
+
+/** Clerk refreshes the token itself, so `forceRefresh` is accepted for compatibility only. */
+export async function getGoogleAccessToken(_opts: { forceRefresh?: boolean } = {}): Promise<string> {
+  void _opts;
+  const { userId } = await auth();
+  if (!userId) throw new Error("Not authenticated");
+  let token: string | undefined;
+  try {
+    const client = await clerkClient();
+    const tokens = await client.users.getUserOauthAccessToken(userId, "google");
+    token = tokens.data[0]?.token;
+  } catch (err) {
+    throw new GoogleNotConnectedError(`Google token unavailable: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  if (!token) throw new GoogleNotConnectedError();
+  return token;
 }

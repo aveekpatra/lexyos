@@ -11,7 +11,6 @@
 import type * as aiChats from "../aiChats.js";
 import type * as apiTokens from "../apiTokens.js";
 import type * as calendarEvents from "../calendarEvents.js";
-import type * as googleConnections from "../googleConnections.js";
 import type * as lib_actor from "../lib/actor.js";
 import type * as lib_recurrence from "../lib/recurrence.js";
 import type * as projects from "../projects.js";
@@ -29,7 +28,6 @@ declare const fullApi: ApiFromModules<{
   aiChats: typeof aiChats;
   apiTokens: typeof apiTokens;
   calendarEvents: typeof calendarEvents;
-  googleConnections: typeof googleConnections;
   "lib/actor": typeof lib_actor;
   "lib/recurrence": typeof lib_recurrence;
   projects: typeof projects;
