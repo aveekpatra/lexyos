@@ -9,7 +9,7 @@ export const AGENT_ENDPOINT_TAG = "openai/flex";
 /**
  * Pinned to OpenAI's flex-tier endpoint with fallbacks disabled, so a request
  * can never silently land on the standard (2x price) endpoint or on Azure /
- * Bedrock. "xhigh" is the highest reasoning effort OpenRouter accepts.
+ * Bedrock. Reasoning effort "high" per product decision (2026-09-19).
  * Reasoning models reject explicit temperature/top_p, so none is set.
  */
 export const AGENT_MODEL_SETTINGS: OpenRouterChatSettings = {
@@ -19,6 +19,6 @@ export const AGENT_MODEL_SETTINGS: OpenRouterChatSettings = {
     allow_fallbacks: false,
     require_parameters: true,
   },
-  reasoning: { effort: "xhigh" },
+  reasoning: { effort: "high" },
   usage: { include: true },
 };
