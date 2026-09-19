@@ -170,4 +170,43 @@ export default defineSchema({
     })),
     userId: v.string(),
   }).index("by_userId", ["userId"]),
+
+  /** OAuth 2.1 authorization server for MCP clients (Claude, ChatGPT, Cursor...). */
+  oauthClients: defineTable({
+    clientId: v.string(),
+    clientSecretHash: v.optional(v.string()),
+    name: v.string(),
+    redirectUris: v.array(v.string()),
+    createdAt: v.number(),
+  }).index("by_clientId", ["clientId"]),
+
+  oauthCodes: defineTable({
+    codeHash: v.string(),
+    clientId: v.string(),
+    clientName: v.string(),
+    userId: v.string(),
+    redirectUri: v.string(),
+    codeChallenge: v.string(),
+    scope: v.string(),
+    resource: v.optional(v.string()),
+    expiresAt: v.number(),
+    usedAt: v.optional(v.number()),
+  }).index("by_codeHash", ["codeHash"]),
+
+  oauthTokens: defineTable({
+    accessHash: v.string(),
+    refreshHash: v.string(),
+    clientId: v.string(),
+    clientName: v.string(),
+    userId: v.string(),
+    scope: v.string(),
+    accessExpiresAt: v.number(),
+    refreshExpiresAt: v.number(),
+    createdAt: v.number(),
+    lastUsedAt: v.optional(v.number()),
+    revokedAt: v.optional(v.number()),
+  })
+    .index("by_accessHash", ["accessHash"])
+    .index("by_refreshHash", ["refreshHash"])
+    .index("by_userId", ["userId"]),
 });

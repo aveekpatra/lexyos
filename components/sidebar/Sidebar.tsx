@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
@@ -14,7 +14,9 @@ import { Folder } from "@/components/ui/folder";
 import { MiniCalendar } from "@/components/sidebar/MiniCalendar";
 import { getOverdueTasks } from "@/lib/task-utils";
 import { Tooltip, TooltipTrigger, TooltipPopup } from "@/components/ui/tooltip";
-import { Menu, MenuTrigger, MenuPopup } from "@/components/ui/menu";
+import { Menu, MenuTrigger, MenuPopup, MenuGroupLabel, MenuRadioGroup, MenuRadioItem } from "@/components/ui/menu";
+import { useUiPref } from "@/lib/ui-prefs";
+import type { Settings } from "@/lib/settings";
 import { ContextMenu, ContextMenuTrigger, ContextMenuPopup } from "@/components/ui/context-menu";
 import { useTheme } from "@/components/ThemeProvider";
 import { CreateProjectDialog } from "@/components/projects/CreateProjectDialog";
@@ -35,6 +37,7 @@ import {
   IoChevronUp,
   IoAlertCircle,
   IoSettings,
+  IoSwapVertical,
 } from "react-icons/io5";
 
 /*
@@ -44,14 +47,24 @@ import {
  * collapsed mode that is a single column of 36px circles.
  */
 
-const COLLAPSE_KEY = "unifocus:sidebar:collapsed";
-const collapseStore = {
-  listeners: new Set<() => void>(),
-  subscribe(cb: () => void) { collapseStore.listeners.add(cb); return () => { collapseStore.listeners.delete(cb); }; },
-  getSnapshot(): boolean { try { return localStorage.getItem(COLLAPSE_KEY) === "true"; } catch { return false; } },
-  getServerSnapshot(): boolean { return false; },
-  set(next: boolean) { try { localStorage.setItem(COLLAPSE_KEY, String(next)); } catch {} collapseStore.listeners.forEach((l) => l()); },
-};
+const PRIORITY_RANK: Record<string, number> = { p1: 0, p2: 1, p3: 2, p4: 3 };
+const PROJECT_SORTS: { value: Settings["ui"]["projectSort"]; label: string }[] = [
+  { value: "manual", label: "Manual" },
+  { value: "name", label: "Name" },
+  { value: "priority", label: "Priority" },
+  { value: "dueDate", label: "Due date" },
+  { value: "recent", label: "Recently created" },
+];
+function sortProjects(list: Doc<"projects">[], by: Settings["ui"]["projectSort"]): Doc<"projects">[] {
+  const out = [...list];
+  switch (by) {
+    case "name": return out.sort((a, b) => a.name.localeCompare(b.name));
+    case "priority": return out.sort((a, b) => (PRIORITY_RANK[a.priority ?? "p4"] ?? 4) - (PRIORITY_RANK[b.priority ?? "p4"] ?? 4) || a.sortOrder - b.sortOrder);
+    case "dueDate": return out.sort((a, b) => (a.dueDate ?? "9999").localeCompare(b.dueDate ?? "9999") || a.sortOrder - b.sortOrder);
+    case "recent": return out.sort((a, b) => b._creationTime - a._creationTime);
+    default: return out.sort((a, b) => a.sortOrder - b.sortOrder);
+  }
+}
 
 /* Row and control geometry, one source. */
 const ROW = "flex h-9 w-full items-center rounded-full text-[14px] font-medium transition-colors";
@@ -69,12 +82,13 @@ export function Sidebar({ onOpenSearch, onOpenHelp, onOpenGoogle, onOpenSettings
   const searchParams = useSearchParams();
   const router = useRouter();
   const allProjects = useQuery(api.projects.list, {});
+  const [projectSort, setProjectSort] = useUiPref("projectSort");
   const tasks = useQuery(api.tasks.list, {});
   const overdueCount = useMemo(() => getOverdueTasks(tasks ?? []).filter((t) => !t.parentTaskId).length, [tasks]);
   const isOverdueView = pathname === "/timeline" && searchParams.get("view") === "overdue";
   const projects = useMemo(
-    () => [...(allProjects ?? [])].filter((p) => p.status === "active").sort((a, b) => a.sortOrder - b.sortOrder),
-    [allProjects],
+    () => sortProjects((allProjects ?? []).filter((p) => p.status === "active"), projectSort),
+    [allProjects, projectSort],
   );
   const archived = useMemo(
     () => [...(allProjects ?? [])].filter((p) => p.status === "archived").sort((a, b) => a.sortOrder - b.sortOrder),
@@ -83,8 +97,8 @@ export function Sidebar({ onOpenSearch, onOpenHelp, onOpenGoogle, onOpenSettings
   const [newProjectOpen, setNewProjectOpen] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
   const [toDelete, setToDelete] = useState<Doc<"projects"> | null>(null);
-  const collapsed = useSyncExternalStore(collapseStore.subscribe, collapseStore.getSnapshot, collapseStore.getServerSnapshot);
-  const toggleCollapsed = useCallback(() => collapseStore.set(!collapseStore.getSnapshot()), []);
+  const [collapsed, setCollapsed] = useUiPref("sidebarCollapsed");
+  const toggleCollapsed = useCallback(() => setCollapsed(!collapsed), [collapsed, setCollapsed]);
   const { width, resizing, onPointerDown } = useResizableWidth("sidebar", { initial: 260, min: 248, max: 400, side: "right" });
 
   const inProject = pathname.startsWith("/project/");
@@ -165,6 +179,26 @@ export function Sidebar({ onOpenSearch, onOpenHelp, onOpenGoogle, onOpenSettings
         <div className={`group/head flex h-8 shrink-0 items-center ${collapsed ? "justify-center" : "gap-1 pl-3.5 pr-1"}`}>
           {!collapsed && (
             <span className="min-w-0 flex-1 truncate text-[12px] font-medium uppercase tracking-[0.06em] text-text-faint">Projects</span>
+          )}
+          {!collapsed && (
+            <Menu>
+              <MenuTrigger
+                render={
+                  <button
+                    aria-label="Sort projects"
+                    className="flex size-7 shrink-0 items-center justify-center rounded-full text-text-faint opacity-0 transition-[opacity,background-color,color] hover:bg-black/[0.05] hover:text-text-strong focus-visible:opacity-100 group-hover/head:opacity-100 data-popup-open:opacity-100 dark:hover:bg-white/[0.06]"
+                  />
+                }
+              >
+                <IoSwapVertical className="size-4" />
+              </MenuTrigger>
+              <MenuPopup align="start" className="w-[190px]">
+                <MenuRadioGroup value={projectSort} onValueChange={(v) => setProjectSort(v as Settings["ui"]["projectSort"])}>
+                  <MenuGroupLabel>Sort projects</MenuGroupLabel>
+                  {PROJECT_SORTS.map((o) => <MenuRadioItem key={o.value} value={o.value}>{o.label}</MenuRadioItem>)}
+                </MenuRadioGroup>
+              </MenuPopup>
+            </Menu>
           )}
           <Tooltip>
             <TooltipTrigger

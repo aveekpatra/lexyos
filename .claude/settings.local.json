@@ -14,7 +14,8 @@
       "WebFetch(domain:stack.convex.dev)",
       "Bash(tasklist:*)",
       "WebFetch(domain:github.com)",
-      "Bash(npm uninstall:*)"
+      "Bash(npm uninstall:*)",
+      "mcp__plugin_vercel_vercel__edit_project_env"
     ]
   }
 }

@@ -21,6 +21,7 @@ import { getOverdueTasks } from "@/lib/task-utils";
 import { useTimeboxOpen } from "@/lib/timebox-store";
 import { useSettings, matchesShortcut } from "@/lib/settings";
 import { useQuickAdd } from "@/lib/quick-add";
+import { useUiPref } from "@/lib/ui-prefs";
 import { durationMinutes } from "@/lib/time-utils";
 import {
   IoCalendar,
@@ -69,30 +70,13 @@ const FUTURE_DAYS = 30;
 const GROW_BY = 14;
 const COLUMN_GAP = 12; // must equal the row gap and the scroll padding
 
-function persisted(key: string, fallback: string): string {
-  if (typeof window === "undefined") return fallback;
-  try { return localStorage.getItem(key) || fallback; } catch { return fallback; }
-}
-
 export default function KanbanBoard() {
   const tasks = useQuery(api.tasks.list, {});
   const projects = useQuery(api.projects.list, { status: "active" });
-  const [view, setViewRaw] = useState<View>(() => (persisted("unifocus:kanban:view", "overview") === "days" ? "days" : "overview"));
-  const setView = useCallback((v: View) => {
-    setViewRaw(v);
-    try { localStorage.setItem("unifocus:kanban:view", v); } catch {}
-  }, []);
+  const [view, setView] = useUiPref("kanbanView");
   const [activeAdd, setActiveAdd] = useState<string | null>(null);
-  const [showDone, setShowDoneRaw] = useState(() => persisted("unifocus:kanban:showDone", "false") === "true");
-  const setShowDone = useCallback((v: boolean) => {
-    setShowDoneRaw(v);
-    try { localStorage.setItem("unifocus:kanban:showDone", String(v)); } catch {}
-  }, []);
-  const [sortBy, setSortByRaw] = useState<SortBy>(() => (persisted("unifocus:kanban:sort", "priority") as SortBy));
-  const setSortBy = useCallback((v: SortBy) => {
-    setSortByRaw(v);
-    try { localStorage.setItem("unifocus:kanban:sort", v); } catch {}
-  }, []);
+  const [showDone, setShowDone] = useUiPref("kanbanShowDone");
+  const [sortBy, setSortBy] = useUiPref("kanbanSort");
   const [timeboxOpen, setTimeboxOpen] = useTimeboxOpen();
   const { settings } = useSettings();
   const weekStartsOn = settings.calendar.weekStartsOn;

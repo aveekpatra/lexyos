@@ -158,7 +158,7 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue, context = "
 
           {/* Title — max 2 lines, click to open detail */}
           <span
-            className={`min-w-0 flex-1 cursor-pointer text-sm font-normal leading-snug ${isDone ? "text-text-faint line-through decoration-text-faint" : "text-foreground"}`}
+            className={`min-w-0 flex-1 cursor-pointer text-[13px] font-normal leading-[1.35] ${isDone ? "text-text-faint line-through decoration-text-faint" : "text-foreground"}`}
             style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}
           >
             {task.title}

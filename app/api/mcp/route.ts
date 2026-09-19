@@ -51,9 +51,21 @@ const handler = createMcpHandler(
 const authed = withMcpAuth(
   handler,
   async (_req, bearer) => {
-    if (!bearer || !bearer.startsWith("mb_")) return undefined;
+    if (!bearer) return undefined;
     const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
     const secret = agentSecret();
+    // OAuth access token (Claude, ChatGPT, Cursor... after consent).
+    if (bearer.startsWith("mba_")) {
+      const row = await convex.query(api.oauth.verifyAccess, { secret, accessHash: sha256(bearer) });
+      if (!row) return undefined;
+      void convex.mutation(api.oauth.touch, { secret, id: row.id }).catch(() => {});
+      const scopes: string[] = [];
+      if (row.scope.includes("tasks:read")) scopes.push("read");
+      if (row.scope.includes("tasks:write")) scopes.push("write");
+      return { token: bearer, clientId: row.clientId, scopes, extra: { userId: row.userId } };
+    }
+    // Personal API key (fallback for clients without OAuth).
+    if (!bearer.startsWith("mb_")) return undefined;
     const row = await convex.query(api.apiTokens.verify, { secret, hash: sha256(bearer) });
     if (!row) return undefined;
     void convex.mutation(api.apiTokens.touch, { secret, id: row.id }).catch(() => {});

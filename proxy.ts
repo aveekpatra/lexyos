@@ -7,13 +7,15 @@ const isProtectedRoute = createRouteMatcher([
   "/calendar(.*)",
   "/tasks(.*)",
   "/settings(.*)",
+  "/oauth(.*)",
 ]);
 
 export default clerkMiddleware(async (auth, req) => {
   if (isProtectedRoute(req)) {
-    await auth.protect({
-      unauthenticatedUrl: new URL("/", req.url).toString(),
-    });
+    const back = new URL("/", req.url);
+    // OAuth consent must resume after sign-in; the landing page honours redirect_url.
+    if (req.nextUrl.pathname.startsWith("/oauth/")) back.searchParams.set("redirect_url", req.nextUrl.pathname + req.nextUrl.search);
+    await auth.protect({ unauthenticatedUrl: back.toString() });
   }
 });
 

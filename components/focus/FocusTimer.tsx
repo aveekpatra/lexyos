@@ -49,7 +49,7 @@ export function FocusTimer() {
 
   return (
     <div className="pointer-events-none fixed inset-x-0 bottom-5 z-40 flex justify-center">
-      <div className="pointer-events-auto flex h-12 items-center gap-2 rounded-full pl-2 pr-1.5 glass-surface">
+      <div className="pointer-events-auto flex h-12 items-center gap-2 rounded-full pl-2 pr-1.5 focus-pill">
         <span className="relative flex size-8 items-center justify-center">
           <svg viewBox="0 0 32 32" className="absolute inset-0 -rotate-90">
             <circle cx="16" cy="16" r="13" className="fill-none stroke-black/[0.08] dark:stroke-white/[0.12]" strokeWidth="3" />
@@ -67,13 +67,15 @@ export function FocusTimer() {
           {session.running ? <IoPause className="size-3.5" /> : <IoPlay className="size-3.5" />}
         </button>
         <button onClick={() => nextPhase(true)} aria-label="Skip" className={circle}><IoPlaySkipForward className="size-3.5" /></button>
-        <button onClick={stopFocus} aria-label="Stop" className={circle}><IoClose className="size-3.5" /></button>
+        <button onClick={stopFocus} aria-label="Stop" className={closeCircle}><IoClose className="size-3.5" /></button>
       </div>
     </div>
   );
 }
 
 const circle = "flex size-8 items-center justify-center rounded-full text-text-secondary transition-colors hover:bg-black/[0.06] hover:text-text-strong dark:hover:bg-white/[0.1]";
+/** Aturno close: a filled grey disc inside a fainter ring, both concentric. */
+const closeCircle = "ml-0.5 flex size-8 items-center justify-center rounded-full bg-black/[0.07] text-text-secondary ring-[3px] ring-black/[0.04] transition-colors hover:bg-black/[0.12] hover:text-text-strong dark:bg-white/[0.1] dark:ring-white/[0.05] dark:hover:bg-white/[0.16]";
 
 function beep() {
   try {

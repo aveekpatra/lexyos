@@ -55,6 +55,15 @@ export interface Settings {
     showReasoning: boolean;
     schedulingPreferences: string;
   };
+  /** Per-account UI state, synced so every device opens the same way. */
+  ui: {
+    sidebarCollapsed: boolean;
+    kanbanView: "overview" | "days";
+    kanbanShowDone: boolean;
+    kanbanSort: "priority" | "date" | "created" | "alpha";
+    timeboxOpen: boolean;
+    projectSort: "manual" | "name" | "priority" | "dueDate" | "recent";
+  };
   shortcuts: {
     palette: Shortcut;
     help: Shortcut;
@@ -90,6 +99,7 @@ export const DEFAULT_SETTINGS: Settings = {
   dueDates: { indicatorWithinDays: 3, reminderNotifications: false },
   pomodoro: { workMin: 25, shortBreakMin: 5, longBreakMin: 15, roundsBeforeLongBreak: 4, autoStartBreaks: true, autoStartNext: false, sound: true },
   ai: { approval: "ask", showReasoning: false, schedulingPreferences: "" },
+  ui: { sidebarCollapsed: false, kanbanView: "overview", kanbanShowDone: false, kanbanSort: "priority", timeboxOpen: true, projectSort: "manual" },
   shortcuts: { palette: "mod+/", help: "?", overview: "shift+o", days: "shift+d", today: "shift+t", quickAdd: "1" },
 };
 

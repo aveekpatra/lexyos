@@ -11,6 +11,7 @@ import { SlidingHighlight } from "@/components/ui/sliding-highlight";
 import { Folder } from "@/components/ui/folder";
 import { useTheme } from "@/components/ThemeProvider";
 import { useTimeboxOpen } from "@/lib/timebox-store";
+import { useUiPref } from "@/lib/ui-prefs";
 import { useQuickAdd } from "@/lib/quick-add";
 import { format, parseISO, isValid } from "date-fns";
 import {
@@ -56,6 +57,7 @@ export function UnifiedSearch({ open, onOpenChange, onAskAI, onNewProject, onOpe
   const toggleComplete = useMutation(api.tasks.toggleComplete);
   const { theme, toggleTheme } = useTheme();
   const [timeboxOpen, setTimeboxOpen] = useTimeboxOpen();
+  const [, setKanbanView] = useUiPref("kanbanView");
 
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
@@ -138,7 +140,7 @@ export function UnifiedSearch({ open, onOpenChange, onAskAI, onNewProject, onOpe
       { id: "go-inbox", group: "Go to", glyph: <Glyph icon={IoFileTrayFull} />, title: "Inbox", keywords: "inbox home board", run: go(() => router.push("/timeline")) },
       { id: "go-overdue", group: "Go to", glyph: <Glyph icon={IoAlertCircle} />, title: "Overdue", keywords: "overdue late", run: go(() => router.push("/timeline?view=overdue")) },
       { id: "go-today", group: "Go to", glyph: <Glyph icon={IoCalendar} />, title: "Today", subtitle: "Days view on today", keywords: "today days calendar", run: go(() => router.push(`/timeline?date=${format(new Date(), "yyyy-MM-dd")}`)) },
-      { id: "go-overview", group: "Go to", glyph: <Glyph icon={IoGrid} />, title: "Overview", subtitle: "Today, this week, next week, month", keywords: "overview week month", run: go(() => { router.push("/timeline"); try { localStorage.setItem("unifocus:kanban:view", "overview"); } catch {} }) },
+      { id: "go-overview", group: "Go to", glyph: <Glyph icon={IoGrid} />, title: "Overview", subtitle: "Today, this week, next week, month", keywords: "overview week month", run: go(() => { router.push("/timeline"); setKanbanView("overview"); }) },
       { id: "toggle-timebox", group: "Go to", glyph: <Glyph icon={IoTime} />, title: timeboxOpen ? "Hide Timebox" : "Show Timebox", keywords: "timebox schedule time grid", run: go(() => setTimeboxOpen(!timeboxOpen)) },
     ];
     // Settings

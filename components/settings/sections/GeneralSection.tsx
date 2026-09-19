@@ -33,7 +33,7 @@ export function GeneralSection() {
 
       <Section title="Inbox" description="How the board opens and what sits beside it.">
         <Row label="Default view">
-          <Segmented layoutId="settings-view" size="sm" value={g.defaultView} onChange={(v) => { update("general", { defaultView: v }); try { localStorage.setItem("unifocus:kanban:view", v); } catch {} }}
+          <Segmented layoutId="settings-view" size="sm" value={g.defaultView} onChange={(v) => { update("general", { defaultView: v }); update("ui", { kanbanView: v }); }}
             items={[{ value: "overview", label: "Overview" }, { value: "days", label: "Days" }]} />
         </Row>
         <Row label="Timebox panel" hint="The day grid beside the board">

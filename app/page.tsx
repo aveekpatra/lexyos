@@ -5,17 +5,25 @@ import {
   SignUpButton,
   Show,
 } from "@clerk/nextjs";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { IoPrism } from "react-icons/io5";
 
+/** Where to go after sign-in: a same-origin path from ?redirect_url (OAuth consent), else the timeline. */
+function useAfterSignIn(): string {
+  const sp = useSearchParams();
+  const r = sp.get("redirect_url") ?? "";
+  return r.startsWith("/") && !r.startsWith("//") ? r : "/timeline";
+}
+
 function RedirectToTimeline() {
   const router = useRouter();
+  const to = useAfterSignIn();
   useEffect(() => {
-    router.replace("/timeline");
-  }, [router]);
+    router.replace(to);
+  }, [router, to]);
   return (
     <div className="flex min-h-svh items-center justify-center">
       <Spinner />
@@ -24,6 +32,7 @@ function RedirectToTimeline() {
 }
 
 export default function Home() {
+  const to = useAfterSignIn();
   return (
     <>
       <Show when="signed-in">
@@ -45,12 +54,12 @@ export default function Home() {
             </div>
 
             <div className="flex w-full flex-col gap-2.5">
-              <SignInButton mode="modal" forceRedirectUrl="/timeline">
+              <SignInButton mode="modal" forceRedirectUrl={to}>
                 <Button className="w-full" size="lg">
                   Sign in
                 </Button>
               </SignInButton>
-              <SignUpButton mode="modal" forceRedirectUrl="/timeline">
+              <SignUpButton mode="modal" forceRedirectUrl={to}>
                 <Button variant="outline" className="w-full" size="lg">
                   Create account
                 </Button>
