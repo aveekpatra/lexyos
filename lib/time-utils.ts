@@ -1,5 +1,5 @@
 /**
- * Pure date/time string helpers shared by the planner, the Google sync layer and
+ * Pure date/time string helpers shared by the board, the Google sync layer and
  * the server actions. No timezone conversions happen here: every function works
  * on the "YYYY-MM-DD" / "HH:MM" wall-clock strings the task schema stores, so
  * the result is the same on the client (user tz) and the server (UTC).

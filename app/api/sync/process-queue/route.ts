@@ -1,4 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
+import { isGoogleNotConnected } from "@/lib/google-oauth";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
@@ -20,6 +21,11 @@ export async function POST() {
 
     const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
     convex.setAuth(token);
+
+    // Nothing to do without a Google account; also avoids marking queue items failed.
+    if (!(await convex.query(api.googleConnections.getEncrypted, {}))) {
+      return Response.json({ error: "google_not_connected" }, { status: 409 });
+    }
 
     // Fetch pending queue items
     const pending = await convex.query(api.syncQueue.getPending, { limit: 10 });
@@ -191,6 +197,7 @@ export async function POST() {
       message: `Processed ${processed} sync items${failed > 0 ? `, ${failed} failed` : ""}`,
     });
   } catch (err) {
+    if (isGoogleNotConnected(err)) return Response.json({ error: "google_not_connected" }, { status: 409 });
     console.error("[SyncQueue] Process error:", err);
     return Response.json(
       { error: err instanceof Error ? err.message : "Internal error" },

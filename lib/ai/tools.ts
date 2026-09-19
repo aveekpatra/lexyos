@@ -9,28 +9,71 @@ import { z } from "zod";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
-import {
-  setGmailToken,
-  clearGmailToken,
-  listMessagesWithDetails,
-  sendMessage as gmailSendMessage,
-  createDraft as gmailCreateDraft,
-  getMessage as gmailGetMessage,
-  archiveMessage,
-  trashMessage,
-  markAsRead,
-  markAsUnread,
-  starMessage,
-  unstarMessage,
-} from "@/lib/gmail-api";
+import { describeRecurrence, normalizeRecurrence, shortRecurrenceLabel, type Recurrence } from "@/convex/lib/recurrence";
+
+// ─── Recurrence schema (mirrors convex/lib/recurrence.ts) ───
+const weekdaySchema = z.enum(["mon", "tue", "wed", "thu", "fri", "sat", "sun"]);
+const recurrenceSchema = z.discriminatedUnion("freq", [
+  z.object({
+    freq: z.literal("daily"),
+    interval: z.number().int().min(1).max(52).optional().describe("Every N days. Default 1."),
+    until: z.string().optional().describe("Last date YYYY-MM-DD. Omit for forever."),
+  }),
+  z.object({
+    freq: z.literal("weekly"),
+    interval: z.number().int().min(1).max(52).optional().describe("Every N weeks. Default 1. Use 2 for fortnightly."),
+    slots: z.array(z.object({
+      day: weekdaySchema,
+      start: z.string().optional().describe("HH:MM 24h. Omit to keep the task's own time."),
+      end: z.string().optional().describe("HH:MM 24h. Needs start. Omit to keep the task's duration."),
+    })).min(1).describe("One entry per weekday. Each day may have its own time, e.g. Mon 08:00 and Tue 18:00."),
+    until: z.string().optional(),
+  }),
+  z.object({
+    freq: z.literal("monthly"),
+    interval: z.number().int().min(1).max(52).optional(),
+    day: z.union([z.number().int().min(1).max(31), z.literal("last")]).optional().describe("Day of month. Omit to use the task's date."),
+    until: z.string().optional(),
+  }),
+  z.object({
+    freq: z.literal("yearly"),
+    interval: z.number().int().min(1).max(52).optional(),
+    month: z.number().int().min(1).max(12).optional(),
+    day: z.number().int().min(1).max(31).optional(),
+    until: z.string().optional(),
+  }),
+]).describe(`Repeat rule. Examples:
+- every day: {"freq":"daily"}
+- weekdays: {"freq":"weekly","slots":[{"day":"mon"},{"day":"tue"},{"day":"wed"},{"day":"thu"},{"day":"fri"}]}
+- Monday morning and Tuesday evening: {"freq":"weekly","slots":[{"day":"mon","start":"08:00","end":"09:00"},{"day":"tue","start":"18:00","end":"19:00"}]}
+- every 2 weeks on Friday: {"freq":"weekly","interval":2,"slots":[{"day":"fri"}]}
+- monthly on the 1st: {"freq":"monthly","day":1}
+- yearly on the task's date: {"freq":"yearly"}
+Completing a repeating task rolls it to the next occurrence and keeps a done copy for history.`);
 
 // ─── Convex client setup ───
 // We use ConvexHttpClient (not the React client) since this runs server-side.
 // Auth token is injected per-request from Clerk.
-function getConvex(token: string) {
+/**
+ * Who the tools act as. In the app the signed-in user's Clerk token. From the
+ * MCP server an agent acting for a user: every call carries the shared
+ * AGENT_SECRET plus that user's id, checked by convex/lib/actor.ts.
+ */
+export type ToolAuth = string | { agentFor: string };
+
+function getConvex(auth: ToolAuth): ConvexHttpClient {
   const client = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
-  client.setAuth(token);
-  return client;
+  if (typeof auth === "string") {
+    client.setAuth(auth);
+    return client;
+  }
+  const secret = process.env.AGENT_SECRET;
+  if (!secret) throw new Error("AGENT_SECRET is not set");
+  const agent = { secret, userId: auth.agentFor };
+  return {
+    query: (fn: any, args: any) => client.query(fn, { ...(args ?? {}), agent }),
+    mutation: (fn: any, args: any) => client.mutation(fn, { ...(args ?? {}), agent }),
+  } as unknown as ConvexHttpClient;
 }
 
 // ─── Helper: get today's date in user's timezone ───
@@ -39,19 +82,8 @@ function today() {
 }
 
 // ─── Tool factory: creates tools that receive auth token at runtime ───
-export function createTools(authToken: string, googleToken?: string): Record<string, any> {
-  const convex = getConvex(authToken);
-
-  /** Wrap a gmail-api call with token setup/teardown */
-  async function withGmail<T>(fn: () => Promise<T>): Promise<T> {
-    if (!googleToken) throw new Error("Gmail not connected");
-    setGmailToken(googleToken);
-    try {
-      return await fn();
-    } finally {
-      clearGmailToken();
-    }
-  }
+export function createTools(auth: ToolAuth): Record<string, any> {
+  const convex = getConvex(auth);
 
   /** Wrap a tool execute fn so errors are returned as { error: "..." } instead of thrown.
    *  This ensures the model always sees a structured result and can react to failures. */
@@ -100,6 +132,10 @@ export function createTools(authToken: string, googleToken?: string): Record<str
           projectId: t.projectId,
           source: t.source,
           description: t.description,
+          repeats: (() => {
+            const r = normalizeRecurrence(t.recurrence, t.dueDate);
+            return r ? shortRecurrenceLabel(r) : undefined;
+          })(),
         }));
       }),
     }),
@@ -125,6 +161,10 @@ export function createTools(authToken: string, googleToken?: string): Record<str
           source: task.source,
           description: task.description,
           googleEventId: task.googleEventId,
+          repeats: (() => {
+            const r = normalizeRecurrence(task.recurrence, task.dueDate);
+            return r ? describeRecurrence(r, task.dueDate) : undefined;
+          })(),
         };
       }),
     }),
@@ -141,6 +181,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
         projectId: z.string().optional().describe("Project ID to assign to"),
         scheduledStartTime: z.string().optional().describe("Start time in HH:MM format"),
         scheduledEndTime: z.string().optional().describe("End time in HH:MM format"),
+        recurrence: recurrenceSchema.optional(),
       }),
       execute: safe(async (args: any) => {
         const dueDate = args.dueDate || today();
@@ -155,6 +196,7 @@ export function createTools(authToken: string, googleToken?: string): Record<str
           projectId: args.projectId as Id<"projects"> | undefined,
           scheduledStartTime: args.scheduledStartTime,
           scheduledEndTime: args.scheduledEndTime,
+          recurrence: args.recurrence as Recurrence | undefined,
           userDate: today(),
         });
 
@@ -168,7 +210,10 @@ export function createTools(authToken: string, googleToken?: string): Record<str
           console.warn("[AI] Failed to enqueue sync:", err);
         }
 
-        return { id, title: args.title, dueDate, created: true };
+        return {
+          id, title: args.title, dueDate, created: true,
+          repeats: args.recurrence ? describeRecurrence(args.recurrence, dueDate) : undefined,
+        };
       }),
     }),
 
@@ -185,9 +230,13 @@ export function createTools(authToken: string, googleToken?: string): Record<str
         projectId: z.string().optional().describe("Move to this project (use 'none' to remove from project)"),
         scheduledStartTime: z.string().optional().describe("Start time (HH:MM)"),
         scheduledEndTime: z.string().optional().describe("End time (HH:MM)"),
+        recurrence: recurrenceSchema.optional().describe("Set or replace the repeat rule"),
+        clearRecurrence: z.boolean().optional().describe("true to stop the task repeating"),
       }),
       execute: safe(async (args: any) => {
         const updateArgs: Record<string, unknown> = { id: args.id };
+        if (args.clearRecurrence) updateArgs.clearRecurrence = true;
+        else if (args.recurrence) updateArgs.recurrence = args.recurrence;
         if (args.title) updateArgs.title = args.title;
         if (args.description !== undefined) updateArgs.description = args.description;
         if (args.dueDate) updateArgs.dueDate = args.dueDate;
@@ -220,12 +269,12 @@ export function createTools(authToken: string, googleToken?: string): Record<str
     }),
 
     complete_task: ({
-      description: `Mark a task as done (or toggle it back to todo if already done). Use when the user says they finished something, completed a task, or want to mark it done.`,
+      description: `Mark a task as done (or toggle it back to todo if already done). Use when the user says they finished something, completed a task, or want to mark it done. For a repeating task this does NOT mark it done: it records a done copy and moves the task to its next occurrence; the result tells you the new date.`,
       inputSchema: z.object({
         id: z.string().describe("Task ID to complete"),
       }),
       execute: safe(async (args: any) => {
-        await convex.mutation(api.tasks.toggleComplete, { id: args.id as Id<"tasks"> });
+        const result = await convex.mutation(api.tasks.toggleComplete, { id: args.id as Id<"tasks">, userDate: today() });
 
         // Enqueue Google Calendar sync to update [Done] prefix
         try {
@@ -238,6 +287,9 @@ export function createTools(authToken: string, googleToken?: string): Record<str
           console.warn("[AI] Failed to enqueue sync:", err);
         }
 
+        if (result.rolled && result.next) {
+          return { id: args.id, completed: true, repeats: true, nextDate: result.next.date, nextStart: result.next.start, nextEnd: result.next.end };
+        }
         return { id: args.id, toggled: true };
       }),
     }),
@@ -508,227 +560,6 @@ export function createTools(authToken: string, googleToken?: string): Record<str
           freeSlots: slots,
           totalFreeMinutes: slots.reduce((sum, s) => sum + s.durationMinutes, 0),
         };
-      }),
-    }),
-
-    // ═══════════════════════════════════════════
-    // EMAIL TOOLS
-    // ═══════════════════════════════════════════
-
-    search_emails: ({
-      description: `Search emails using Gmail search syntax. Use when the user asks about emails, wants to find a message, check unread mail, etc. Returns subject, from, date, snippet, and IDs. Supports Gmail search operators: from:, to:, subject:, is:unread, is:starred, has:attachment, after:, before:, label:, etc.`,
-      inputSchema: z.object({
-        query: z.string().describe("Gmail search query (e.g. 'from:john subject:meeting is:unread', 'after:2024/01/01')"),
-        maxResults: z.number().optional().describe("Max results to return (default: 10)"),
-      }),
-      execute: safe(async (args: any) => {
-        return withGmail(async () => {
-          const result = await listMessagesWithDetails({
-            query: args.query,
-            maxResults: args.maxResults || 10,
-          });
-          return result.messages.map((m) => ({
-            id: m.id,
-            threadId: m.threadId,
-            subject: m.subject,
-            from: m.from,
-            to: m.to,
-            date: m.date,
-            snippet: m.snippet,
-            isUnread: m.isUnread,
-            isStarred: m.isStarred,
-            hasAttachments: m.attachments.length > 0,
-          }));
-        });
-      }),
-    }),
-
-    read_email: ({
-      description: `Read the full content of a specific email by its message ID. Use after search_emails to get the full body text of a message.`,
-      inputSchema: z.object({
-        messageId: z.string().describe("Gmail message ID"),
-      }),
-      execute: safe(async (args: any) => {
-        return withGmail(async () => {
-          const msg = await gmailGetMessage(args.messageId);
-          return {
-            id: msg.id,
-            threadId: msg.threadId,
-            subject: msg.subject,
-            from: msg.from,
-            to: msg.to,
-            cc: msg.cc,
-            date: msg.date,
-            bodyText: msg.bodyText,
-            isUnread: msg.isUnread,
-            isStarred: msg.isStarred,
-            attachments: msg.attachments.map((a) => ({
-              filename: a.filename,
-              mimeType: a.mimeType,
-              size: a.size,
-            })),
-          };
-        });
-      }),
-    }),
-
-    send_email: ({
-      description: `Compose and send a new email. IMPORTANT: This is irreversible — always confirm the recipient, subject, and body with the user BEFORE calling this tool.`,
-      inputSchema: z.object({
-        to: z.string().describe("Recipient email address"),
-        subject: z.string().describe("Email subject"),
-        body: z.string().describe("Email body (plain text)"),
-        cc: z.string().optional().describe("CC email address(es), comma separated"),
-        bcc: z.string().optional().describe("BCC email address(es), comma separated"),
-      }),
-      execute: safe(async (args: any) => {
-        return withGmail(async () => {
-          const sent = await gmailSendMessage({
-            to: args.to.trim(),
-            subject: args.subject.trim(),
-            body: args.body,
-            cc: args.cc?.trim(),
-            bcc: args.bcc?.trim(),
-          });
-          return { id: sent.id, threadId: sent.threadId, sent: true };
-        });
-      }),
-    }),
-
-    reply_to_email: ({
-      description: `Reply to an email thread. IMPORTANT: This is irreversible — confirm the reply content with the user BEFORE calling this tool. Requires the message ID to reply to (get it from search_emails or read_email first).`,
-      inputSchema: z.object({
-        messageId: z.string().describe("The message ID to reply to"),
-        body: z.string().describe("Reply body (plain text)"),
-        replyAll: z.boolean().optional().describe("If true, reply to all recipients (default: false)"),
-      }),
-      execute: safe(async (args: any) => {
-        return withGmail(async () => {
-          const original = await gmailGetMessage(args.messageId);
-          const replyTo = args.replyAll
-            ? [original.from.email, ...original.to.map((a: { email: string }) => a.email), ...original.cc.map((a: { email: string }) => a.email)].join(", ")
-            : original.from.email;
-          const subject = original.subject.startsWith("Re:") ? original.subject : `Re: ${original.subject}`;
-          const sent = await gmailSendMessage({
-            to: replyTo,
-            subject,
-            body: args.body,
-            threadId: original.threadId,
-            inReplyTo: original.messageIdHeader,
-            references: original.messageIdHeader,
-          });
-          return { id: sent.id, threadId: sent.threadId, replied: true };
-        });
-      }),
-    }),
-
-    save_draft: ({
-      description: `Save an email as a draft in Gmail. The user can review and send it later from Gmail. Use this when the user asks to "draft", "write a draft", "save for later", or "prepare an email" — anything that implies they want to review before sending. Do NOT ask for confirmation — just save the draft.`,
-      inputSchema: z.object({
-        to: z.string().describe("Recipient email address"),
-        subject: z.string().describe("Email subject"),
-        body: z.string().describe("Email body (plain text)"),
-        cc: z.string().optional().describe("CC email address(es), comma separated"),
-        bcc: z.string().optional().describe("BCC email address(es), comma separated"),
-      }),
-      execute: safe(async (args: any) => {
-        return withGmail(async () => {
-          const draft = await gmailCreateDraft({
-            to: args.to.trim(),
-            subject: args.subject.trim(),
-            body: args.body,
-            cc: args.cc?.trim(),
-            bcc: args.bcc?.trim(),
-          });
-          return { draftId: draft.id, messageId: draft.messageId, saved: true };
-        });
-      }),
-    }),
-
-    save_reply_draft: ({
-      description: `Save a reply as a draft in Gmail (in the same thread). Use when the user asks to "draft a reply", "prepare a reply", or wants to reply but review it first. Do NOT ask for confirmation — just save the draft.`,
-      inputSchema: z.object({
-        messageId: z.string().describe("The message ID to reply to"),
-        body: z.string().describe("Reply body (plain text)"),
-        replyAll: z.boolean().optional().describe("If true, reply to all recipients (default: false)"),
-      }),
-      execute: safe(async (args: any) => {
-        return withGmail(async () => {
-          const original = await gmailGetMessage(args.messageId);
-          const replyTo = args.replyAll
-            ? [original.from.email, ...original.to.map((a: { email: string }) => a.email), ...original.cc.map((a: { email: string }) => a.email)].join(", ")
-            : original.from.email;
-          const subject = original.subject.startsWith("Re:") ? original.subject : `Re: ${original.subject}`;
-          const draft = await gmailCreateDraft({
-            to: replyTo,
-            subject,
-            body: args.body,
-            threadId: original.threadId,
-          });
-          return { draftId: draft.id, messageId: draft.messageId, threadId: original.threadId, saved: true };
-        });
-      }),
-    }),
-
-    archive_email: ({
-      description: `Archive an email (remove from inbox). Use when the user wants to archive a message.`,
-      inputSchema: z.object({
-        messageId: z.string().describe("Gmail message ID to archive"),
-      }),
-      execute: safe(async (args: any) => {
-        return withGmail(async () => {
-          await archiveMessage(args.messageId);
-          return { messageId: args.messageId, archived: true };
-        });
-      }),
-    }),
-
-    trash_email: ({
-      description: `Move an email to trash. Use when the user wants to delete a message.`,
-      inputSchema: z.object({
-        messageId: z.string().describe("Gmail message ID to trash"),
-      }),
-      execute: safe(async (args: any) => {
-        return withGmail(async () => {
-          await trashMessage(args.messageId);
-          return { messageId: args.messageId, trashed: true };
-        });
-      }),
-    }),
-
-    toggle_email_star: ({
-      description: `Star or unstar an email. Use when the user wants to star/flag or unstar a message.`,
-      inputSchema: z.object({
-        messageId: z.string().describe("Gmail message ID"),
-        star: z.boolean().describe("true to star, false to unstar"),
-      }),
-      execute: safe(async (args: any) => {
-        return withGmail(async () => {
-          if (args.star) {
-            await starMessage(args.messageId);
-          } else {
-            await unstarMessage(args.messageId);
-          }
-          return { messageId: args.messageId, starred: args.star };
-        });
-      }),
-    }),
-
-    toggle_email_read: ({
-      description: `Mark an email as read or unread.`,
-      inputSchema: z.object({
-        messageId: z.string().describe("Gmail message ID"),
-        read: z.boolean().describe("true to mark as read, false to mark as unread"),
-      }),
-      execute: safe(async (args: any) => {
-        return withGmail(async () => {
-          if (args.read) {
-            await markAsRead(args.messageId);
-          } else {
-            await markAsUnread(args.messageId);
-          }
-          return { messageId: args.messageId, read: args.read };
-        });
       }),
     }),
   };

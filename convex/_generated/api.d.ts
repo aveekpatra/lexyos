@@ -9,13 +9,12 @@
  */
 
 import type * as aiChats from "../aiChats.js";
-import type * as aiSettings from "../aiSettings.js";
+import type * as apiTokens from "../apiTokens.js";
 import type * as calendarEvents from "../calendarEvents.js";
-import type * as emailSyncState from "../emailSyncState.js";
-import type * as emails from "../emails.js";
-import type * as favorites from "../favorites.js";
+import type * as googleConnections from "../googleConnections.js";
+import type * as lib_actor from "../lib/actor.js";
+import type * as lib_recurrence from "../lib/recurrence.js";
 import type * as projects from "../projects.js";
-import type * as sections from "../sections.js";
 import type * as syncQueue from "../syncQueue.js";
 import type * as tasks from "../tasks.js";
 import type * as userPreferences from "../userPreferences.js";
@@ -28,13 +27,12 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   aiChats: typeof aiChats;
-  aiSettings: typeof aiSettings;
+  apiTokens: typeof apiTokens;
   calendarEvents: typeof calendarEvents;
-  emailSyncState: typeof emailSyncState;
-  emails: typeof emails;
-  favorites: typeof favorites;
+  googleConnections: typeof googleConnections;
+  "lib/actor": typeof lib_actor;
+  "lib/recurrence": typeof lib_recurrence;
   projects: typeof projects;
-  sections: typeof sections;
   syncQueue: typeof syncQueue;
   tasks: typeof tasks;
   userPreferences: typeof userPreferences;

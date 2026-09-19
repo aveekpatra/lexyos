@@ -1,5 +1,13 @@
 import { v } from "convex/values";
-import { query, mutation } from "./_generated/server";
+import { agentValidator, getIdentity } from "./lib/actor";
+import { query, mutation, type MutationCtx } from "./_generated/server";
+import type { Doc, Id } from "./_generated/dataModel";
+import {
+  recurrenceValidator,
+  normalizeRecurrence,
+  validateRecurrence,
+  nextOccurrence,
+} from "./lib/recurrence";
 
 // ─── "HH:MM" helpers (kept local so the Convex bundle has no app imports) ───
 const MAX_DAY_MIN = 23 * 60 + 59;
@@ -28,7 +36,7 @@ function clampedEndTime(start: string, minutes: number): string {
 const SYNC_CLOCK_SKEW_MS = 30_000;
 
 export const list = query({
-  args: {
+  args: { agent: agentValidator,
     status: v.optional(
       v.union(v.literal("todo"), v.literal("planned"), v.literal("in_progress"), v.literal("review"), v.literal("done"))
     ),
@@ -37,7 +45,7 @@ export const list = query({
     source: v.optional(v.union(v.literal("local"), v.literal("google_calendar"))),
   },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
+    const identity = await getIdentity(ctx, args.agent);
     if (!identity) return [];
     const userId = identity.subject;
 
@@ -91,9 +99,9 @@ export const list = query({
 });
 
 export const getById = query({
-  args: { id: v.id("tasks") },
+  args: { agent: agentValidator, id: v.id("tasks") },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
+    const identity = await getIdentity(ctx, args.agent);
     if (!identity) return null;
 
     const task = await ctx.db.get("tasks", args.id);
@@ -102,26 +110,10 @@ export const getById = query({
   },
 });
 
-export const getByGmailThread = query({
-  args: { gmailThreadId: v.string() },
-  handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) return null;
-
-    const tasks = await ctx.db
-      .query("tasks")
-      .withIndex("by_userId_and_gmailThreadId", (q) =>
-        q.eq("userId", identity.subject).eq("gmailThreadId", args.gmailThreadId)
-      )
-      .collect();
-    return tasks[0] || null;
-  },
-});
-
 export const getSubtasks = query({
-  args: { parentTaskId: v.id("tasks") },
+  args: { agent: agentValidator, parentTaskId: v.id("tasks") },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
+    const identity = await getIdentity(ctx, args.agent);
     if (!identity) return [];
 
     return await ctx.db
@@ -134,7 +126,7 @@ export const getSubtasks = query({
 });
 
 export const create = mutation({
-  args: {
+  args: { agent: agentValidator,
     title: v.string(),
     description: v.optional(v.string()),
     status: v.optional(
@@ -149,22 +141,19 @@ export const create = mutation({
     scheduledStartTime: v.optional(v.string()),
     scheduledEndTime: v.optional(v.string()),
     projectId: v.optional(v.id("projects")),
-    sectionId: v.optional(v.id("sections")),
-    recurrence: v.optional(v.string()),
+    recurrence: v.optional(recurrenceValidator),
     labels: v.optional(v.array(v.string())),
     parentTaskId: v.optional(v.id("tasks")),
     googleEventId: v.optional(v.string()),
     googleCalendarId: v.optional(v.string()),
-    // Gmail linking
-    gmailMessageId: v.optional(v.string()),
-    gmailThreadId: v.optional(v.string()),
-    gmailSubject: v.optional(v.string()),
     // Client-provided local date (format: "YYYY-MM-DD") to avoid UTC drift on the server.
     // Falls back to server UTC date if not provided.
     userDate: v.optional(v.string()),
+    /** Settings: add new tasks to the top of the list. */
+    placeAtTop: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
+    const identity = await getIdentity(ctx, args.agent);
     if (!identity) throw new Error("Not authenticated");
     const userId = identity.subject;
 
@@ -173,10 +162,12 @@ export const create = mutation({
       .withIndex("by_userId", (q) => q.eq("userId", userId))
       .collect();
     const maxOrder = existing.reduce((max, t) => Math.max(max, t.sortOrder), 0);
+    const minOrder = existing.reduce((min, t) => Math.min(min, t.sortOrder), 0);
 
     // Default dueDate to today if not provided — tasks must always have a date.
     // Prefer client-supplied userDate (local timezone) over server UTC date.
     const today = args.userDate || new Date().toISOString().slice(0, 10);
+    if (args.recurrence) validateRecurrence(args.recurrence);
 
     return await ctx.db.insert("tasks", {
       title: args.title,
@@ -189,24 +180,20 @@ export const create = mutation({
       scheduledStartTime: args.scheduledStartTime,
       scheduledEndTime: args.scheduledEndTime,
       projectId: args.projectId,
-      sectionId: args.sectionId,
       recurrence: args.recurrence,
       labels: args.labels,
       parentTaskId: args.parentTaskId,
       googleEventId: args.googleEventId,
       googleCalendarId: args.googleCalendarId,
-      gmailMessageId: args.gmailMessageId,
-      gmailThreadId: args.gmailThreadId,
-      gmailSubject: args.gmailSubject,
       source: "local",
-      sortOrder: maxOrder + 1,
+      sortOrder: args.placeAtTop ? minOrder - 1 : maxOrder + 1,
       userId,
     });
   },
 });
 
 export const update = mutation({
-  args: {
+  args: { agent: agentValidator,
     id: v.id("tasks"),
     title: v.optional(v.string()),
     description: v.optional(v.string()),
@@ -222,8 +209,7 @@ export const update = mutation({
     scheduledStartTime: v.optional(v.string()),
     scheduledEndTime: v.optional(v.string()),
     projectId: v.optional(v.id("projects")),
-    sectionId: v.optional(v.id("sections")),
-    recurrence: v.optional(v.string()),
+    recurrence: v.optional(recurrenceValidator),
     labels: v.optional(v.array(v.string())),
     sortOrder: v.optional(v.number()),
     googleEventId: v.optional(v.string()),
@@ -235,7 +221,6 @@ export const update = mutation({
     clearScheduledStartTime: v.optional(v.boolean()),
     clearScheduledEndTime: v.optional(v.boolean()),
     clearProjectId: v.optional(v.boolean()),
-    clearSectionId: v.optional(v.boolean()),
     clearRecurrence: v.optional(v.boolean()),
     clearDescription: v.optional(v.boolean()),
     // Client-provided local date (format: "YYYY-MM-DD") to avoid UTC drift on the server.
@@ -243,7 +228,7 @@ export const update = mutation({
     userDate: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
+    const identity = await getIdentity(ctx, args.agent);
     if (!identity) throw new Error("Not authenticated");
 
     const task = await ctx.db.get("tasks", args.id);
@@ -252,8 +237,10 @@ export const update = mutation({
     }
 
     const { id, clearDueDate, clearDueTime, clearScheduledDate, clearScheduledStartTime,
-      clearScheduledEndTime, clearProjectId, clearSectionId, clearRecurrence, clearDescription,
+      clearScheduledEndTime, clearProjectId, clearRecurrence, clearDescription,
       userDate, ...updates } = args;
+
+    if (args.recurrence) validateRecurrence(args.recurrence);
 
     // Build patch: include set values, apply clears
     const patch: Record<string, unknown> = {};
@@ -321,7 +308,6 @@ export const update = mutation({
     if (clearScheduledStartTime) patch.scheduledStartTime = undefined;
     if (clearScheduledEndTime) patch.scheduledEndTime = undefined;
     if (clearProjectId) patch.projectId = undefined;
-    if (clearSectionId) patch.sectionId = undefined;
     if (clearRecurrence) patch.recurrence = undefined;
     if (clearDescription) patch.description = undefined;
 
@@ -329,10 +315,91 @@ export const update = mutation({
   },
 });
 
+/**
+ * Result of completing a task. `rolled` means the task repeats: it was NOT
+ * marked done; a done snapshot was written and the live task moved to
+ * `next`. Callers move the Google event to `next` instead of prefixing [Done].
+ */
+export type CompleteResult = {
+  googleEventId?: string;
+  googleCalendarId?: string;
+  rolled: boolean;
+  next?: { date: string; start?: string; end?: string };
+  snapshotId?: Id<"tasks">;
+};
+
+/**
+ * Mark a task done. For a repeating task this writes a done copy for history
+ * and advances the live task to its next occurrence (keeping its Google link).
+ * The next occurrence is computed strictly after max(task date, today) so a
+ * task completed late does not land in the past.
+ */
+async function completeTask(ctx: MutationCtx, task: Doc<"tasks">, userDate?: string): Promise<CompleteResult> {
+  const base = { googleEventId: task.googleEventId, googleCalendarId: task.googleCalendarId };
+  const today = userDate || new Date().toISOString().slice(0, 10);
+  const anchor = task.dueDate || task.scheduledDate || today;
+  const rec = normalizeRecurrence(task.recurrence, anchor);
+  const from = anchor > today ? anchor : today;
+  const next = rec ? nextOccurrence(rec, from, anchor) : null;
+
+  if (!rec || !next) {
+    // Not repeating, or the rule has run out: plain completion.
+    await ctx.db.patch("tasks", task._id, {
+      status: "done",
+      completedAt: Date.now(),
+      ...(rec && !next ? { recurrence: undefined } : {}),
+    });
+    return { ...base, rolled: false };
+  }
+
+  // 1. History: a done copy of this occurrence, unlinked from Google and the rule.
+  const { _id, _creationTime, ...fields } = task;
+  void _id; void _creationTime;
+  const snapshotId = await ctx.db.insert("tasks", {
+    ...fields,
+    status: "done",
+    completedAt: Date.now(),
+    recurrence: undefined,
+    googleEventId: undefined,
+    googleCalendarId: undefined,
+    lastSyncedAt: undefined,
+    googleUpdatedAt: undefined,
+    htmlLink: undefined,
+  });
+
+  // 2. Advance the live task. Weekly slots may dictate their own time.
+  const patch: Record<string, unknown> = {
+    dueDate: next.date,
+    scheduledDate: next.date,
+    recurrence: rec, // persist the normalised form so legacy strings retire
+    status: task.status === "done" ? "todo" : task.status,
+    completedAt: undefined,
+  };
+  let start = next.start;
+  let end = next.end;
+  if (start) {
+    const dur = durationBetween(task.scheduledStartTime, task.scheduledEndTime) ?? 60;
+    end = end && durationBetween(start, end) !== null ? end : clampedEndTime(start, dur);
+    patch.dueTime = start;
+    patch.scheduledStartTime = start;
+    patch.scheduledEndTime = end;
+  } else {
+    start = task.scheduledStartTime || task.dueTime;
+    end = task.scheduledEndTime;
+  }
+  await ctx.db.patch("tasks", task._id, patch);
+
+  return { ...base, rolled: true, next: { date: next.date, start, end }, snapshotId };
+}
+
 export const toggleComplete = mutation({
-  args: { id: v.id("tasks") },
-  handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
+  args: { agent: agentValidator,
+    id: v.id("tasks"),
+    // Client local date ("YYYY-MM-DD") so recurring tasks roll relative to the user's today.
+    userDate: v.optional(v.string()),
+  },
+  handler: async (ctx, args): Promise<CompleteResult> => {
+    const identity = await getIdentity(ctx, args.agent);
     if (!identity) throw new Error("Not authenticated");
 
     const task = await ctx.db.get("tasks", args.id);
@@ -345,22 +412,31 @@ export const toggleComplete = mutation({
         status: "todo",
         completedAt: undefined,
       });
-    } else {
-      await ctx.db.patch("tasks", args.id, {
-        status: "done",
-        completedAt: Date.now(),
-      });
+      return { googleEventId: task.googleEventId, googleCalendarId: task.googleCalendarId, rolled: false };
     }
 
-    // Return googleEventId so the UI can handle Google Calendar sync if needed
-    return { googleEventId: task.googleEventId, googleCalendarId: task.googleCalendarId };
+    const result = await completeTask(ctx, task, args.userDate);
+    await maybeCompleteParent(ctx, task, identity.subject);
+    return result;
   },
 });
 
+/** Settings: complete the parent once every sub-issue is done. */
+async function maybeCompleteParent(ctx: MutationCtx, task: Doc<"tasks">, userId: string) {
+  if (!task.parentTaskId) return;
+  const prefs = await ctx.db.query("userPreferences").withIndex("by_userId", (q) => q.eq("userId", userId)).first();
+  const on = (prefs?.prefs as { general?: { completeParentWhenSubtasksDone?: boolean } } | undefined)?.general?.completeParentWhenSubtasksDone;
+  if (!on) return;
+  const parent = await ctx.db.get("tasks", task.parentTaskId);
+  if (!parent || parent.status === "done") return;
+  const siblings = await ctx.db.query("tasks").withIndex("by_parentTaskId", (q) => q.eq("parentTaskId", parent._id)).collect();
+  if (siblings.every((s) => s.status === "done" || s._id === task._id)) await completeTask(ctx, parent);
+}
+
 export const remove = mutation({
-  args: { id: v.id("tasks") },
+  args: { agent: agentValidator, id: v.id("tasks") },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
+    const identity = await getIdentity(ctx, args.agent);
     if (!identity) throw new Error("Not authenticated");
 
     const task = await ctx.db.get("tasks", args.id);
@@ -385,23 +461,30 @@ export const remove = mutation({
 });
 
 export const bulkUpdateStatus = mutation({
-  args: {
+  args: { agent: agentValidator,
     ids: v.array(v.id("tasks")),
     status: v.union(v.literal("todo"), v.literal("planned"), v.literal("in_progress"), v.literal("review"), v.literal("done")),
+    userDate: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
+    const identity = await getIdentity(ctx, args.agent);
     if (!identity) throw new Error("Not authenticated");
 
+    const results: Array<{ id: Id<"tasks"> } & CompleteResult> = [];
     for (const id of args.ids) {
       const task = await ctx.db.get("tasks", id);
-      if (task && task.userId === identity.subject) {
+      if (!task || task.userId !== identity.subject) continue;
+      if (args.status === "done" && task.status !== "done") {
+        results.push({ id, ...(await completeTask(ctx, task, args.userDate)) });
+      } else {
         await ctx.db.patch("tasks", id, {
           status: args.status,
           completedAt: args.status === "done" ? Date.now() : undefined,
         });
+        results.push({ id, googleEventId: task.googleEventId, googleCalendarId: task.googleCalendarId, rolled: false });
       }
     }
+    return results;
   },
 });
 
@@ -819,5 +902,31 @@ export const cleanupGoogleCalendarDone = mutation({
     }
 
     return { fixed };
+  },
+});
+
+/**
+ * Move every open, locally owned task dated before `today` onto `today`.
+ * Used by the optional task rollover setting. Returns how many moved.
+ */
+export const rolloverOverdue = mutation({
+  args: { today: v.string(), includeRecurring: v.optional(v.boolean()) },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Not authenticated");
+    const tasks = await ctx.db
+      .query("tasks")
+      .withIndex("by_userId", (q) => q.eq("userId", identity.subject))
+      .collect();
+    let moved = 0;
+    for (const t of tasks) {
+      if (t.status === "done" || t.source === "google_calendar" || t.parentTaskId) continue;
+      if (t.recurrence && !args.includeRecurring) continue;
+      const d = t.dueDate || t.scheduledDate;
+      if (!d || d >= args.today) continue;
+      await ctx.db.patch("tasks", t._id, { dueDate: args.today, scheduledDate: args.today });
+      moved++;
+    }
+    return moved;
   },
 });

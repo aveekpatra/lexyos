@@ -146,6 +146,7 @@
 }
 
 @theme inline {
+  --font-display: var(--font-cormorant), "Cormorant Garamond", Georgia, serif;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -242,6 +243,24 @@
   }
   .island { box-shadow: var(--island-shadow); }
 
+  /* ── Dialog surface (Linear chrome) ──
+     Large radius, hairline border, layered low-opacity shadow instead of one
+     heavy drop. Shared by every dialog so modals read as one system. */
+  .dialog-surface {
+    border-radius: 20px;
+    border: 1px solid var(--line);
+    box-shadow:
+      0 9px 48px rgba(0, 0, 0, 0.08),
+      0 6px 24px rgba(0, 0, 0, 0.1),
+      0 1px 2px rgba(0, 0, 0, 0.04);
+  }
+  .dark .dialog-surface {
+    box-shadow:
+      0 9px 48px rgba(0, 0, 0, 0.5),
+      0 6px 24px rgba(0, 0, 0, 0.4),
+      0 1px 2px rgba(0, 0, 0, 0.3);
+  }
+
   /* ── Apple "Liquid Glass": frosted floating CONTROLS layer ──
      Reserved for floating controls / menus / panels. Content stays flat. */
   .glass-control {
@@ -253,11 +272,11 @@
   }
   .glass-control:hover { background-color: rgba(255, 255, 255, 0.82); }
   .dark .glass-control {
-    border-color: rgba(255, 255, 255, 0.2);
-    background-color: rgba(255, 255, 255, 0.1);
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+    border-color: transparent;
+    background-color: rgba(255, 255, 255, 0.08);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05), 0 1px 2px rgba(0, 0, 0, 0.35);
   }
-  .dark .glass-control:hover { background-color: rgba(255, 255, 255, 0.16); }
+  .dark .glass-control:hover { background-color: rgba(255, 255, 255, 0.12); }
 
   .glass-surface {
     border: 1.5px solid rgba(255, 255, 255, 0.75);
@@ -288,70 +307,120 @@
   }
 }
 
-/* Command bar glow */
-.command-glow {
-  border: 1px solid #7c3aed40;
-  box-shadow:
-    /* Inner top highlight — 3D raised effect */
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.04),
-    inset 0 0 12px 0 #7c3aed08,
-    /* Close purple glow */
-    0 0 0 1px #7c3aed20,
-    0 0 10px -2px #7c3aed50,
-    0 0 20px -4px #7c3aed35,
-    /* Mid pink glow */
-    0 0 40px -8px #ec489925,
-    /* Far purple halo */
-    0 0 80px -16px #8b5cf620,
-    /* Depth shadow — 3D lift */
-    0 8px 32px -8px rgba(0, 0, 0, 0.6),
-    0 16px 64px -16px rgba(0, 0, 0, 0.4);
+
+/* ── Task description editor (TipTap, markdown on the wire) ──
+   Content layer: flat, readable, no chrome. Sizes step down from the 24px title. */
+.task-prose {
+  font-size: 15px;
+  line-height: 1.65;
+  color: var(--text-secondary);
+  min-height: 160px;
+}
+.task-prose > * + * { margin-top: 0.6em; }
+.task-prose p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: var(--text-faint);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+.task-prose h1, .task-prose h2, .task-prose h3 {
+  color: var(--text-strong);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+}
+.task-prose h1 { font-size: 20px; margin-top: 1.4em; }
+.task-prose h2 { font-size: 17px; margin-top: 1.3em; }
+.task-prose h3 { font-size: 15px; margin-top: 1.2em; }
+.task-prose h1:first-child, .task-prose h2:first-child, .task-prose h3:first-child { margin-top: 0; }
+.task-prose strong { color: var(--text-strong); font-weight: 600; }
+.task-prose a { color: var(--brand); text-decoration: underline; text-underline-offset: 2px; }
+.task-prose ul, .task-prose ol { padding-left: 1.4em; }
+.task-prose ul { list-style: disc; }
+.task-prose ol { list-style: decimal; }
+.task-prose li + li { margin-top: 0.2em; }
+.task-prose li > p { margin: 0; }
+.task-prose blockquote {
+  border-left: 2px solid var(--line-strong);
+  padding-left: 0.9em;
+  color: var(--text-muted);
+}
+.task-prose code {
+  font-size: 0.88em;
+  padding: 0.1em 0.35em;
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text-strong);
+}
+.task-prose pre {
+  padding: 0.75em 1em;
+  border-radius: 12px;
+  background: var(--surface-2);
+  overflow-x: auto;
+}
+.task-prose pre code { padding: 0; background: transparent; font-size: 13px; }
+.task-prose hr { border: 0; border-top: 1px solid var(--line); margin: 1.2em 0; }
+/* Checklists: a round tick control that matches the sub-issue rows. */
+.task-prose ul[data-type="taskList"] { list-style: none; padding-left: 0; }
+.task-prose ul[data-type="taskList"] li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6em;
+}
+.task-prose ul[data-type="taskList"] li > label { flex: 0 0 auto; margin-top: 0.3em; }
+.task-prose ul[data-type="taskList"] li > div { flex: 1 1 auto; min-width: 0; }
+.task-prose ul[data-type="taskList"] input[type="checkbox"] {
+  appearance: none;
+  width: 15px; height: 15px;
+  border-radius: 999px;
+  border: 1.5px solid var(--line-strong);
+  display: block;
+  cursor: pointer;
+  transition: background-color 120ms, border-color 120ms;
+}
+.task-prose ul[data-type="taskList"] input[type="checkbox"]:checked {
+  background: var(--brand);
+  border-color: var(--brand);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 8' fill='none'%3E%3Cpath d='M1.5 4L3.2 5.7L6.5 2.3' stroke='white' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-size: 8px 8px;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+.task-prose ul[data-type="taskList"] li[data-checked="true"] > div {
+  color: var(--text-faint);
+  text-decoration: line-through;
 }
 
-/* Email reading pane — always light mode so HTML emails render correctly */
-:root.dark .email-reading-pane {
-  --surface-0: #ffffff;
-  --surface-1: #ffffff;
-  --line: #e7ebf2;
-  --line-strong: #d3dae5;
-  --text-faint: #98a0ad;
-  --text-muted: #667085;
-  --text-secondary: #475467;
-  --text-strong: #101828;
-  --foreground: #101828;
-  --background: #ffffff;
-  --color-foreground: #101828;
-  --color-surface-0: #ffffff;
-  --color-surface-1: #ffffff;
-  --color-line: #e7ebf2;
-  --color-line-strong: #d3dae5;
-  --color-text-faint: #98a0ad;
-  --color-text-muted: #667085;
-  --color-text-secondary: #475467;
-  --color-text-strong: #101828;
-  background-color: #ffffff;
-  color: #101828;
+/* Smoothstep scrim under the floating task header: content dissolves, no seam. */
+.task-header-scrim {
+  background: var(--surface-0);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  mask-image: linear-gradient(
+    to bottom,
+    rgba(0,0,0,1) 0%, rgba(0,0,0,0.99) 10%, rgba(0,0,0,0.96) 20%, rgba(0,0,0,0.9) 30%,
+    rgba(0,0,0,0.78) 40%, rgba(0,0,0,0.6) 50%, rgba(0,0,0,0.4) 60%, rgba(0,0,0,0.22) 70%,
+    rgba(0,0,0,0.1) 80%, rgba(0,0,0,0.03) 90%, rgba(0,0,0,0) 100%
+  );
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    rgba(0,0,0,1) 0%, rgba(0,0,0,0.99) 10%, rgba(0,0,0,0.96) 20%, rgba(0,0,0,0.9) 30%,
+    rgba(0,0,0,0.78) 40%, rgba(0,0,0,0.6) 50%, rgba(0,0,0,0.4) 60%, rgba(0,0,0,0.22) 70%,
+    rgba(0,0,0,0.1) 80%, rgba(0,0,0,0.03) 90%, rgba(0,0,0,0) 100%
+  );
 }
 
-/* Email body rendering */
-.email-body {
-  word-wrap: break-word;
-  overflow-wrap: break-word;
-}
-
-
-/* Collapse Gmail's auto-generated div/p wrappers that add excessive spacing,
-   but preserve intentional blank lines (empty div/p with just a <br>) */
-.email-body div,
-.email-body p {
-  margin: 0;
-  padding: 0;
-  min-height: 1lh;
-}
-
-/* Hide quoted reply content in email thread view */
-.email-body .gmail_quote,
-.email-body .gmail_extra,
-.email-body blockquote {
-  display: none;
+/* Sidebar month picker: a dot under days that have open tasks. Selected day inverts. */
+.mini-cal .day-busy > button::after {
+  content: "";
+  position: absolute;
+  bottom: 3px;
+  left: 50%;
+  width: 3px;
+  height: 3px;
+  margin-left: -1.5px;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.55;
 }

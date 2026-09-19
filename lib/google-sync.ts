@@ -157,6 +157,47 @@ export async function syncTaskCompletionToGoogle(
   await updateGoogleEvent(calId, task.googleEventId!, { summary: newTitle });
 }
 
+/** Shape returned by tasks.toggleComplete / bulkUpdateStatus. */
+export interface CompletionResult {
+  googleEventId?: string;
+  googleCalendarId?: string;
+  rolled: boolean;
+  next?: { date: string; start?: string; end?: string };
+}
+
+/**
+ * Sync the outcome of completing a task.
+ * - Repeating task (`rolled`): the live task moved to `next`, so move its Google
+ *   event there and make sure the title has no [Done] prefix.
+ * - Otherwise: toggle the [Done] prefix like before.
+ *
+ * Pass the task state from BEFORE the mutation and `wasDone` for that state.
+ */
+export async function syncCompletionResultToGoogle(
+  task: Doc<"tasks">,
+  result: CompletionResult,
+  wasDone: boolean,
+): Promise<void> {
+  if (!shouldSyncToGoogle(task)) return;
+  if (!result.rolled || !result.next) {
+    await syncTaskCompletionToGoogle(task, !wasDone);
+    return;
+  }
+  const { next } = result;
+  const changes: Record<string, unknown> = {
+    title: task.title.replace(/^\[Done\]\s*/, ""),
+    dueDate: next.date,
+  };
+  if (next.start) {
+    changes.dueTime = next.start;
+    changes.scheduledStartTime = next.start;
+    if (next.end) changes.scheduledEndTime = next.end;
+  } else {
+    changes.clearDueTime = true;
+  }
+  await syncTaskUpdateToGoogle(task, changes);
+}
+
 /**
  * Delete a task's corresponding Google Calendar event.
  */

@@ -2,30 +2,38 @@
 
 /**
  * Unified right-click context menu for tasks/events.
- * Used by KanbanCard, ResizableTaskBlock, sidebar items, month view cells.
+ * Used by KanbanCard, sidebar items, and month view.
  * Wraps children with ContextMenu + provides all task actions.
  */
 
-import React, { useState, useCallback } from "react";
+import React, { useCallback } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
-import type { Doc, Id } from "@/convex/_generated/dataModel";
+import type { Doc } from "@/convex/_generated/dataModel";
 import { ContextMenu, ContextMenuTrigger, ContextMenuPopup } from "@/components/ui/context-menu";
 import {
   MenuItem, MenuSub, MenuSubTrigger, MenuSubPopup, MenuSeparator,
 } from "@/components/ui/menu";
-import { HugeiconsIcon } from "@hugeicons/react";
-import {
-  Edit01Icon, Delete01Icon, Tick01Icon,
-  Calendar03Icon, Folder01Icon,
-} from "@hugeicons/core-free-icons";
 import { format, addDays, startOfWeek, endOfWeek, addWeeks, endOfMonth } from "date-fns";
-import { syncTaskUpdateToGoogle, syncTaskCompletionToGoogle, syncTaskDeletionToGoogle } from "@/lib/google-sync";
-import { TaskEditDialog } from "@/components/kanban/KanbanCard";
+import { syncTaskUpdateToGoogle, syncCompletionResultToGoogle, syncTaskDeletionToGoogle } from "@/lib/google-sync";
+import { RECURRENCE_PRESETS, normalizeRecurrence, matchPreset, shortRecurrenceLabel } from "@/convex/lib/recurrence";
+import { startFocus } from "@/lib/focus-store";
+import { useSettings } from "@/lib/settings";
+import { useRouter } from "next/navigation";
 import { PRIORITY_COLORS, PRIORITY_LABELS } from "@/lib/constants";
+import {
+  IoCalendar,
+  IoCheckmark,
+  IoCreate,
+  IoFolder,
+  IoRepeat,
+  IoTrash,
+  IoTimer,
+} from "react-icons/io5";
+import { Folder } from "@/components/ui/folder";
 
-const itemClass = "rounded-lg px-3 py-2 text-sm text-text-strong hover:bg-line";
-const subPopupClass = "w-[220px] rounded-xl border border-line-strong bg-surface-0 p-1.5 shadow-[0_8px_32px_rgba(0,0,0,0.5)]";
+const itemClass = "";
+const subPopupClass = "w-[220px]";
 
 export function TaskContextMenu({ task, children, className, style }: {
   task: Doc<"tasks">;
@@ -37,7 +45,8 @@ export function TaskContextMenu({ task, children, className, style }: {
   const toggleCompleteMut = useMutation(api.tasks.toggleComplete);
   const removeTaskMut = useMutation(api.tasks.remove);
   const projects = useQuery(api.projects.list, { status: "active" });
-  const [editOpen, setEditOpen] = useState(false);
+  const router = useRouter();
+  const { settings } = useSettings();
 
   const syncUpdate = useCallback(async (args: Parameters<typeof updateTask>[0]) => {
     await updateTask(args);
@@ -51,8 +60,8 @@ export function TaskContextMenu({ task, children, className, style }: {
 
   const toggleComplete = useCallback(async () => {
     const wasDone = task.status === "done";
-    await toggleCompleteMut({ id: task._id });
-    try { await syncTaskCompletionToGoogle(task, !wasDone); } catch (err) { console.warn("Google sync failed:", err); }
+    const result = await toggleCompleteMut({ id: task._id, userDate: format(new Date(), "yyyy-MM-dd") });
+    try { await syncCompletionResultToGoogle(task, result, wasDone); } catch (err) { console.warn("Google sync failed:", err); }
   }, [toggleCompleteMut, task]);
 
   const removeTask = useCallback(async () => {
@@ -63,6 +72,9 @@ export function TaskContextMenu({ task, children, className, style }: {
   const isDone = task.status === "done";
   const color = PRIORITY_COLORS[task.priority] || "#a1a1aa";
   const now = new Date();
+  const anchorDate = task.dueDate || task.scheduledDate || format(now, "yyyy-MM-dd");
+  const recurrence = normalizeRecurrence(task.recurrence, anchorDate);
+  const activePreset = recurrence ? matchPreset(recurrence, anchorDate) : undefined;
 
   const datePresets = [
     { label: "Today", date: format(now, "yyyy-MM-dd") },
@@ -78,16 +90,16 @@ export function TaskContextMenu({ task, children, className, style }: {
         <ContextMenuTrigger className={className} style={style}>
           {children}
         </ContextMenuTrigger>
-        <ContextMenuPopup className="w-[220px] rounded-xl border border-line-strong bg-surface-0 p-1.5 shadow-[0_8px_32px_rgba(0,0,0,0.5)]">
-          {/* Edit */}
-          <MenuItem onClick={() => setEditOpen(true)} className={itemClass}>
+        <ContextMenuPopup className="w-[220px]">
+          {/* Open detail */}
+          <MenuItem onClick={() => router.push(`/task/${task._id}`)} className={itemClass}>
             <span className="flex items-center gap-2.5">
-              <HugeiconsIcon icon={Edit01Icon} size={14} className="text-text-muted" />
+              <IoCreate size={14} className="text-text-muted" />
               Edit
             </span>
           </MenuItem>
 
-          <MenuSeparator className="my-1 border-line" />
+          <MenuSeparator />
 
           {/* Priority submenu */}
           <MenuSub>
@@ -102,13 +114,13 @@ export function TaskContextMenu({ task, children, className, style }: {
                 <MenuItem
                   key={p}
                   onClick={() => syncUpdate({ id: task._id, priority: p })}
-                  className={`${itemClass} ${task.priority === p ? "bg-brand-bg text-brand-strong" : ""}`}
+                  className={`${itemClass} ${task.priority === p ? "!text-brand-strong" : ""}`}
                 >
                   <span className="flex items-center gap-2.5">
                     <span className="size-2.5 rounded-full" style={{ backgroundColor: PRIORITY_COLORS[p] }} />
                     {PRIORITY_LABELS[p]}
                   </span>
-                  {task.priority === p && <span className="ml-auto text-[10px] text-text-muted">✓</span>}
+                  {task.priority === p && <IoCheckmark className="ml-auto size-3.5 !text-brand-strong" />}
                 </MenuItem>
               ))}
             </MenuSubPopup>
@@ -118,7 +130,7 @@ export function TaskContextMenu({ task, children, className, style }: {
           <MenuSub>
             <MenuSubTrigger className={itemClass}>
               <span className="flex items-center gap-2.5">
-                <HugeiconsIcon icon={Calendar03Icon} size={14} className="text-text-muted" />
+                <IoCalendar size={14} className="text-text-muted" />
                 {task.dueDate ? format(new Date(task.dueDate + "T00:00:00"), "MMM d") : "Date"}
               </span>
             </MenuSubTrigger>
@@ -127,15 +139,15 @@ export function TaskContextMenu({ task, children, className, style }: {
                 <MenuItem
                   key={d.label}
                   onClick={() => syncUpdate({ id: task._id, dueDate: d.date })}
-                  className={`${itemClass} ${task.dueDate === d.date ? "bg-brand-bg text-brand-strong" : ""}`}
+                  className={`${itemClass} ${task.dueDate === d.date ? "!text-brand-strong" : ""}`}
                 >
                   {d.label}
-                  {task.dueDate === d.date && <span className="ml-auto text-[10px] text-text-muted">✓</span>}
+                  {task.dueDate === d.date && <IoCheckmark className="ml-auto size-3.5 !text-brand-strong" />}
                 </MenuItem>
               ))}
               {task.dueDate && (
                 <>
-                  <MenuSeparator className="my-1 border-line" />
+                  <MenuSeparator />
                   <MenuItem
                     onClick={() => syncUpdate({ id: task._id, clearDueDate: true } as Parameters<typeof updateTask>[0])}
                     className={`${itemClass} text-[#ef4444]`}
@@ -151,40 +163,86 @@ export function TaskContextMenu({ task, children, className, style }: {
           <MenuSub>
             <MenuSubTrigger className={itemClass}>
               <span className="flex items-center gap-2.5">
-                <HugeiconsIcon icon={Folder01Icon} size={14} className="text-text-muted" />
+                <IoFolder size={14} className="text-text-muted" />
                 Project
               </span>
             </MenuSubTrigger>
             <MenuSubPopup className={subPopupClass}>
               <MenuItem
                 onClick={() => syncUpdate({ id: task._id, clearProjectId: true } as Parameters<typeof updateTask>[0])}
-                className={`${itemClass} ${!task.projectId ? "bg-brand-bg text-brand-strong" : ""}`}
+                className={`${itemClass} ${!task.projectId ? "!text-brand-strong" : ""}`}
               >
                 No project
-                {!task.projectId && <span className="ml-auto text-[10px] text-text-muted">✓</span>}
+                {!task.projectId && <IoCheckmark className="ml-auto size-3.5 !text-brand-strong" />}
               </MenuItem>
               {projects?.map((p) => (
                 <MenuItem
                   key={p._id}
                   onClick={() => syncUpdate({ id: task._id, projectId: p._id })}
-                  className={`${itemClass} ${task.projectId === p._id ? "bg-brand-bg text-brand-strong" : ""}`}
+                  className={`${itemClass} ${task.projectId === p._id ? "!text-brand-strong" : ""}`}
                 >
                   <span className="flex items-center gap-2.5">
-                    <span className="size-2 rounded-full" style={{ backgroundColor: p.color }} />
+                    <Folder className="size-4" style={{ color: p.color }} />
                     {p.name}
                   </span>
-                  {task.projectId === p._id && <span className="ml-auto text-[10px] text-text-muted">✓</span>}
+                  {task.projectId === p._id && <IoCheckmark className="ml-auto size-3.5 !text-brand-strong" />}
                 </MenuItem>
               ))}
             </MenuSubPopup>
           </MenuSub>
 
-          <MenuSeparator className="my-1 border-line" />
+          <MenuItem
+              onClick={() => startFocus({ taskId: task._id, taskTitle: task.title, lengths: { focus: settings.pomodoro.workMin, short: settings.pomodoro.shortBreakMin, long: settings.pomodoro.longBreakMin, rounds: settings.pomodoro.roundsBeforeLongBreak } })}
+              className={itemClass}
+            >
+              <span className="flex items-center gap-2.5">
+                <IoTimer size={14} className="text-text-muted" />
+                Start focus
+              </span>
+            </MenuItem>
+
+          {/* Repeat submenu: presets only; the task page holds the custom editor */}
+          <MenuSub>
+            <MenuSubTrigger className={itemClass}>
+              <span className="flex items-center gap-2.5">
+                <IoRepeat size={14} className="text-text-muted" />
+                {recurrence ? shortRecurrenceLabel(recurrence) : "Repeat"}
+              </span>
+            </MenuSubTrigger>
+            <MenuSubPopup className={subPopupClass}>
+              {RECURRENCE_PRESETS.map((p) => (
+                <MenuItem
+                  key={p.id}
+                  onClick={() => syncUpdate({ id: task._id, recurrence: p.build(anchorDate) })}
+                  className={`${itemClass} ${activePreset === p.id ? "!text-brand-strong" : ""}`}
+                >
+                  {p.label}
+                  {activePreset === p.id && <IoCheckmark className="ml-auto size-3.5 !text-brand-strong" />}
+                </MenuItem>
+              ))}
+              <MenuItem onClick={() => router.push(`/task/${task._id}`)} className={itemClass}>
+                Custom...
+              </MenuItem>
+              {recurrence && (
+                <>
+                  <MenuSeparator />
+                  <MenuItem
+                    onClick={() => syncUpdate({ id: task._id, clearRecurrence: true } as Parameters<typeof updateTask>[0])}
+                    className={`${itemClass} text-[#ef4444]`}
+                  >
+                    Stop repeating
+                  </MenuItem>
+                </>
+              )}
+            </MenuSubPopup>
+          </MenuSub>
+
+          <MenuSeparator />
 
           {/* Mark done */}
           <MenuItem onClick={toggleComplete} className={itemClass}>
             <span className="flex items-center gap-2.5">
-              <HugeiconsIcon icon={Tick01Icon} size={14} className="text-text-muted" />
+              <IoCheckmark size={14} className="text-text-muted" />
               {isDone ? "Mark undone" : "Mark done"}
             </span>
           </MenuItem>
@@ -192,15 +250,12 @@ export function TaskContextMenu({ task, children, className, style }: {
           {/* Delete */}
           <MenuItem onClick={removeTask} className={`${itemClass} text-[#ef4444]`}>
             <span className="flex items-center gap-2.5">
-              <HugeiconsIcon icon={Delete01Icon} size={14} />
+              <IoTrash size={14} />
               Delete
             </span>
           </MenuItem>
         </ContextMenuPopup>
       </ContextMenu>
-
-      {/* Edit dialog */}
-      <TaskEditDialog task={task} open={editOpen} onOpenChange={setEditOpen} />
     </>
   );
 }

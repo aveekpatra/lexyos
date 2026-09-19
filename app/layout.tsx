@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Poppins, Inter } from "next/font/google";
+import { Poppins, Inter, Cormorant_Garamond } from "next/font/google";
 import "./globals.css";
 import ConvexClientProvider from "@/components/ConvexClientProvider";
 import { ThemeProvider } from "@/components/ThemeProvider";
@@ -11,6 +11,13 @@ const poppins = Poppins({
   subsets: ["latin", "latin-ext"],
 });
 
+// Cormorant Garamond: the wordmark only.
+const cormorant = Cormorant_Garamond({
+  variable: "--font-cormorant",
+  weight: ["500", "600", "700"],
+  subsets: ["latin"],
+});
+
 // Inter — used by the AI chat panel so its type matches the Linear reference.
 const inter = Inter({
   variable: "--font-inter",
@@ -18,7 +25,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "UniFocus",
+  title: "Mindbook",
   description: "AI-powered productivity system",
 };
 
@@ -38,7 +45,7 @@ export default function RootLayout({
         />
       </head>
       <body
-        className={`${poppins.variable} ${inter.variable} antialiased`}
+        className={`${poppins.variable} ${inter.variable} ${cormorant.variable} antialiased`}
       >
         <ThemeProvider>
           <ClerkProvider dynamic>

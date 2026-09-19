@@ -1,12 +1,13 @@
 import { v } from "convex/values";
+import { agentValidator, getIdentity } from "./lib/actor";
 import { query, mutation } from "./_generated/server";
 
 export const list = query({
-  args: {
+  args: { agent: agentValidator,
     status: v.optional(v.union(v.literal("active"), v.literal("archived"))),
   },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
+    const identity = await getIdentity(ctx, args.agent);
     if (!identity) return [];
     const userId = identity.subject;
 
@@ -27,9 +28,9 @@ export const list = query({
 });
 
 export const getById = query({
-  args: { id: v.id("projects") },
+  args: { agent: agentValidator, id: v.id("projects") },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
+    const identity = await getIdentity(ctx, args.agent);
     if (!identity) return null;
     const project = await ctx.db.get("projects", args.id);
     if (!project || project.userId !== identity.subject) return null;
@@ -38,9 +39,9 @@ export const getById = query({
 });
 
 export const getTaskCounts = query({
-  args: { id: v.id("projects") },
+  args: { agent: agentValidator, id: v.id("projects") },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
+    const identity = await getIdentity(ctx, args.agent);
     if (!identity) return null;
     const project = await ctx.db.get("projects", args.id);
     if (!project || project.userId !== identity.subject) return null;
@@ -63,7 +64,7 @@ export const getTaskCounts = query({
 });
 
 export const create = mutation({
-  args: {
+  args: { agent: agentValidator,
     name: v.string(),
     description: v.optional(v.string()),
     color: v.string(),
@@ -78,7 +79,7 @@ export const create = mutation({
     notes: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
+    const identity = await getIdentity(ctx, args.agent);
     if (!identity) throw new Error("Not authenticated");
     const userId = identity.subject;
 
@@ -107,7 +108,7 @@ export const create = mutation({
 });
 
 export const update = mutation({
-  args: {
+  args: { agent: agentValidator,
     id: v.id("projects"),
     name: v.optional(v.string()),
     description: v.optional(v.string()),
@@ -125,7 +126,7 @@ export const update = mutation({
     sortOrder: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
+    const identity = await getIdentity(ctx, args.agent);
     if (!identity) throw new Error("Not authenticated");
     const project = await ctx.db.get("projects", args.id);
     if (!project || project.userId !== identity.subject) throw new Error("Project not found");
@@ -190,9 +191,9 @@ export const reorder = mutation({
 });
 
 export const remove = mutation({
-  args: { id: v.id("projects") },
+  args: { agent: agentValidator, id: v.id("projects") },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
+    const identity = await getIdentity(ctx, args.agent);
     if (!identity) throw new Error("Not authenticated");
     const project = await ctx.db.get("projects", args.id);
     if (!project || project.userId !== identity.subject) throw new Error("Project not found");

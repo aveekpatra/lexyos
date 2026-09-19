@@ -7,18 +7,18 @@ import { useVoiceChat } from "@/lib/ai/useVoiceChat";
 import { motion, AnimatePresence } from "motion/react";
 import type { IconType } from "react-icons";
 import {
-  IoSparkles,
-  IoRemove,
-  IoExpand,
-  IoContract,
-  IoClose,
-  IoMic,
+  IoAlertCircle,
   IoArrowUp,
+  IoCalendar,
+  IoClose,
+  IoContract,
+  IoExpand,
   IoFlash,
   IoHelpCircle,
+  IoMic,
+  IoRemove,
+  IoSparkles,
   IoTime,
-  IoCalendar,
-  IoAlertCircle,
 } from "react-icons/io5";
 
 type ChatMsg = {
@@ -26,6 +26,7 @@ type ChatMsg = {
   role: "user" | "assistant";
   text: string;
   toolCalls?: Array<{ toolName: string; input: unknown; output: unknown; error?: boolean }>;
+  reasoning?: string;
 };
 
 // Module-level cache (survives re-renders, hydrated from Convex on load)
@@ -40,11 +41,21 @@ const SUGGESTION_CHIPS: { label: string; Icon: IconType }[] = [
   { label: "What's overdue?", Icon: IoAlertCircle },
 ];
 
-const FloatingPill = memo(function FloatingPill() {
+const FloatingPill = memo(function FloatingPill({
+  open,
+  onOpenChange,
+  seed,
+  onSeedConsumed,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  /** A query handed over from unified search — sent as a message when it changes. */
+  seed?: string;
+  onSeedConsumed?: () => void;
+}) {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<ChatMsg[]>(_persistedMessages);
   const [isLoading, setIsLoading] = useState(false);
-  const [isOpen, setIsOpen] = useState(false);
   const [isMaximized, setIsMaximized] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -101,6 +112,7 @@ const FloatingPill = memo(function FloatingPill() {
         role: "assistant",
         text: responseText,
         toolCalls: data.toolCalls,
+        reasoning: typeof data.reasoning === "string" ? data.reasoning : undefined,
       };
       setMessages((prev) => [...prev, assistantMsg]);
       return responseText;
@@ -128,19 +140,14 @@ const FloatingPill = memo(function FloatingPill() {
     }, 500);
   }, [messages, saveChat]);
 
-  // Ctrl+K opens + focuses; Escape closes
+  // Escape closes. Ctrl/Cmd+/ is owned by unified search, not by this panel.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === "k") {
-        e.preventDefault();
-        setIsOpen(true);
-        setTimeout(() => inputRef.current?.focus(), 100);
-      }
-      if (e.key === "Escape" && isOpen) setIsOpen(false);
+      if (e.key === "Escape" && open) onOpenChange(false);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [isOpen]);
+  }, [open, onOpenChange]);
 
   // Auto-scroll
   useEffect(() => {
@@ -149,8 +156,22 @@ const FloatingPill = memo(function FloatingPill() {
 
   // Focus input when panel opens
   useEffect(() => {
-    if (isOpen) setTimeout(() => inputRef.current?.focus(), 150);
-  }, [isOpen]);
+    if (open) setTimeout(() => inputRef.current?.focus(), 150);
+  }, [open]);
+
+  // Unified search hand-off: send the seeded query as soon as it arrives.
+  // Reset on clear so the same query can be handed over again later.
+  const seedRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!seed) {
+      seedRef.current = undefined;
+      return;
+    }
+    if (seed === seedRef.current) return;
+    seedRef.current = seed;
+    sendMessage(seed);
+    onSeedConsumed?.();
+  }, [seed, sendMessage, onSeedConsumed]);
 
   const handleSubmit = useCallback(() => {
     if (!input.trim() || isLoading) return;
@@ -176,16 +197,16 @@ const FloatingPill = memo(function FloatingPill() {
     <>
       {/* ===== COLLAPSED: floating trigger ===== */}
       <AnimatePresence>
-        {!isOpen && (
+        {!open && (
           <motion.button
             type="button"
-            onClick={() => setIsOpen(true)}
+            onClick={() => onOpenChange(true)}
             initial={{ scale: 0.8, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             exit={{ scale: 0.8, opacity: 0 }}
             transition={{ duration: 0.2, ease: "easeOut" }}
             className="fixed bottom-5 right-5 z-50 flex size-12 items-center justify-center rounded-full border-[0.5px] border-black/[0.08] bg-white shadow-[0_6px_18px_rgba(0,0,0,0.06),0_3px_9px_rgba(0,0,0,0.06),0_1px_1px_rgba(0,0,0,0.06)] transition-transform duration-200 hover:scale-105 dark:border-white/10 dark:bg-[#1c1c1f]"
-            title="Open Agent (Ctrl+K)"
+            title="Open Agent"
           >
             <IoSparkles size={20} className="text-text-strong" />
             {hasMessages && (
@@ -197,7 +218,7 @@ const FloatingPill = memo(function FloatingPill() {
 
       {/* ===== EXPANDED: chat panel (Linear agents-panel spec) ===== */}
       <AnimatePresence>
-        {isOpen && (
+        {open && (
           <motion.div
             ref={containerRef}
             initial={{ opacity: 0, y: 16, scale: 0.98 }}
@@ -215,7 +236,7 @@ const FloatingPill = memo(function FloatingPill() {
               <span className="flex-1 text-[13px] font-medium text-[#17181b] dark:text-white">
                 Agent
               </span>
-              <button type="button" onClick={() => setIsOpen(false)} title="Minimize" className={headerBtn}>
+              <button type="button" onClick={() => onOpenChange(false)} title="Minimize" className={headerBtn}>
                 <IoRemove size={16} />
               </button>
               <button
@@ -226,7 +247,7 @@ const FloatingPill = memo(function FloatingPill() {
               >
                 {isMaximized ? <IoContract size={14} /> : <IoExpand size={14} />}
               </button>
-              <button type="button" onClick={() => setIsOpen(false)} title="Close" className={headerBtn}>
+              <button type="button" onClick={() => onOpenChange(false)} title="Close" className={headerBtn}>
                 <IoClose size={17} />
               </button>
             </div>
@@ -247,6 +268,12 @@ const FloatingPill = memo(function FloatingPill() {
                           ? "max-w-[80%] rounded-br-md bg-black/[0.05] px-3 py-1.5 text-text-strong dark:bg-white/[0.08]"
                           : "flex-1 text-text-strong"
                       }`}>
+                        {m.reasoning && (
+                          <details className="mb-2 rounded-lg bg-black/[0.03] px-3 py-2 text-xs text-text-muted dark:bg-white/[0.05]">
+                            <summary className="cursor-pointer select-none font-medium text-text-secondary">Thinking</summary>
+                            <p className="mt-1.5 whitespace-pre-wrap leading-relaxed">{m.reasoning}</p>
+                          </details>
+                        )}
                         {m.toolCalls && m.toolCalls.length > 0 && (
                           <div className="mb-2 flex flex-col gap-1">
                             {m.toolCalls.map((tc, i) => (
@@ -275,7 +302,7 @@ const FloatingPill = memo(function FloatingPill() {
                   <IoSparkles size={17} className="mb-2 text-[#62646a] dark:text-white/50" />
                   <p className="mb-1 text-[13px] font-semibold text-[#17181b] dark:text-white">How can I help?</p>
                   <p className="mb-5 text-center text-[13px] text-[#62646a] dark:text-white/60">
-                    Ask anything or tell UniFocus what you need
+                    Ask anything or tell Mindbook what you need
                   </p>
                   <div className="flex flex-wrap justify-center gap-2">
                     {SUGGESTION_CHIPS.map(({ label, Icon }) => (

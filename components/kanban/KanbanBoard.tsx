@@ -1,441 +1,412 @@
 "use client";
 
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { motion } from "motion/react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Doc } from "@/convex/_generated/dataModel";
-import KanbanCard, { TaskEditDialog } from "./KanbanCard";
+import KanbanCard from "./KanbanCard";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Menu, MenuTrigger, MenuPopup, MenuItem, MenuSeparator, MenuCheckboxItem,
-} from "@/components/ui/menu";
-import { IoArrowDownCircle, IoFilterCircle, IoCheckmarkCircle } from "react-icons/io5";
 import { Segmented } from "@/components/ui/segmented";
-import { glassAction, glassActionActive, bluePill } from "@/lib/ui/chrome";
+import { SidebarGlyph } from "@/components/ui/sidebar-glyph";
+import { Menu, MenuTrigger, MenuPopup, MenuSeparator, MenuCheckboxItem, MenuGroup, MenuGroupLabel, MenuRadioGroup, MenuRadioItem } from "@/components/ui/menu";
+import { DatePickerPopover } from "@/components/tasks/TaskPropertyPopovers";
+import { glassAction, glassIconButton, BOARD_COLUMN_WIDTH } from "@/lib/ui/chrome";
 import {
-  format, isToday, startOfWeek, endOfWeek, addWeeks, addDays,
-  isWithinInterval, startOfMonth, endOfMonth,
-  parseISO, isBefore, startOfDay, isSameDay, isSameMonth,
+  format, isToday, isTomorrow, isYesterday, startOfWeek, endOfWeek, addWeeks, addDays,
+  endOfMonth, parseISO, isBefore, startOfDay, isSameDay, differenceInCalendarDays,
 } from "date-fns";
-import { isGoogleCalEvent, getOverdueTasks, getTasksForDate } from "@/lib/task-utils";
-import { PRIORITY_COLORS, PRIORITY_LABELS } from "@/lib/constants";
+import { getOverdueTasks } from "@/lib/task-utils";
+import { useTimeboxOpen } from "@/lib/timebox-store";
+import { useSettings, matchesShortcut } from "@/lib/settings";
+import { useQuickAdd } from "@/lib/quick-add";
+import { durationMinutes } from "@/lib/time-utils";
+import {
+  IoCalendar,
+  IoClose,
+  IoChevronBack,
+  IoChevronForward,
+  IoAlertCircle,
+  IoAddCircle,
+  IoEllipsisHorizontal,
+} from "react-icons/io5";
+import { Folder } from "@/components/ui/folder";
+
+/*
+ * Inbox: every task, grouped by time. Two ways to look at it:
+ * - Overview: Today / This week / Next week / This month buckets.
+ * - Days: one column per calendar day, endless in both directions. Scroll to
+ *   wherever you like; the strip grows as you approach either edge. Jump to
+ *   today or any date from the header.
+ */
+
+type View = "overview" | "days";
+type SortBy = "priority" | "date" | "created" | "alpha";
+const SORT_LABELS: Record<SortBy, string> = {
+  priority: "Priority", date: "Due date", created: "Recently added", alpha: "Alphabetical",
+};
 
 type Col = {
   id: string;
   title: string;
   subtitle?: string;
-  shortcut: string;
+  shortcut?: string;
+  /** Exact calendar day this column represents (Days view). */
+  date?: string;
+  /** Date given to a task created in or dropped on this column. */
+  dropDate: string;
+  /** Which dates belong to this column (for done tasks). */
+  covers: (date: Date) => boolean;
   tasks: Doc<"tasks">[];
   overdueTasks: Doc<"tasks">[];
-  doneTasks: Doc<"tasks">[];
+  isToday?: boolean;
 };
 
-type SortBy = "priority" | "date" | "created" | "alpha";
-type FilterPriority = Set<string>;
+const DAY_STR = (d: Date) => format(d, "yyyy-MM-dd");
+const PAST_DAYS = 7;
+const FUTURE_DAYS = 30;
+const GROW_BY = 14;
+const COLUMN_GAP = 12; // must equal the row gap and the scroll padding
 
-const SORT_LABELS: Record<SortBy, string> = {
-  priority: "Priority", date: "Due date", created: "Recently added", alpha: "Alphabetical",
-};
+function persisted(key: string, fallback: string): string {
+  if (typeof window === "undefined") return fallback;
+  try { return localStorage.getItem(key) || fallback; } catch { return fallback; }
+}
 
 export default function KanbanBoard() {
   const tasks = useQuery(api.tasks.list, {});
   const projects = useQuery(api.projects.list, { status: "active" });
-  const [view, setViewRaw] = useState<"overview" | "d" | "w" | "m">(() => {
-    if (typeof window === "undefined") return "overview";
-    return (localStorage.getItem("unifocus:kanban:view") as "overview" | "d" | "w" | "m") || "overview";
-  });
-  const setView = useCallback((v: "overview" | "d" | "w" | "m") => {
+  const [view, setViewRaw] = useState<View>(() => (persisted("unifocus:kanban:view", "overview") === "days" ? "days" : "overview"));
+  const setView = useCallback((v: View) => {
     setViewRaw(v);
     try { localStorage.setItem("unifocus:kanban:view", v); } catch {}
   }, []);
   const [activeAdd, setActiveAdd] = useState<string | null>(null);
-  const [showDone, setShowDoneRaw] = useState(() => {
-    if (typeof window === "undefined") return false;
-    return localStorage.getItem("unifocus:kanban:showDone") === "true";
-  });
-  const setShowDone = useCallback((v: boolean | ((prev: boolean) => boolean)) => {
-    setShowDoneRaw((prev) => {
-      const next = typeof v === "function" ? v(prev) : v;
-      try { localStorage.setItem("unifocus:kanban:showDone", String(next)); } catch {}
-      return next;
-    });
+  const [showDone, setShowDoneRaw] = useState(() => persisted("unifocus:kanban:showDone", "false") === "true");
+  const setShowDone = useCallback((v: boolean) => {
+    setShowDoneRaw(v);
+    try { localStorage.setItem("unifocus:kanban:showDone", String(v)); } catch {}
   }, []);
-  const [sortBy, setSortByRaw] = useState<SortBy>(() => {
-    if (typeof window === "undefined") return "priority";
-    return (localStorage.getItem("unifocus:kanban:sort") as SortBy) || "priority";
-  });
+  const [sortBy, setSortByRaw] = useState<SortBy>(() => (persisted("unifocus:kanban:sort", "priority") as SortBy));
   const setSortBy = useCallback((v: SortBy) => {
     setSortByRaw(v);
     try { localStorage.setItem("unifocus:kanban:sort", v); } catch {}
   }, []);
-  const [filterPriority, setFilterPriority] = useState<FilterPriority>(new Set(["p1", "p2", "p3", "p4"]));
-  const [filterProject, setFilterProject] = useState<string | null>(null); // null = all
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const [timeboxOpen, setTimeboxOpen] = useTimeboxOpen();
+  const { settings } = useSettings();
+  const weekStartsOn = settings.calendar.weekStartsOn;
+  const sc = settings.shortcuts;
+  const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Sort function
+  // Days view window as day offsets from today. Grows when you near an edge.
+  const [range, setRange] = useState({ from: -PAST_DAYS, to: FUTURE_DAYS });
+  const pendingPrepend = useRef(0);
+
+  // Project filter lives in the URL so the Filter menu and deep links agree.
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const filterProject = searchParams.get("project");
+  const dateParam = searchParams.get("date");
+  const overdueView = searchParams.get("view") === "overdue";
+  const setFilterProject = useCallback((id: string | null) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (id === null) params.delete("project"); else params.set("project", id);
+    const qs = params.toString();
+    router.replace(qs ? `/timeline?${qs}` : "/timeline", { scroll: false });
+  }, [router, searchParams]);
+  const activeProject = useMemo(
+    () => (filterProject ? projects?.find((p) => p._id === filterProject) ?? null : null),
+    [projects, filterProject],
+  );
+
   const sortTasks = useCallback((list: Doc<"tasks">[]) => {
     const sorted = [...list];
     switch (sortBy) {
-      case "priority": {
-        const order = { p1: 0, p2: 1, p3: 2, p4: 3 };
-        sorted.sort((a, b) => (order[a.priority] ?? 3) - (order[b.priority] ?? 3));
-        break;
-      }
+      case "priority": { const o = { p1: 0, p2: 1, p3: 2, p4: 3 }; sorted.sort((a, b) => (o[a.priority] ?? 3) - (o[b.priority] ?? 3)); break; }
       case "date":
         sorted.sort((a, b) => {
-          const da = a.dueDate || a.scheduledDate || "9999";
-          const db = b.dueDate || b.scheduledDate || "9999";
-          const dateCmp = da.localeCompare(db);
-          if (dateCmp !== 0) return dateCmp;
-          // Same date — sort by time (dueTime or scheduledStartTime)
-          const ta = a.dueTime || a.scheduledStartTime || "23:59";
-          const tb = b.dueTime || b.scheduledStartTime || "23:59";
-          return ta.localeCompare(tb);
+          const c = (a.dueDate || a.scheduledDate || "9999").localeCompare(b.dueDate || b.scheduledDate || "9999");
+          if (c !== 0) return c;
+          return (a.dueTime || a.scheduledStartTime || "23:59").localeCompare(b.dueTime || b.scheduledStartTime || "23:59");
         });
         break;
-      case "created":
-        sorted.sort((a, b) => b._creationTime - a._creationTime);
-        break;
-      case "alpha":
-        sorted.sort((a, b) => a.title.localeCompare(b.title));
-        break;
+      case "created": sorted.sort((a, b) => b._creationTime - a._creationTime); break;
+      case "alpha": sorted.sort((a, b) => a.title.localeCompare(b.title)); break;
     }
     return sorted;
   }, [sortBy]);
 
-  // Filter function
-  const filterTasks = useCallback((list: Doc<"tasks">[]) => {
-    return list.filter((t) => {
-      if (!filterPriority.has(t.priority)) return false;
-      if (filterProject !== null && (t.projectId || "") !== filterProject) return false;
-      return true;
-    });
-  }, [filterPriority, filterProject]);
+  const filterTasks = useCallback((list: Doc<"tasks">[]) => list.filter((t) => filterProject === null || (t.projectId || "") === filterProject), [filterProject]);
 
   const apply = useCallback((list: Doc<"tasks">[]) => sortTasks(filterTasks(list)), [sortTasks, filterTasks]);
 
-  // Build columns based on view
-  const columns = useMemo(() => {
+  const columns = useMemo<Col[] | null>(() => {
     if (!tasks) return null;
     const now = new Date();
     const today = startOfDay(now);
-    const active = tasks.filter((t) => t.status !== "done");
-    const overdue = getOverdueTasks(tasks);
+    const active = tasks.filter((t) => t.status !== "done" && !t.parentTaskId);
+    const overdue = getOverdueTasks(tasks).filter((t) => !t.parentTaskId);
+    const dateOf = (t: Doc<"tasks">) => (t.dueDate || t.scheduledDate ? parseISO((t.dueDate || t.scheduledDate)!) : null);
 
-    if (view === "d") {
-      // Day view — 4 columns (Morning/Afternoon/Evening/Night) with hour blocks inside
-      const buckets: Record<string, Doc<"tasks">[]> = { morning: [], afternoon: [], evening: [], night: [] };
-      const todayActive = getTasksForDate(tasks, now);
-
-      for (const t of todayActive) {
-        const time = (t as Record<string, unknown>).dueTime as string || t.scheduledStartTime || "";
-        const hour = time ? parseInt(time.split(":")[0], 10) : 9;
-        if (hour >= 6 && hour < 12) buckets.morning.push(t);
-        else if (hour >= 12 && hour < 17) buckets.afternoon.push(t);
-        else if (hour >= 17 && hour < 21) buckets.evening.push(t);
-        else buckets.night.push(t);
-      }
-
+    if (overdueView) {
+      // Overdue plus the two most plausible landing days, so rescheduling is a drag away.
+      const tomorrow = addDays(today, 1);
+      const dayCol = (d: Date, title: string): Col => ({
+        id: `date-${DAY_STR(d)}`, title, subtitle: format(d, "EEE, MMM d"), date: DAY_STR(d), dropDate: DAY_STR(d),
+        covers: (x: Date) => isSameDay(x, d),
+        tasks: active.filter((t) => { const td = dateOf(t); return !!td && isSameDay(td, d); }),
+        overdueTasks: [], isToday: isToday(d),
+      });
       return [
-        { id: "morning", title: "Morning", subtitle: "6am – 12pm", shortcut: "1", tasks: buckets.morning, overdueTasks: overdue, doneTasks: [] },
-        { id: "afternoon", title: "Afternoon", subtitle: "12pm – 5pm", shortcut: "2", tasks: buckets.afternoon, overdueTasks: [], doneTasks: [] },
-        { id: "evening", title: "Evening", subtitle: "5pm – 9pm", shortcut: "3", tasks: buckets.evening, overdueTasks: [], doneTasks: [] },
-        { id: "night", title: "Night", subtitle: "9pm – 6am", shortcut: "4", tasks: buckets.night, overdueTasks: [], doneTasks: [] },
-      ] as Col[];
+        {
+          id: "overdue", title: "Overdue", subtitle: `${overdue.length} ${overdue.length === 1 ? "task" : "tasks"}`,
+          dropDate: DAY_STR(today), covers: () => false, tasks: [], overdueTasks: overdue,
+        },
+        dayCol(today, "Today"),
+        dayCol(tomorrow, "Tomorrow"),
+      ];
     }
 
-    if (view === "w") {
-      // Week view — 7 days starting Monday
-      const weekStart = startOfWeek(now, { weekStartsOn: 1 });
-      const todayIdx = Math.max(0, Math.floor((today.getTime() - weekStart.getTime()) / 86400000));
-
-      return Array.from({ length: 7 }, (_, i) => {
-        const day = addDays(weekStart, i);
+    if (view === "days") {
+      return Array.from({ length: range.to - range.from + 1 }, (_, i) => {
+        const idx = range.from + i;
+        const day = addDays(today, idx);
+        const ds = DAY_STR(day);
         return {
-          id: `day-${i}`,
-          title: format(day, "EEE"),
-          subtitle: format(day, "MMM d"),
-          shortcut: String(i + 1),
-          tasks: getTasksForDate(tasks, day),
-          overdueTasks: i === todayIdx ? overdue : [],
-          doneTasks: [],
-        } as Col;
+          id: `date-${ds}`,
+          title: isToday(day) ? "Today" : isTomorrow(day) ? "Tomorrow" : isYesterday(day) ? "Yesterday" : format(day, "EEEE"),
+          subtitle: format(day, "EEE, MMM d"),
+          shortcut: idx >= 0 && idx < 9 ? String(idx + 1) : undefined,
+          date: ds,
+          dropDate: ds,
+          covers: (d: Date) => isSameDay(d, day),
+          tasks: active.filter((t) => { const d = dateOf(t); return !!d && isSameDay(d, day); }),
+          overdueTasks: isToday(day) ? overdue : [],
+          isToday: isToday(day),
+        } satisfies Col;
       });
     }
 
-    if (view === "m") {
-      // Month view — every day of the month
-      const mStart = startOfMonth(now);
-      const daysInMonth = endOfMonth(now).getDate();
-      const todayDayIdx = isSameMonth(now, mStart) ? today.getDate() - 1 : -1;
-
-      return Array.from({ length: daysInMonth }, (_, i) => {
-        const day = addDays(mStart, i);
-        return {
-          id: `mday-${i}`,
-          title: format(day, "EEE"),
-          subtitle: format(day, "MMM d"),
-          shortcut: String(i + 1),
-          tasks: getTasksForDate(tasks, day),
-          overdueTasks: i === todayDayIdx ? overdue : [],
-          doneTasks: [],
-        } as Col;
-      });
-    }
-
-    // Overview — Today / This Week / Next Week / This Month
-    const weekStart = startOfWeek(now, { weekStartsOn: 1 });
-    const weekEnd = endOfWeek(now, { weekStartsOn: 1 });
+    const weekStart = startOfWeek(now, { weekStartsOn });
+    const weekEnd = endOfWeek(now, { weekStartsOn });
     const nextWeekStart = addWeeks(weekStart, 1);
     const nextWeekEnd = addWeeks(weekEnd, 1);
     const monthEnd = endOfMonth(now);
-    const afterNextWeek = addDays(nextWeekEnd, 1);
-
-    const todayTasks: Doc<"tasks">[] = [];
-    const thisWeekTasks: Doc<"tasks">[] = [];
-    const nextWeekTasks: Doc<"tasks">[] = [];
-    const thisMonthTasks: Doc<"tasks">[] = [];
-
-    for (const t of active) {
-      const ds = t.dueDate || t.scheduledDate;
-      if (!ds) continue;
-      const d = parseISO(ds);
-
-      if (isBefore(d, today) && !isToday(d)) continue; // overdue handled by shared fn
-      if (isToday(d)) todayTasks.push(t);
-      else if (isBefore(d, addDays(weekEnd, 1)) && !isBefore(d, today)) thisWeekTasks.push(t);
-      else if (isBefore(d, addDays(nextWeekEnd, 1)) && !isBefore(d, nextWeekStart)) nextWeekTasks.push(t);
-      else if (isBefore(d, addDays(monthEnd, 1)) && !isBefore(d, afterNextWeek)) thisMonthTasks.push(t);
-    }
+    const inRange = (d: Date, from: Date, to: Date) => !isBefore(d, from) && isBefore(d, addDays(to, 1));
+    const coversToday = (d: Date) => isSameDay(d, today);
+    const coversWeek = (d: Date) => inRange(d, addDays(today, 1), weekEnd);
+    const coversNext = (d: Date) => inRange(d, nextWeekStart, nextWeekEnd);
+    const coversMonth = (d: Date) => inRange(d, addDays(nextWeekEnd, 1), monthEnd);
+    const bucket = (pred: (d: Date) => boolean) => active.filter((t) => { const d = dateOf(t); return !!d && pred(d); });
 
     return [
-      { id: "today", title: "Today", subtitle: format(now, "MMM d"), shortcut: "1", tasks: todayTasks, overdueTasks: overdue, doneTasks: [] },
-      { id: "this-week", title: "This Week", subtitle: `${format(weekStart, "MMM d")} – ${format(weekEnd, "MMM d")}`, shortcut: "2", tasks: thisWeekTasks, overdueTasks: [], doneTasks: [] },
-      { id: "next-week", title: "Next Week", subtitle: `${format(nextWeekStart, "MMM d")} – ${format(nextWeekEnd, "MMM d")}`, shortcut: "3", tasks: nextWeekTasks, overdueTasks: [], doneTasks: [] },
-      { id: "this-month", title: "This Month", subtitle: format(monthEnd, "MMM yyyy"), shortcut: "4", tasks: thisMonthTasks, overdueTasks: [], doneTasks: [] },
-    ] as Col[];
-  }, [tasks, view]);
+      { id: "today", title: "Today", subtitle: format(now, "EEE, MMM d"), shortcut: "1", dropDate: DAY_STR(today), covers: coversToday, tasks: bucket(coversToday), overdueTasks: overdue, isToday: true },
+      { id: "this-week", title: "This Week", subtitle: `${format(weekStart, "MMM d")} to ${format(weekEnd, "MMM d")}`, shortcut: "2", dropDate: DAY_STR(isBefore(addDays(today, 1), addDays(weekEnd, 1)) ? addDays(today, 1) : today), covers: coversWeek, tasks: bucket(coversWeek), overdueTasks: [] },
+      { id: "next-week", title: "Next Week", subtitle: `${format(nextWeekStart, "MMM d")} to ${format(nextWeekEnd, "MMM d")}`, shortcut: "3", dropDate: DAY_STR(nextWeekStart), covers: coversNext, tasks: bucket(coversNext), overdueTasks: [] },
+      { id: "this-month", title: "This Month", subtitle: format(monthEnd, "MMMM"), shortcut: "4", dropDate: DAY_STR(addDays(nextWeekEnd, 1)), covers: coversMonth, tasks: bucket(coversMonth), overdueTasks: [] },
+    ];
+  }, [tasks, view, range, overdueView, weekStartsOn]);
 
-  // Keyboard shortcuts
-  // Shift+O/D/W/M = switch views
-  // Number keys = debounced buffer for column shortcuts (handles 2 vs 22, etc.)
+  const scrollToColumn = useCallback((id: string, behavior: ScrollBehavior = "smooth") => {
+    const el = scrollRef.current?.querySelector<HTMLElement>(`[data-column-id="${id}"]`);
+    el?.scrollIntoView({ behavior, inline: "start", block: "nearest" });
+  }, []);
+
+  const scrollToDate = useCallback((ds: string) => {
+    if (view !== "days") setView("days");
+    const offset = differenceInCalendarDays(parseISO(ds), startOfDay(new Date()));
+    setRange((r) => {
+      if (offset >= r.from && offset <= r.to) return r;
+      return { from: Math.min(r.from, offset - PAST_DAYS), to: Math.max(r.to, offset + FUTURE_DAYS) };
+    });
+    // Two frames: one for a possible range change to render, one for layout.
+    requestAnimationFrame(() => requestAnimationFrame(() => scrollToColumn(`date-${ds}`)));
+  }, [view, setView, scrollToColumn]);
+
+  // A ?date= deep link (sidebar month picker) lands on that day in Days view.
+  const lastDateParam = useRef<string | null>(null);
+  useEffect(() => {
+    if (!dateParam || dateParam === lastDateParam.current || !columns) return;
+    lastDateParam.current = dateParam;
+    const id = requestAnimationFrame(() => scrollToDate(dateParam));
+    return () => cancelAnimationFrame(id);
+  }, [dateParam, columns, scrollToDate]);
+
+  // Shortcuts: Shift+O / Shift+D switch views, Shift+T goes to today, digits focus a column's add field.
   const keyBuffer = useRef("");
   const keyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const DEBOUNCE_MS = 400;
-
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      const tag = (e.target as HTMLElement).tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA") return;
-
-      // View switching with Shift
-      if (e.shiftKey) {
-        const key = e.key.toUpperCase();
-        if (key === "O") { e.preventDefault(); setView("overview"); return; }
-        if (key === "D") { e.preventDefault(); setView("d"); return; }
-        if (key === "W") { e.preventDefault(); setView("w"); return; }
-        if (key === "M") { e.preventDefault(); setView("m"); return; }
+      const target = e.target as HTMLElement;
+      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable) return;
+      if (matchesShortcut(e, sc.overview)) { e.preventDefault(); setView("overview"); return; }
+      if (matchesShortcut(e, sc.days)) { e.preventDefault(); setView("days"); return; }
+      if (matchesShortcut(e, sc.today)) { e.preventDefault(); scrollToDate(DAY_STR(new Date())); return; }
+      if (columns && matchesShortcut(e, sc.quickAdd) && !/^[0-9]$/.test(e.key)) {
+        e.preventDefault();
+        const first = columns.find((c) => c.shortcut === "1") ?? columns[0];
+        if (first) { setActiveAdd(first.id); scrollToColumn(first.id); }
+        return;
       }
-
-      // Number keys — debounced buffer
       if (!e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && /^[0-9]$/.test(e.key) && columns) {
         keyBuffer.current += e.key;
-
-        // Clear any pending timer
         if (keyTimer.current) clearTimeout(keyTimer.current);
-
-        // Set new timer — when it fires, resolve the buffered number
         keyTimer.current = setTimeout(() => {
-          const num = keyBuffer.current;
-          keyBuffer.current = "";
-          keyTimer.current = null;
-
+          const num = keyBuffer.current; keyBuffer.current = ""; keyTimer.current = null;
           const match = columns.find((c) => c.shortcut === num);
-          if (match) setActiveAdd(match.id);
-        }, DEBOUNCE_MS);
+          if (match) { setActiveAdd(match.id); scrollToColumn(match.id); }
+        }, 400);
       }
     }
     window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      if (keyTimer.current) clearTimeout(keyTimer.current);
-    };
-  }, [columns]);
+    return () => { window.removeEventListener("keydown", onKey); if (keyTimer.current) clearTimeout(keyTimer.current); };
+  }, [columns, setView, scrollToDate, scrollToColumn, sc]);
 
-  // Auto-scroll to today's column in week/month views
+  // Land on today: when the board mounts, when the view switches, and whenever
+  // the route settles on the plain Inbox (no date, no overdue) again.
+  const routeKey = `${overdueView ? "overdue" : "inbox"}|${dateParam ?? ""}`;
+  const lastLanding = useRef("");
   useEffect(() => {
-    if ((view !== "w" && view !== "m") || !columns || !scrollContainerRef.current) return;
-    const todayStr = format(new Date(), "yyyy-MM-dd");
-    const todayIdx = columns.findIndex((col) => {
-      // For week view (day-N) or month view (mday-N), compute the date
-      if (col.id.startsWith("day-")) {
-        const i = parseInt(col.id.split("-")[1], 10);
-        const day = addDays(startOfWeek(new Date(), { weekStartsOn: 1 }), i);
-        return isSameDay(day, new Date());
-      }
-      if (col.id.startsWith("mday-")) {
-        const i = parseInt(col.id.split("-")[1], 10);
-        const day = addDays(startOfMonth(new Date()), i);
-        return isSameDay(day, new Date());
-      }
-      return false;
+    if (!columns) return;
+    const key = `${view}|${routeKey}`;
+    if (lastLanding.current === key) return;
+    lastLanding.current = key;
+    if (dateParam) return; // the ?date= effect handles this case
+    const id = requestAnimationFrame(() => {
+      if (view === "days") scrollToColumn(`date-${DAY_STR(new Date())}`, "instant");
+      else if (scrollRef.current) scrollRef.current.scrollLeft = 0;
     });
-    if (todayIdx < 0) return;
-    // Find the column element by data-column-id
-    const container = scrollContainerRef.current;
-    const colEl = container.querySelector(`[data-column-id="${columns[todayIdx].id}"]`);
-    if (colEl) {
-      setTimeout(() => {
-        colEl.scrollIntoView({ behavior: "smooth", inline: "start" });
-      }, 50);
+    return () => cancelAnimationFrame(id);
+  }, [view, routeKey, dateParam, columns, scrollToColumn]);
+
+  // After prepending days, keep the viewport where it was.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || !pendingPrepend.current) return;
+    const col = el.firstElementChild as HTMLElement | null;
+    if (col) el.scrollLeft += pendingPrepend.current * (col.getBoundingClientRect().width + COLUMN_GAP);
+    pendingPrepend.current = 0;
+  }, [range.from]);
+
+  const onScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el || view !== "days") return;
+    if (el.scrollLeft + el.clientWidth > el.scrollWidth - 600) setRange((r) => ({ ...r, to: r.to + GROW_BY }));
+    if (el.scrollLeft < 600 && !pendingPrepend.current) {
+      pendingPrepend.current = GROW_BY;
+      setRange((r) => ({ ...r, from: r.from - GROW_BY }));
     }
-  }, [view, columns]);
+  }, [view]);
+
+  const nudge = (dir: -1 | 1) => {
+    const el = scrollRef.current;
+    const col = el?.firstElementChild as HTMLElement | null;
+    if (!el || !col) return;
+    el.scrollBy({ left: dir * (col.getBoundingClientRect().width + COLUMN_GAP), behavior: "smooth" });
+  };
 
   if (!columns) {
     return (
       <div className="flex-1 p-6">
-        <Skeleton className="mb-6 h-8 w-48" />
-        <div className="flex gap-0">{[1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-80 flex-1" />)}</div>
+        <Skeleton className="mb-6 h-8 w-48 rounded-lg" />
+        <div className="flex gap-2.5">{[1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-80 flex-1 rounded-[18px]" />)}</div>
       </div>
     );
   }
 
-  const views = [
-    { id: "overview" as const, label: "Overview", shortcut: "⇧O" },
-    { id: "d" as const, label: "D", shortcut: "⇧D" },
-    { id: "w" as const, label: "W", shortcut: "⇧W" },
-    { id: "m" as const, label: "M", shortcut: "⇧M" },
-  ];
-
-  function togglePriority(p: string) {
-    setFilterPriority((prev) => {
-      const next = new Set(prev);
-      if (next.has(p)) next.delete(p); else next.add(p);
-      return next;
-    });
-  }
-
-  const isFiltered = filterPriority.size < 4 || filterProject !== null;
-  const filterCount = (filterPriority.size < 4 ? 1 : 0) + (filterProject !== null ? 1 : 0);
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden">
+    <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
       {/* Header */}
-      <div className="flex shrink-0 items-center justify-between px-5 py-2">
-        <div className="flex items-center gap-3.5">
-          <h1 className="text-[15px] font-bold tracking-tight text-text-strong">Upcoming</h1>
-          <Segmented
-            layoutId="kanban-view"
-            value={view}
-            onChange={setView}
-            items={views.map((v) => ({ value: v.id, label: v.label, title: v.label }))}
-          />
+      <div className="flex shrink-0 items-center justify-between gap-3 px-5 py-2">
+        <div className="flex min-w-0 items-center gap-3.5">
+          {filterProject !== null ? (
+            <button
+              onClick={() => setFilterProject(null)}
+              title="Clear project filter"
+              className="group inline-flex items-center gap-1.5 rounded-full bg-black/[0.04] px-2.5 py-1 text-[14px] font-bold tracking-tight text-text-strong transition-colors hover:bg-black/[0.07] dark:bg-white/[0.06] dark:hover:bg-white/[0.1]"
+            >
+              <Folder open className="size-4" style={{ color: activeProject?.color ?? "#71717a" }} />
+              <span className="max-w-[220px] truncate">{filterProject === "" ? "No project" : activeProject?.name ?? "Project"}</span>
+              <IoClose className="size-3.5 text-text-faint transition-colors group-hover:text-text-secondary" />
+            </button>
+          ) : overdueView ? (
+            <h1 className="flex items-center gap-2 text-[15px] font-bold tracking-tight text-text-strong">
+              <IoAlertCircle className="size-4 text-[#ef4444]" />
+              Overdue
+            </h1>
+          ) : (
+            <h1 className="text-[15px] font-bold tracking-tight text-text-strong">Inbox</h1>
+          )}
+          {!overdueView && (
+            <Segmented
+              layoutId="kanban-view"
+              value={view}
+              onChange={setView}
+              items={[{ value: "overview", label: "Overview" }, { value: "days", label: "Days" }]}
+            />
+          )}
         </div>
 
-        {/* Sort + Filter */}
         <div className="flex items-center gap-1.5">
-          {/* Sort */}
+          {view === "days" && !overdueView && (
+            <div className="mr-1.5 flex items-center gap-1">
+              <button onClick={() => nudge(-1)} aria-label="Earlier" className={glassIconButton}>
+                <IoChevronBack className="size-4" />
+              </button>
+              <button onClick={() => scrollToDate(DAY_STR(new Date()))} className={glassAction}>Today</button>
+              <button onClick={() => nudge(1)} aria-label="Later" className={glassIconButton}>
+                <IoChevronForward className="size-4" />
+              </button>
+              <DatePickerPopover value={undefined} onChange={(d) => d && scrollToDate(d)}>
+                <button aria-label="Jump to date" className={glassIconButton}>
+                  <IoCalendar className="size-[15px]" />
+                </button>
+              </DatePickerPopover>
+            </div>
+          )}
           <Menu>
-            <MenuTrigger render={
-              <button className={glassAction} />
-            }>
-              <IoArrowDownCircle className="size-[15px]" />
-              <span>Sort</span>
+            <MenuTrigger render={<button aria-label="View options" className={glassIconButton} />}>
+              <IoEllipsisHorizontal className="size-4" />
             </MenuTrigger>
-            <MenuPopup>
-              {(Object.keys(SORT_LABELS) as SortBy[]).map((s) => (
-                <MenuItem key={s} onClick={() => setSortBy(s)}>
-                  {SORT_LABELS[s]}
-                  {sortBy === s && <span className="ml-auto text-xs text-muted-foreground">✓</span>}
-                </MenuItem>
-              ))}
-            </MenuPopup>
-          </Menu>
-
-          {/* Filter */}
-          <Menu>
-            <MenuTrigger render={
-              <button className={`${glassAction} ${isFiltered ? glassActionActive : ""}`} />
-            }>
-              <IoFilterCircle className="size-[15px]" />
-              <span>Filter</span>
-              {filterCount > 0 && (
-                <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-brand px-1 text-[10px] font-semibold tabular-nums text-white">
-                  {filterCount}
-                </span>
-              )}
-            </MenuTrigger>
-            <MenuPopup>
-              <MenuItem className="text-xs font-semibold text-muted-foreground pointer-events-none">Priority</MenuItem>
-              {(["p1", "p2", "p3", "p4"] as const).map((p) => (
-                <MenuCheckboxItem key={p} checked={filterPriority.has(p)} onCheckedChange={() => togglePriority(p)}>
-                  <span className="size-2.5 rounded-full" style={{ backgroundColor: PRIORITY_COLORS[p] }} />
-                  {PRIORITY_LABELS[p]}
-                </MenuCheckboxItem>
-              ))}
-              {projects && projects.length > 0 && (
-                <>
-                  <MenuSeparator />
-                  <MenuItem className="text-xs font-semibold text-muted-foreground pointer-events-none">Project</MenuItem>
-                  <MenuItem onClick={() => setFilterProject(null)}>
-                    All projects
-                    {filterProject === null && <span className="ml-auto text-xs text-muted-foreground">✓</span>}
-                  </MenuItem>
-                  <MenuItem onClick={() => setFilterProject("")}>
-                    No project
-                    {filterProject === "" && <span className="ml-auto text-xs text-muted-foreground">✓</span>}
-                  </MenuItem>
-                  {projects.map((p) => (
-                    <MenuItem key={p._id} onClick={() => setFilterProject(p._id)}>
-                      <span className="size-2 rounded-full" style={{ backgroundColor: p.color }} />
-                      {p.name}
-                      {filterProject === p._id && <span className="ml-auto text-xs text-muted-foreground">✓</span>}
-                    </MenuItem>
+            <MenuPopup align="end" className="w-[220px]">
+              <MenuCheckboxItem checked={showDone} onCheckedChange={(v) => setShowDone(!!v)}>
+                Show completed tasks
+              </MenuCheckboxItem>
+              <MenuSeparator />
+              <MenuGroup>
+                <MenuGroupLabel>Sort by</MenuGroupLabel>
+                <MenuRadioGroup value={sortBy} onValueChange={(v) => setSortBy(v as SortBy)}>
+                  {(Object.keys(SORT_LABELS) as SortBy[]).map((k) => (
+                    <MenuRadioItem key={k} value={k}>{SORT_LABELS[k]}</MenuRadioItem>
                   ))}
-                </>
-              )}
-              {isFiltered && (
-                <>
-                  <MenuSeparator />
-                  <MenuItem onClick={() => { setFilterPriority(new Set(["p1", "p2", "p3", "p4"])); setFilterProject(null); }}>
-                    Clear all filters
-                  </MenuItem>
-                </>
-              )}
+                </MenuRadioGroup>
+              </MenuGroup>
             </MenuPopup>
           </Menu>
-
-          {/* Show-done toggle — brand fill when on for clear on/off feedback */}
-          <button
-            onClick={() => setShowDone(!showDone)}
-            aria-pressed={showDone}
-            className={showDone ? bluePill : glassAction}
-          >
-            <IoCheckmarkCircle className="size-[15px]" />
-            <span>Done</span>
-          </button>
+          {!timeboxOpen && (
+            <button onClick={() => setTimeboxOpen(true)} aria-label="Show timebox" title="Show timebox" className={glassIconButton}>
+              <SidebarGlyph side="right" className="size-4" />
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Columns — week/month views scroll horizontally with hidden scrollbar */}
+      {/* Columns */}
       <div
-        ref={scrollContainerRef}
-        className={`flex flex-1 gap-2.5 overflow-hidden px-3 pb-3 pt-1 ${
-          view === "w" || view === "m"
-            ? "overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
-            : ""
-        }`}
+        ref={scrollRef}
+        onScroll={onScroll}
+        className="flex flex-1 gap-3 overflow-x-auto overflow-y-hidden scroll-px-3 px-3 pb-3 pt-1 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
       >
         {columns.map((col) => (
-          <UpcomingColumn
+          <BoardColumn
             key={col.id}
             column={col}
             isAdding={activeAdd === col.id}
             onStartAdd={() => setActiveAdd(col.id)}
             onStopAdd={() => setActiveAdd(null)}
-            applySort={apply}
-            view={view}
+            apply={apply}
             showDone={showDone}
             allTasks={tasks || []}
           />
@@ -445,351 +416,133 @@ export default function KanbanBoard() {
   );
 }
 
-/* ─── Time mappings for day-view quarters ─── */
-const QUARTER_START_TIMES: Record<string, string> = {
-  morning: "06:00", afternoon: "12:00", evening: "17:00", night: "21:00",
-};
-
-const PERIOD_HOURS: Record<string, number[]> = {
-  morning: [6, 7, 8, 9, 10, 11],
-  afternoon: [12, 13, 14, 15, 16],
-  evening: [17, 18, 19, 20],
-  night: [21, 22, 23],
-};
-
-function formatHour(h: number): string {
-  if (h === 0) return "12 am";
-  if (h < 12) return `${h} am`;
-  if (h === 12) return "12 pm";
-  return `${h - 12} pm`;
-}
-
-/** Renders tasks grouped by hour blocks inside a day-view column */
-function DayViewHourBlocks({ tasks, columnId }: { tasks: Doc<"tasks">[]; columnId: string }) {
-  const hours = PERIOD_HOURS[columnId] || [];
-  const now = new Date();
-  const currentHour = now.getHours();
-
-  // Group tasks by hour
-  const tasksByHour = new Map<number, Doc<"tasks">[]>();
-  for (const h of hours) tasksByHour.set(h, []);
-
-  // Tasks without a matching hour go into the first hour
-  const unslotted: Doc<"tasks">[] = [];
-  for (const t of tasks) {
-    const time = (t as Record<string, unknown>).dueTime as string || t.scheduledStartTime || "";
-    const hour = time ? parseInt(time.split(":")[0], 10) : -1;
-    const bucket = tasksByHour.get(hour);
-    if (bucket) bucket.push(t);
-    else unslotted.push(t);
-  }
-  // Put unslotted into first hour
-  if (unslotted.length > 0 && hours.length > 0) {
-    const first = tasksByHour.get(hours[0])!;
-    first.push(...unslotted);
-  }
-
-  return (
-    <div className="flex flex-col">
-      {hours.map((h) => {
-        const hourTasks = tasksByHour.get(h) || [];
-        const isCurrentHour = h === currentHour;
-
-        return (
-          <div key={h} className="relative">
-            {/* Hour label with dashed line */}
-            <div className="flex items-center gap-2 py-1.5">
-              <span className={`shrink-0 text-[11px] font-medium tabular-nums ${isCurrentHour ? "text-brand" : "text-text-faint"}`}>
-                {formatHour(h)}
-              </span>
-              <div className={`h-px flex-1 ${isCurrentHour ? "border-t border-dashed border-brand/40" : "border-t border-dashed border-line-strong"}`} />
-            </div>
-
-            {/* Tasks in this hour */}
-            {hourTasks.length > 0 && (
-              <div className="flex flex-col gap-1.5 pb-1">
-                {hourTasks.map((t) => (
-                  <KanbanCard key={t._id} task={t} />
-                ))}
-              </div>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
 /* ─── Column ─── */
-function UpcomingColumn({ column, isAdding, onStartAdd, onStopAdd, applySort, view, showDone, allTasks }: {
-  column: Col; isAdding: boolean;
-  onStartAdd: () => void; onStopAdd: () => void;
-  applySort: (list: Doc<"tasks">[]) => Doc<"tasks">[];
-  view: string;
-  showDone: boolean;
-  allTasks: Doc<"tasks">[];
+
+function BoardColumn({ column, isAdding, onStartAdd, onStopAdd, apply, showDone, allTasks }: {
+  column: Col; isAdding: boolean; onStartAdd: () => void; onStopAdd: () => void;
+  apply: (list: Doc<"tasks">[]) => Doc<"tasks">[]; showDone: boolean; allTasks: Doc<"tasks">[];
 }) {
-  const createTask = useMutation(api.tasks.create);
+  const { create: quickCreate, settings } = useQuickAdd();
   const updateTask = useMutation(api.tasks.update);
+  const router = useRouter();
   const [newTitle, setNewTitle] = useState("");
-  const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [isOver, setIsOver] = useState(false);
   const dragCounter = useRef(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // isAdding is now only a focus signal (e.g. from the number-key shortcut).
-  useEffect(() => {
-    if (isAdding) requestAnimationFrame(() => inputRef.current?.focus());
-  }, [isAdding]);
+  useEffect(() => { if (isAdding) requestAnimationFrame(() => inputRef.current?.focus()); }, [isAdding]);
 
-  // Compute default due date for this column
-  const defaultDueDate = useMemo(() => {
-    const now = new Date();
-    if (column.id === "today" || column.id === "morning" || column.id === "afternoon" || column.id === "evening" || column.id === "night") {
-      return format(now, "yyyy-MM-dd");
-    } else if (column.id === "this-week") {
-      return format(startOfWeek(now, { weekStartsOn: 1 }), "yyyy-MM-dd");
-    } else if (column.id === "next-week") {
-      return format(addWeeks(startOfWeek(now, { weekStartsOn: 1 }), 1), "yyyy-MM-dd");
-    } else if (column.id === "this-month") {
-      return format(endOfMonth(now), "yyyy-MM-dd");
-    } else if (column.id.startsWith("mday-")) {
-      const dayIdx = parseInt(column.id.split("-")[1], 10);
-      return format(addDays(startOfMonth(now), dayIdx), "yyyy-MM-dd");
-    } else if (column.id.startsWith("day-")) {
-      const dayIdx = parseInt(column.id.split("-")[1], 10);
-      return format(addDays(startOfWeek(now, { weekStartsOn: 1 }), dayIdx), "yyyy-MM-dd");
-    }
-    return format(now, "yyyy-MM-dd");
-  }, [column.id]);
-
-  // Done tasks for this column — tasks matching this column's date range that are done
   const doneTasks = useMemo(() => {
     if (!showDone) return [];
-    const now = new Date();
-    const today = startOfDay(now);
-    const ws = startOfWeek(now, { weekStartsOn: 1 });
-    const we = endOfWeek(now, { weekStartsOn: 1 });
-    const nws = addWeeks(ws, 1);
-    const nwe = addWeeks(we, 1);
-    const me = endOfMonth(now);
-
     return allTasks.filter((t) => {
-      if (t.status !== "done") return false;
+      if (t.status !== "done" || t.parentTaskId) return false;
       const ds = t.dueDate || t.scheduledDate;
-      if (!ds) return false;
-      const d = parseISO(ds);
-
-      // Specific day columns — exact day match
-      if (column.id.startsWith("day-") || column.id.startsWith("mday-") || column.id === "today") {
-        return isSameDay(d, parseISO(defaultDueDate));
-      }
-      // Range columns — same logic as active task bucketing
-      if (column.id === "this-week") {
-        return isWithinInterval(d, { start: today, end: we }) && !isToday(d);
-      }
-      if (column.id === "next-week") {
-        return isWithinInterval(d, { start: nws, end: nwe });
-      }
-      if (column.id === "this-month") {
-        return isWithinInterval(d, { start: nwe, end: me });
-      }
-      // Day-view quarters — today only
-      if (["morning", "afternoon", "evening", "night"].includes(column.id)) {
-        return isSameDay(d, today);
-      }
-      return false;
+      return !!ds && column.covers(parseISO(ds));
     });
-  }, [showDone, allTasks, column.id, defaultDueDate]);
+  }, [showDone, allTasks, column]);
 
-  const handleQuickAdd = useCallback(async () => {
-    if (!newTitle.trim()) return;
-    const quarterTime = QUARTER_START_TIMES[column.id];
-    const newTaskId = await createTask({
-      title: newTitle.trim(),
-      dueDate: defaultDueDate,
-      userDate: format(new Date(), "yyyy-MM-dd"),
-      ...(quarterTime ? { dueTime: quarterTime } : {}),
-    });
+  const create = useCallback(async (open: boolean) => {
+    const title = newTitle.trim() || (open ? "New task" : "");
+    if (!title) return;
+    const id = await quickCreate({ title, dueDate: column.dropDate });
     setNewTitle("");
+    if (open) { onStopAdd(); if (id) router.push(`/task/${id}`); return; }
     inputRef.current?.focus();
-    // Auto-push to Google Calendar
-    if (newTaskId && defaultDueDate) {
+    if (id) {
       try {
         const { pushLocalTaskToGoogle } = await import("@/lib/google-sync");
-        const result = await pushLocalTaskToGoogle({ _id: newTaskId, title: newTitle.trim(), dueDate: defaultDueDate } as Doc<"tasks">);
-        if (result) await updateTask({ id: newTaskId, googleEventId: result.googleEventId, googleCalendarId: result.googleCalendarId } as Parameters<typeof updateTask>[0]);
+        const result = await pushLocalTaskToGoogle({ _id: id, title, dueDate: column.dropDate } as Doc<"tasks">);
+        if (result) await updateTask({ id, googleEventId: result.googleEventId, googleCalendarId: result.googleCalendarId });
       } catch (err) { console.warn("Auto-push failed:", err); }
     }
-  }, [newTitle, defaultDueDate, createTask, updateTask]);
+  }, [newTitle, column.dropDate, quickCreate, updateTask, onStopAdd, router]);
 
-  // ── Drop handlers ──
-  const handleDragEnter = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    dragCounter.current++;
-    setIsOver(true);
-  }, []);
-
-  const handleDragLeave = useCallback(() => {
-    dragCounter.current--;
-    if (dragCounter.current <= 0) {
-      dragCounter.current = 0;
-      setIsOver(false);
-    }
-  }, []);
-
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
-  }, []);
-
-  const handleDrop = useCallback(async (e: React.DragEvent) => {
+  const onDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault();
     dragCounter.current = 0;
     setIsOver(false);
-
     const taskId = e.dataTransfer.getData("text/plain");
     if (!taskId) return;
+    if ([...column.tasks, ...column.overdueTasks].some((t) => t._id === taskId)) return;
+    await updateTask({ id: taskId as Doc<"tasks">["_id"], dueDate: column.dropDate });
+  }, [column, updateTask]);
 
-    // Check if task already belongs to this column — skip update if so
-    const allColumnTasks = [...column.tasks, ...column.overdueTasks];
-    if (allColumnTasks.some((t) => t._id === taskId)) return;
-
-    // For range columns (today, this-week, this-month), use today's date
-    // since past days don't matter. For specific-day columns, use exact date.
-    const now = new Date();
-    const todayStr = format(now, "yyyy-MM-dd");
-
-    let targetDate: string;
-    if (column.id === "today" || column.id === "this-week" || column.id === "this-month") {
-      // Range columns: anchor to today
-      targetDate = todayStr;
-    } else if (column.id === "next-week") {
-      // Next week: set to Monday of next week
-      targetDate = defaultDueDate;
-    } else {
-      // Specific day columns (day-N, mday-N) or day quarters: use exact date
-      targetDate = defaultDueDate;
-    }
-
-    const update: Record<string, unknown> = {
-      id: taskId,
-      dueDate: targetDate,
-    };
-
-    // Day view quarters: also set the time
-    const startTime = QUARTER_START_TIMES[column.id];
-    if (startTime) {
-      update.dueTime = startTime;
-    }
-
-    await updateTask(update as Parameters<typeof updateTask>[0]);
-  }, [defaultDueDate, column, updateTask]);
-
-  const sortedTasks = applySort(column.tasks);
-  const sortedOverdue = applySort(column.overdueTasks);
-
-  const hasOverdue = sortedOverdue.length > 0;
-
-  // Week/month views: fixed width per column (4 visible = 25% each)
-  const widthClass = (view === "w" || view === "m") ? "w-[25%] min-w-[25%] shrink-0" : "min-w-[260px] flex-1";
+  const sortedTasks = apply(column.tasks);
+  const sortedOverdue = apply(column.overdueTasks);
+  // Settings: workday threshold. Hours already planned in this column.
+  const threshold = settings.calendar.workdayThresholdEnabled && column.date ? settings.calendar.workdayThresholdHours : null;
+  const plannedMin = threshold !== null
+    ? [...column.tasks, ...column.overdueTasks].reduce((sum, t) => sum + (durationMinutes(t.scheduledStartTime, t.scheduledEndTime) ?? (t.dueTime || t.scheduledStartTime ? settings.general.defaultDurationMin : 0)), 0)
+    : 0;
+  const plannedH = Math.round((plannedMin / 60) * 10) / 10;
+  const isPast = !!column.date && isBefore(parseISO(column.date), startOfDay(new Date()));
 
   return (
     <div
       data-column-id={column.id}
-      className={`relative flex flex-col overflow-hidden rounded-[18px] bg-black/[0.035] dark:bg-white/[0.04] ${widthClass}`}
-      onDragEnter={handleDragEnter}
-      onDragLeave={handleDragLeave}
-      onDragOver={handleDragOver}
-      onDrop={handleDrop}
+      className={`relative flex flex-col overflow-hidden rounded-[18px] bg-black/[0.035] dark:bg-white/[0.04] ${BOARD_COLUMN_WIDTH} ${isPast ? "opacity-70" : ""}`}
+      onDragEnter={(e) => { e.preventDefault(); dragCounter.current++; setIsOver(true); }}
+      onDragLeave={() => { dragCounter.current--; if (dragCounter.current <= 0) { dragCounter.current = 0; setIsOver(false); } }}
+      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
+      onDrop={onDrop}
     >
-      {/* Drop zone indicator */}
       {isOver && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.15 }}
-          className="pointer-events-none absolute inset-2 z-20 rounded-xl border-2 border-dashed border-brand/60 bg-brand/5"
-        />
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.15 }}
+          className="pointer-events-none absolute inset-2 z-20 rounded-xl border-2 border-dashed border-brand/60 bg-brand/5" />
       )}
 
-      {/* Header */}
       <div className="flex items-baseline gap-2 px-3 pb-2.5 pt-3.5">
         <span className="text-[14px] font-bold tracking-tight text-text-strong">{column.title}</span>
         {column.subtitle && <span className="text-[12px] font-medium text-text-muted">{column.subtitle}</span>}
+        {threshold !== null && plannedMin > 0 && (
+          <span title={`${plannedH}h planned of a ${threshold}h day`} className={`ml-auto text-[12px] font-medium tabular-nums ${plannedH > threshold ? "text-amber-600" : "text-text-faint"}`}>{plannedH}h</span>
+        )}
       </div>
 
-      {/* Add task — a persistent pill text input (Enter adds, Tab opens full editor) */}
-      <div className="mx-3 mb-2.5 flex items-center gap-2 overflow-hidden rounded-full bg-surface-0 px-3.5 py-2 transition-shadow focus-within:ring-1 focus-within:ring-inset focus-within:ring-line-strong dark:bg-white/[0.05] dark:focus-within:ring-white/[0.14]">
-        <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="shrink-0 text-text-faint"><circle cx="8" cy="8" r="6.5" /><path d="M8 5v6M5 8h6" /></svg>
+      <div className="mx-3 mb-2.5 flex h-9 items-center gap-2 overflow-hidden rounded-full bg-surface-0 px-1.5 transition-shadow focus-within:ring-1 focus-within:ring-inset focus-within:ring-line-strong dark:bg-white/[0.05] dark:focus-within:ring-white/[0.14]">
+        <IoAddCircle className="size-6 shrink-0 text-text-faint" aria-hidden />
         <input
           ref={inputRef} value={newTitle} onChange={(e) => setNewTitle(e.target.value)}
           placeholder="Add task"
           onFocus={onStartAdd}
           onKeyDown={(e) => {
-            if (e.key === "Enter") { e.preventDefault(); handleQuickAdd(); }
-            if (e.key === "Tab") { e.preventDefault(); setCreateDialogOpen(true); }
+            if (e.key === "Enter") { e.preventDefault(); create(false); }
+            if (e.key === "Tab") { e.preventDefault(); create(true); }
             if (e.key === "Escape") { e.currentTarget.blur(); onStopAdd(); }
           }}
           onBlur={() => { if (!newTitle.trim()) onStopAdd(); }}
           className="w-0 min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-text-faint"
         />
         {column.shortcut && (
-          <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-black/[0.05] text-[10px] font-bold text-text-faint dark:bg-white/[0.08]">
+          <kbd className="inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-black/[0.05] text-[10px] font-medium text-text-faint dark:bg-white/[0.08]">
             {column.shortcut}
-          </span>
+          </kbd>
         )}
       </div>
 
-      {/* Tasks */}
       <div className="flex flex-1 flex-col overflow-y-auto px-3 pb-3 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-        {hasOverdue && (
+        {sortedOverdue.length > 0 && (
           <div className="mb-4">
-            <div className="mb-2 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="text-[13px] font-bold text-[#ef4444]">Overdue</span>
-                <span className="text-[13px] font-medium text-text-secondary">{sortedOverdue.length}</span>
-              </div>
+            <div className="mb-2 flex items-center gap-2">
+              <span className="text-[13px] font-bold text-[#ef4444]">Overdue</span>
+              <span className="text-[13px] font-medium text-text-secondary">{sortedOverdue.length}</span>
             </div>
-            <div className="flex flex-col gap-1.5">
-              {sortedOverdue.map((t) => <KanbanCard key={t._id} task={t} isOverdue />)}
-            </div>
+            <div className="flex flex-col gap-1.5">{sortedOverdue.map((t) => <KanbanCard key={t._id} task={t} isOverdue />)}</div>
           </div>
         )}
-
-        {/* Tasks — grouped by hour in day view, flat otherwise */}
         {sortedTasks.length > 0 && (
-          view === "d" ? (
-            <DayViewHourBlocks tasks={sortedTasks} columnId={column.id} />
-          ) : (
-            <div className="flex flex-col gap-1.5">
-              {sortedTasks.map((t) => (
-                <KanbanCard key={t._id} task={t} />
-              ))}
-            </div>
-          )
+          <div className="flex flex-col gap-1.5">{sortedTasks.map((t) => <KanbanCard key={t._id} task={t} />)}</div>
         )}
-
-        {/* Done tasks */}
         {showDone && doneTasks.length > 0 && (
           <div className="mt-4 border-t border-line-strong pt-3">
             <div className="mb-2 flex items-center gap-2">
               <span className="text-[12px] font-medium text-text-faint">Completed</span>
-              <span className="flex size-[16px] items-center justify-center rounded-full border border-line-strong text-[9px] font-medium text-text-faint">
-                {doneTasks.length}
-              </span>
+              <span className="text-[12px] tabular-nums text-text-faint">{doneTasks.length}</span>
             </div>
-            <div className="flex flex-col gap-1.5">
-              {doneTasks.map((t) => <KanbanCard key={t._id} task={t} />)}
-            </div>
+            <div className="flex flex-col gap-1.5">{doneTasks.map((t) => <KanbanCard key={t._id} task={t} />)}</div>
           </div>
         )}
-
       </div>
-
-      {/* Full create dialog */}
-      <TaskEditDialog open={createDialogOpen} onOpenChange={setCreateDialogOpen} defaultDueDate={defaultDueDate} />
     </div>
   );
 }

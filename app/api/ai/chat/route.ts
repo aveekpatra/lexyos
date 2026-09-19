@@ -2,8 +2,10 @@ import { generateText, stepCountIs } from "ai";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { createTools } from "@/lib/ai/tools";
 import { auth } from "@clerk/nextjs/server";
-import { getGoogleAccessToken } from "@/app/actions/google-auth";
 import { AGENT_MODEL, AGENT_MODEL_SETTINGS } from "@/lib/ai/agent-model";
+import { ConvexHttpClient } from "convex/browser";
+import { api } from "@/convex/_generated/api";
+import { mergeSettings } from "@/lib/settings";
 
 export const maxDuration = 60;
 
@@ -15,15 +17,11 @@ const SYSTEM_PROMPT = `You are UniFocus AI — a personal task and calendar mana
 - Check today's schedule, find free time, plan days
 - Answer questions about what's coming up, what's overdue, priorities
 - Find tasks by name and act on them (reschedule, reprioritize, move to project, etc.)
-- Search, read, send, reply to, archive, trash, star, and manage emails via Gmail
-- Compose new emails and reply to threads
-- Save email drafts to Gmail for the user to review and send later
 
 ## How You Work
 - Act immediately — do NOT ask for confirmation. Just execute the tool and briefly confirm what you did.
-- The only exceptions where you MUST ask before acting: send_email, reply_to_email, delete_task. These are irreversible.
-- When the user says "draft", "write a draft", "prepare", or "save for later" — use save_draft or save_reply_draft to save to Gmail drafts. Do NOT use send_email for drafts.
-- Everything else (create, update, complete, archive, star, trash, etc.) — just do it. The user can ask you to undo if needed.
+- The only exception where you MUST ask before acting: delete_task. This is irreversible.
+- Everything else (create, update, complete, etc.) — just do it. The user can ask you to undo if needed.
 - When the user mentions a task by name, use search_tasks first to find the ID, then act on it.
 - When the user mentions a project by name, use list_projects to find the ID.
 - You can chain multiple tool calls in a single turn.
@@ -32,7 +30,6 @@ const SYSTEM_PROMPT = `You are UniFocus AI — a personal task and calendar mana
 - Be concise. Don't over-explain. Confirm actions briefly.
 - Priority levels: p1 = urgent/critical, p2 = high, p3 = medium (default), p4 = low.
 - Task statuses: todo, planned, in_progress, review, done.
-- When asked about unread emails, use search_emails with 'is:unread' query.
 
 ## CRITICAL: Verify Every Write Operation
 This is your most important rule. You MUST verify after every write operation:
@@ -41,8 +38,7 @@ This is your most important rule. You MUST verify after every write operation:
 2. **After update_task**: Call get_task with the task ID to read the updated state. Report the verified values.
 3. **After complete_task**: Call get_task to confirm the status is now "done" (or toggled back).
 4. **After delete_task**: You may skip verification since the task no longer exists.
-5. **After send_email / reply_to_email**: The tool result contains the sent message ID — that is sufficient verification.
-6. **After create_project / update_project**: Call list_projects to verify.
+5. **After create_project / update_project**: Call list_projects to verify.
 
 NEVER tell the user "I created your task" based only on the create_task result. You MUST read it back with get_task first. Your confirmation must be based on what you READ, not what you WROTE.
 
@@ -126,23 +122,31 @@ export async function POST(req: Request) {
       }
     }
 
-    // Pre-fetch Google OAuth token for email tools
-    let googleToken: string | undefined;
-    try {
-      googleToken = await getGoogleAccessToken();
-    } catch {
-      // Gmail not connected — email tools will fail gracefully
-    }
-
     const openrouter = createOpenRouter({ apiKey: process.env.OPENROUTER_API_KEY });
     const model = openrouter(AGENT_MODEL, AGENT_MODEL_SETTINGS);
-    const tools = createTools(token, googleToken);
+    const tools = createTools(token);
+
+    // User preferences the agent should honour (scheduling notes, clock format).
+    let prefsBlock = "";
+    let showReasoning = false;
+    try {
+      const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
+      convex.setAuth(token);
+      const prefs = await convex.query(api.userPreferences.get, {});
+      const s = mergeSettings(prefs?.prefs);
+      const lines = [`- Communicate times in ${s.calendar.timeFormat === "24h" ? "24 hour" : "12 hour"} format.`, `- The user's week starts on ${["Sunday", "Monday", "", "", "", "", "Saturday"][s.calendar.weekStartsOn]}.`];
+      if (s.ai.schedulingPreferences.trim()) lines.push(`- Scheduling preferences, in the user's words: ${s.ai.schedulingPreferences.trim()}`);
+      if (s.ai.approval === "auto") lines.push("- Auto-approval is on: apply valid changes immediately without asking, except delete_task.");
+      else lines.push("- Approval mode is ASK: before any create_task, update_task, complete_task or delete_task call, first reply with the exact change you intend and wait for the user to confirm. Only call write tools after an explicit yes in the conversation. Read-only tools need no confirmation.");
+      showReasoning = s.ai.showReasoning;
+      prefsBlock = "\n\nUSER PREFERENCES\n" + lines.join("\n");
+    } catch { /* preferences are optional */ }
 
     // Let the AI SDK handle the full tool execution loop natively.
     // stepCountIs(10) allows up to 10 rounds of tool calls before forcing a text response.
     const result = await generateText({
       model,
-      system: SYSTEM_PROMPT,
+      system: SYSTEM_PROMPT + prefsBlock,
       messages: history,
       tools,
       toolChoice: "auto",
@@ -182,6 +186,7 @@ export async function POST(req: Request) {
     return Response.json({
       text: result.text || "Done.",
       toolCalls: toolCallLog,
+      reasoning: showReasoning ? result.reasoningText || undefined : undefined,
     });
   } catch (err) {
     console.error("AI chat error:", err);

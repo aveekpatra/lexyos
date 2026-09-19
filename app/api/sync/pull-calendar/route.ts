@@ -1,4 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
+import { isGoogleNotConnected } from "@/lib/google-oauth";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "@/convex/_generated/api";
 import {
@@ -25,6 +26,8 @@ export async function POST() {
     convex.setAuth(token);
 
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const prefsRow = await convex.query(api.userPreferences.get, {});
+    const showDeclined = !!(prefsRow?.prefs as { calendar?: { showDeclinedEvents?: boolean } } | undefined)?.calendar?.showDeclinedEvents;
 
     // Get existing sync states
     const syncStates = await convex.query(api.calendarEvents.getSyncState, {});
@@ -52,7 +55,7 @@ export async function POST() {
 
         if (result.fullSyncRequired) {
           // syncToken expired — fall back to full sync for this calendar
-          await fullSyncCalendar(convex, calendar.id, tz);
+          await fullSyncCalendar(convex, calendar.id, tz, showDeclined);
           method = "full (token expired)";
         } else {
           // Process incremental changes: upserts for live events, deletes for
@@ -62,7 +65,7 @@ export async function POST() {
             const cancelledIds = result.events
               .filter((e) => e.status === "cancelled")
               .map((e) => e.id);
-            const mapped = mapEventsToTaskFormat(result.events, tz);
+            const mapped = mapEventsToTaskFormat(result.events, tz, showDeclined);
             if (mapped.length > 0) {
               await convex.mutation(api.tasks.bulkUpsertFromGoogle, { events: mapped, fetchedAt });
             }
@@ -85,7 +88,7 @@ export async function POST() {
       } else {
         // No syncToken — do a full sync for this calendar
         method = "full (first sync)";
-        await fullSyncCalendar(convex, calendar.id, tz);
+        await fullSyncCalendar(convex, calendar.id, tz, showDeclined);
       }
     }
 
@@ -96,6 +99,7 @@ export async function POST() {
       message: `Calendar sync complete (${method})`,
     });
   } catch (err) {
+    if (isGoogleNotConnected(err)) return Response.json({ error: "google_not_connected" }, { status: 409 });
     console.error("[PullCalendar] Error:", err);
     return Response.json(
       { error: err instanceof Error ? err.message : "Internal error" },
@@ -109,6 +113,7 @@ async function fullSyncCalendar(
   convex: ConvexHttpClient,
   calendarId: string,
   tz: string,
+  showDeclined = false,
 ) {
   const now = new Date();
   const timeMin = new Date(now.getTime() - 30 * 86400000).toISOString();
@@ -123,7 +128,7 @@ async function fullSyncCalendar(
   );
 
   if (result.events.length > 0) {
-    const mapped = mapEventsToTaskFormat(result.events, tz);
+    const mapped = mapEventsToTaskFormat(result.events, tz, showDeclined);
     if (mapped.length > 0) {
       await convex.mutation(api.tasks.bulkUpsertFromGoogle, { events: mapped, fetchedAt });
     }
@@ -158,11 +163,14 @@ function mapEventsToTaskFormat(
     colorId?: string;
     updated?: string;
     extendedProperties?: { private?: Record<string, string> };
+    attendees?: Array<{ self?: boolean; responseStatus?: string }>;
   }>,
   tz: string,
+  showDeclined = false,
 ) {
   return events
     .filter((e) => e.status !== "cancelled")
+    .filter((e) => showDeclined || !e.attendees?.some((a) => a.self && a.responseStatus === "declined"))
     .map((e) => ({
       googleEventId: e.id,
       googleCalendarId: e.calendarId || "primary",

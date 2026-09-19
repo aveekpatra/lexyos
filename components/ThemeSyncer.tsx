@@ -14,7 +14,7 @@ import { useTheme } from "@/components/ThemeProvider";
  */
 export function ThemeSyncer() {
   const { theme, setTheme } = useTheme();
-  const prefs = useQuery(api.userPreferences.get);
+  const prefs = useQuery(api.userPreferences.get, {});
   const setPrefs = useMutation(api.userPreferences.set);
   const hydratedFromDb = useRef(false);
   const prevTheme = useRef(theme);

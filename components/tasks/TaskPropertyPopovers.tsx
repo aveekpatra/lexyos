@@ -5,16 +5,15 @@ import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { Popover, PopoverTrigger, PopoverPopup } from "@/components/ui/popover";
-import { HugeiconsIcon } from "@hugeicons/react";
-import {
-  Calendar01Icon,
-  Clock01Icon,
-  FolderLibraryIcon,
-  Delete02Icon,
-} from "@hugeicons/core-free-icons";
+import { menuRow, menuInput, menuSectionLabel } from "@/lib/ui/chrome";
 import {
   format, addDays, startOfWeek, endOfWeek, addWeeks, endOfMonth, getWeek,
 } from "date-fns";
+import {
+  IoCalendar,
+  IoTrash,
+} from "react-icons/io5";
+import { Folder } from "@/components/ui/folder";
 
 /**
  * Runs `reset` when `open` transitions from true to false, using React's
@@ -34,11 +33,11 @@ function useResetOnClose(open: boolean, reset: () => void) {
  * Shared styles
  * ──────────────────────────────────────────────────────── */
 
-const popoverClass = "w-[260px] rounded-xl border border-line-strong bg-surface-0 p-0 shadow-3d";
-const inputClass = "w-full border-b border-line bg-transparent px-3.5 py-2.5 text-sm text-foreground outline-none placeholder:text-text-faint";
-const itemClass = "flex w-full cursor-pointer items-center justify-between rounded-lg px-3.5 py-2 text-sm text-text-strong transition-colors duration-100 hover:bg-line";
-const removeClass = "flex w-full cursor-pointer items-center gap-2 rounded-lg px-3.5 py-2 text-sm text-[#ef4444] transition-colors duration-100 hover:bg-line";
-const sectionClass = "px-3.5 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wider text-text-faint";
+const popoverClass = "w-[268px]";
+const inputClass = `${menuInput} mb-1`;
+const itemClass = `${menuRow} w-full cursor-pointer justify-between hover:text-text-strong`;
+const removeClass = `${menuRow} w-full cursor-pointer !text-[#ef4444] [&_svg]:!text-[#ef4444]`;
+const sectionClass = menuSectionLabel;
 
 /* ────────────────────────────────────────────────────────
  * DatePickerPopover
@@ -87,19 +86,19 @@ export const DatePickerPopover = memo(function DatePickerPopover({
       label: "This week",
       detail: `W${getWeek(now, { weekStartsOn: 1 })}, ${format(weekStart, "d")}-${format(weekEnd, "d MMM")}`,
       value: format(weekEnd, "yyyy-MM-dd"),
-      icon: Calendar01Icon,
+      icon: IoCalendar,
     },
     {
       label: "Next week",
       detail: `W${getWeek(nextWeekStart, { weekStartsOn: 1 })}, ${format(nextWeekStart, "d")}-${format(nextWeekEnd, "d MMM")}`,
       value: format(nextWeekStart, "yyyy-MM-dd"),
-      icon: Calendar01Icon,
+      icon: IoCalendar,
     },
     {
       label: "This month",
       detail: format(now, "MMM"),
       value: format(endOfMonth(now), "yyyy-MM-dd"),
-      icon: Calendar01Icon,
+      icon: IoCalendar,
     },
   ];
 
@@ -131,16 +130,17 @@ export const DatePickerPopover = memo(function DatePickerPopover({
             }
           }}
         />
-        <div className="p-1.5">
+        <div className="space-y-0.5">
           {filtered.map((preset) => (
             <button
+              data-row
               key={preset.label}
               onClick={() => select(preset.value)}
               className={itemClass}
             >
               <span className="flex items-center gap-2.5">
                 {preset.icon && (
-                  <HugeiconsIcon icon={preset.icon} size={14} className="text-text-muted" />
+                  <preset.icon size={14} className="text-text-muted" />
                 )}
                 {preset.label}
               </span>
@@ -149,9 +149,9 @@ export const DatePickerPopover = memo(function DatePickerPopover({
           ))}
         </div>
         {value && (
-          <div className="border-t border-line p-1.5">
-            <button onClick={() => select(undefined)} className={removeClass}>
-              <HugeiconsIcon icon={Delete02Icon} size={14} />
+          <div className="mt-1.5">
+            <button data-row onClick={() => select(undefined)} className={removeClass}>
+              <IoTrash size={14} />
               Remove
             </button>
           </div>
@@ -247,21 +247,22 @@ export const DurationPickerPopover = memo(function DurationPickerPopover({
             }
           }}
         />
-        <div className="max-h-[240px] overflow-y-auto p-1.5">
+        <div className="space-y-0.5">
           {filtered.map((preset) => (
             <button
+              data-row
               key={preset.minutes}
               onClick={() => select(preset.minutes)}
-              className={`${itemClass} ${value === preset.minutes ? "bg-brand-bg text-brand-strong" : ""}`}
+              className={`${itemClass} ${value === preset.minutes ? "!text-brand-strong" : ""}`}
             >
               {preset.label}
             </button>
           ))}
         </div>
         {value !== undefined && value > 0 && (
-          <div className="border-t border-line p-1.5">
-            <button onClick={() => select(undefined)} className={removeClass}>
-              <HugeiconsIcon icon={Delete02Icon} size={14} />
+          <div className="mt-1.5">
+            <button data-row onClick={() => select(undefined)} className={removeClass}>
+              <IoTrash size={14} />
               Remove
             </button>
           </div>
@@ -332,20 +333,16 @@ export const ProjectPickerPopover = memo(function ProjectPickerPopover({
         {filtered.length > 0 && (
           <>
             <div className={sectionClass}>Projects</div>
-            <div className="p-1.5 pt-0">
+            <div className="space-y-0.5">
               {filtered.map((project) => (
                 <button
+                  data-row
                   key={project._id}
                   onClick={() => select(project._id)}
-                  className={`${itemClass} ${value === project._id ? "bg-brand-bg text-brand-strong" : ""}`}
+                  className={`${itemClass} ${value === project._id ? "!text-brand-strong" : ""}`}
                 >
                   <span className="flex items-center gap-2.5">
-                    <span
-                      className="flex size-5 items-center justify-center rounded-md text-[10px] font-bold text-foreground"
-                      style={{ backgroundColor: project.color || "#6366f1" }}
-                    >
-                      {project.name[0]?.toUpperCase()}
-                    </span>
+                    <Folder className="size-4" style={{ color: project.color || "#6366f1" }} />
                     {project.name}
                   </span>
                 </button>
@@ -361,9 +358,9 @@ export const ProjectPickerPopover = memo(function ProjectPickerPopover({
         )}
 
         {value && (
-          <div className="border-t border-line p-1.5">
-            <button onClick={() => select(undefined)} className={removeClass}>
-              <HugeiconsIcon icon={Delete02Icon} size={14} />
+          <div className="mt-1.5">
+            <button data-row onClick={() => select(undefined)} className={removeClass}>
+              <IoTrash size={14} />
               Remove project
             </button>
           </div>
@@ -462,21 +459,22 @@ export const TimePickerPopover = memo(function TimePickerPopover({
             }
           }}
         />
-        <div ref={listRef} className="max-h-[240px] overflow-y-auto p-1.5">
+        <div ref={listRef} className="space-y-0.5">
           {filtered.map((t) => (
             <button
+              data-row
               key={t.value}
               onClick={() => select(t.value)}
-              className={`${itemClass} ${value === t.value ? "bg-brand-bg text-brand-strong" : ""}`}
+              className={`${itemClass} ${value === t.value ? "!text-brand-strong" : ""}`}
             >
               {t.label}
             </button>
           ))}
         </div>
         {value && (
-          <div className="border-t border-line p-1.5">
-            <button onClick={() => select(undefined)} className={removeClass}>
-              <HugeiconsIcon icon={Delete02Icon} size={14} />
+          <div className="mt-1.5">
+            <button data-row onClick={() => select(undefined)} className={removeClass}>
+              <IoTrash size={14} />
               Remove
             </button>
           </div>

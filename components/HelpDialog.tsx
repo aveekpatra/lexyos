@@ -1,167 +1,164 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import {
-  Dialog,
-  DialogPopup,
-  DialogTitle,
-  DialogHeader,
-  DialogPanel,
-} from "@/components/ui/dialog";
+import { useEffect, useState } from "react";
+import { Dialog, DialogPopup, DialogTitle } from "@/components/ui/dialog";
+import { Segmented } from "@/components/ui/segmented";
 import { Kbd } from "@/components/ui/kbd";
+import { glassIconButton } from "@/lib/ui/chrome";
+import { IoClose, IoHelpCircle } from "react-icons/io5";
+import { useSettings, matchesShortcut, shortcutKeys, type Shortcut } from "@/lib/settings";
 
-export function HelpDialog({
-  open,
-  onOpenChange,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-}) {
+/*
+ * Help as an Aturno sheet: hero glyph, one question per tab, and grouped
+ * capsule lists instead of a wall of headings. Tabs slide; nothing stacks.
+ */
+
+type Tab = "shortcuts" | "board" | "ai";
+
+export function HelpDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+  const [tab, setTab] = useState<Tab>("shortcuts");
+  const { settings } = useSettings();
+  const sc = settings.shortcuts;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogPopup className="max-w-xl" showCloseButton>
-        <DialogHeader>
-          <DialogTitle className="text-lg">Help</DialogTitle>
-        </DialogHeader>
-        <DialogPanel>
-          <div className="flex flex-col gap-6">
-            {/* AI Agent */}
-            <Section title="AI Agent">
-              <p className="mb-3 text-sm text-text-secondary">
-                Press <Kbd>Ctrl</Kbd> <Kbd>K</Kbd> to focus the AI bar. Ask it anything in natural language.
-              </p>
-              <SubSection title="Tasks">
-                <HelpItem text="Create tasks" example={`"Add a task to review PRs tomorrow at 2pm"`} />
-                <HelpItem text="Update tasks" example={`"Move standup to 10am"`} />
-                <HelpItem text="Complete / delete tasks" example={`"Mark groceries as done"`} />
-                <HelpItem text="Search tasks" example={`"What's on my plate today?"`} />
-                <HelpItem text="Plan your day" example={`"Plan my day" or "When am I free?"`} />
-              </SubSection>
-              <SubSection title="Projects">
-                <HelpItem text="Create projects" example={`"Create a project called Q3 Launch"`} />
-                <HelpItem text="Update / archive projects" example={`"Rename project to Beta Launch"`} />
-                <HelpItem text="Move tasks to projects" example={`"Move that task to Q3 Launch"`} />
-              </SubSection>
-              <SubSection title="Email">
-                <HelpItem text="Search emails" example={`"Show unread emails from John"`} />
-                <HelpItem text="Read emails" example={`"What did Sarah say about the meeting?"`} />
-                <HelpItem text="Send emails" example={`"Email Alex saying I'll be late"`} />
-                <HelpItem text="Reply to emails" example={`"Reply saying sounds good"`} />
-                <HelpItem text="Archive / trash / star" example={`"Archive that email"`} />
-              </SubSection>
-              <SubSection title="Voice">
-                <HelpItem text="Press the mic icon to dictate — speech fills the input" />
-                <HelpItem text="Press the phone icon for call mode — hands-free conversation with voice responses" />
-              </SubSection>
-            </Section>
-
-            {/* Global Shortcuts */}
-            <Section title="Global Shortcuts">
-              <ShortcutRow keys={["Ctrl", "K"]} label="Focus AI bar" />
-            </Section>
-
-            {/* Inbox Shortcuts */}
-            <Section title="Inbox">
-              <ShortcutRow keys={["Shift", "O"]} label="Overview (day buckets)" />
-              <ShortcutRow keys={["Shift", "D"]} label="Day view" />
-              <ShortcutRow keys={["Shift", "W"]} label="Week view" />
-              <ShortcutRow keys={["Shift", "M"]} label="Month view" />
-              <ShortcutRow keys={["1"]} label="Add task to first column" extra="2, 3... for other columns" />
-            </Section>
-
-            {/* Planner Shortcuts */}
-            <Section title="Planner">
-              <ShortcutRow keys={["T"]} label="Jump to today" />
-              <ShortcutRow keys={["C"]} label="Add new task" />
-              <p className="mt-1 text-xs text-text-faint">Drag tasks onto the time grid to schedule them. Resize blocks to change duration.</p>
-            </Section>
-
-            {/* Mail Shortcuts */}
-            <Section title="Mail">
-              <ShortcutRow keys={["J"]} label="Next email" extra="or Arrow Down" />
-              <ShortcutRow keys={["K"]} label="Previous email" extra="or Arrow Up" />
-              <ShortcutRow keys={["E"]} label="Archive" />
-              <ShortcutRow keys={["S"]} label="Star / unstar" />
-              <ShortcutRow keys={["#"]} label="Trash" />
-              <ShortcutRow keys={["Shift", "I"]} label="Mark as read" />
-              <ShortcutRow keys={["Shift", "U"]} label="Mark as unread" />
-              <ShortcutRow keys={["C"]} label="Compose new email" />
-              <ShortcutRow keys={["X"]} label="Select / deselect" />
-              <ShortcutRow keys={["/"]} label="Focus search" />
-              <ShortcutRow keys={["Esc"]} label="Close thread / clear selection" />
-            </Section>
-
-            {/* General Tips */}
-            <Section title="Tips">
-              <ul className="flex flex-col gap-1.5 text-sm text-text-secondary">
-                <li>Right-click any task or email for quick actions</li>
-                <li>Drag and drop tasks between columns to reschedule</li>
-                <li>Drag projects in the sidebar to reorder them</li>
-                <li>Click the sync button to manually sync Calendar and Gmail</li>
-              </ul>
-            </Section>
+      <DialogPopup className="max-w-[460px] overflow-hidden !rounded-[24px] !p-0" showCloseButton={false}>
+        <div className="flex max-h-[82vh] flex-col">
+          <div className="flex items-center justify-end px-4 pt-4">
+            <button onClick={() => onOpenChange(false)} aria-label="Close" className={glassIconButton}>
+              <IoClose className="size-4" />
+            </button>
           </div>
-        </DialogPanel>
+
+          <div className="flex flex-col items-center px-6 pb-4 text-center">
+            <div className="mb-3 flex size-14 items-center justify-center rounded-full bg-brand/10 text-brand">
+              <IoHelpCircle className="size-7" aria-hidden />
+            </div>
+            <DialogTitle className="text-[20px] font-semibold leading-snug tracking-[-0.01em] text-text-strong">How Mindbook works</DialogTitle>
+            <p className="mt-1 max-w-[320px] text-[13px] leading-relaxed text-text-muted">
+              Everything is a task. Inbox shows all of them by time, a project shows its own by status.
+            </p>
+            <Segmented
+              layoutId="help-tabs"
+              value={tab}
+              onChange={setTab}
+              className="mt-4"
+              items={[
+                { value: "shortcuts", label: "Shortcuts" },
+                { value: "board", label: "Board" },
+                { value: "ai", label: "Ask AI" },
+              ]}
+            />
+          </div>
+
+          <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-5 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+            {tab === "shortcuts" && (
+              <div className="space-y-4">
+                <Group title="Anywhere">
+                  <Row label="Search, jump, or ask AI" keys={shortcutKeys(sc.palette)} />
+                  <Row label="Open this help" keys={shortcutKeys(sc.help)} />
+                </Group>
+                <Group title="Inbox">
+                  <Row label="Overview: today, this week, next week, month" keys={shortcutKeys(sc.overview)} />
+                  <Row label="Days: one column per day, endless" keys={shortcutKeys(sc.days)} />
+                  <Row label="Scroll to today" keys={shortcutKeys(sc.today)} />
+                  <Row label="Add a task to a column" keys={shortcutKeys(sc.quickAdd)} hint="2, 3 for the next ones" />
+                </Group>
+                <Group title="Add task field">
+                  <Row label="Create and stay" keys={["Enter"]} />
+                  <Row label="Create and open the task" keys={["Tab"]} />
+                </Group>
+              </div>
+            )}
+
+            {tab === "board" && (
+              <div className="space-y-4">
+                <Group title="Cards">
+                  <Tip>Drag a card onto any column or day to move its date.</Tip>
+                  <Tip>Drop a card on an hour in the Timebox to give it a time. Drag the block to move it, pull its bottom edge to change the length.</Tip>
+                  <Tip>Right-click a card for priority, date, project, repeat, done, and delete without opening it.</Tip>
+                  <Tip>Click the circle on a card to complete it. A repeating task rolls to its next date and keeps a done copy.</Tip>
+                </Group>
+                <Group title="Projects">
+                  <Tip>Click a project in the sidebar to open its board, grouped by status. Overview holds its description and a context document.</Tip>
+                  <Tip>Right-click a project, or hover its row, for rename, colour, archive, duplicate, and delete.</Tip>
+                </Group>
+                <Group title="Calendar">
+                  <Tip>Pick a day in the sidebar month to jump the Inbox and the Timebox to it.</Tip>
+                  <Tip>Tasks with a date appear on Google Calendar. The sync button in the sidebar pulls and pushes on demand.</Tip>
+                </Group>
+              </div>
+            )}
+
+            {tab === "ai" && (
+              <div className="space-y-4">
+                <Group title="Try saying">
+                  <Say>Add a task to review PRs tomorrow at 2pm</Say>
+                  <Say>Move standup to 10am and make it repeat on weekdays</Say>
+                  <Say>Make this Monday morning and Thursday evening</Say>
+                  <Say>What is on my plate today?</Say>
+                  <Say>Plan my day</Say>
+                  <Say>Create a project called Q3 Launch</Say>
+                </Group>
+                <Group title="Voice">
+                  <Tip>The mic dictates into the input. The phone icon starts a hands-free conversation with spoken replies.</Tip>
+                </Group>
+              </div>
+            )}
+          </div>
+        </div>
       </DialogPopup>
     </Dialog>
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Group({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div>
-      <h3 className="mb-2 text-[13px] font-semibold uppercase tracking-wider text-text-faint">{title}</h3>
-      {children}
-    </div>
-  );
-}
-
-function SubSection({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="mb-2.5">
-      <h4 className="mb-1.5 text-[13px] font-medium text-text-secondary">{title}</h4>
-      <div className="flex flex-col gap-1">{children}</div>
-    </div>
-  );
-}
-
-function HelpItem({ text, example }: { text: string; example?: string }) {
-  return (
-    <div className="flex items-baseline gap-2 text-sm">
-      <span className="text-text-secondary">{text}</span>
-      {example && <span className="text-xs text-text-faint">{example}</span>}
-    </div>
-  );
-}
-
-function ShortcutRow({ keys, label, extra }: { keys: string[]; label: string; extra?: string }) {
-  return (
-    <div className="flex items-center justify-between py-0.5">
-      <span className="text-sm text-text-secondary">{label}</span>
-      <div className="flex items-center gap-1.5">
-        {extra && <span className="mr-1 text-xs text-text-faint">{extra}</span>}
-        <div className="flex items-center gap-0.5">
-          {keys.map((k, i) => (
-            <Kbd key={i}>{k}</Kbd>
-          ))}
-        </div>
+    <section>
+      <h3 className="mb-1.5 px-3.5 text-[11px] font-medium uppercase tracking-[0.06em] text-text-faint">{title}</h3>
+      <div className="overflow-hidden rounded-[16px] bg-black/[0.03] dark:bg-white/[0.05] [&>*+*]:border-t [&>*+*]:border-black/[0.05] dark:[&>*+*]:border-white/[0.06]">
+        {children}
       </div>
+    </section>
+  );
+}
+
+function Row({ label, keys, hint }: { label: string; keys: string[]; hint?: string }) {
+  return (
+    <div className="flex min-h-10 items-center gap-3 px-3.5 py-2">
+      <span className="min-w-0 flex-1 text-[13px] text-text-strong">{label}</span>
+      {hint && <span className="text-[11px] text-text-faint">{hint}</span>}
+      <span className="flex shrink-0 items-center gap-0.5">
+        {keys.map((k, i) => <Kbd key={i}>{k}</Kbd>)}
+      </span>
     </div>
+  );
+}
+
+function Tip({ children }: { children: React.ReactNode }) {
+  return <p className="px-3.5 py-2.5 text-[13px] leading-relaxed text-text-secondary">{children}</p>;
+}
+
+function Say({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="px-3.5 py-2.5 text-[13px] text-text-strong">
+      <span className="text-text-faint">&ldquo;</span>{children}<span className="text-text-faint">&rdquo;</span>
+    </p>
   );
 }
 
 /** Hook to open help dialog with ? key */
-export function useHelpShortcut(onOpen: () => void) {
+export function useHelpShortcut(onOpen: () => void, combo: Shortcut = "?") {
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      const tag = (e.target as HTMLElement).tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-      if (e.key === "?" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      const target = e.target as HTMLElement;
+      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable) return;
+      if (matchesShortcut(e, combo)) {
         e.preventDefault();
         onOpen();
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onOpen]);
+  }, [onOpen, combo]);
 }

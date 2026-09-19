@@ -1,4 +1,5 @@
 import { v } from "convex/values";
+import { agentValidator, getIdentity } from "./lib/actor";
 import { query, mutation } from "./_generated/server";
 
 /**
@@ -9,13 +10,13 @@ import { query, mutation } from "./_generated/server";
 /** Enqueue a sync operation. Deduplicates by taskId — if a pending entry
  *  already exists for the same task, updates it in place. */
 export const enqueue = mutation({
-  args: {
+  args: { agent: agentValidator,
     taskId: v.id("tasks"),
     action: v.union(v.literal("push"), v.literal("update"), v.literal("delete")),
     payload: v.optional(v.any()),
   },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
+    const identity = await getIdentity(ctx, args.agent);
     if (!identity) throw new Error("Unauthorized");
     const userId = identity.subject;
 

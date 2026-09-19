@@ -10,9 +10,10 @@ const GOOGLE_CALENDAR_API = "https://www.googleapis.com/calendar/v3";
 
 async function googleFetch(
   path: string,
-  options: RequestInit = {}
+  options: RequestInit = {},
+  retried = false,
 ): Promise<Response> {
-  const token = await getGoogleAccessToken();
+  const token = await getGoogleAccessToken({ forceRefresh: retried });
   const res = await fetch(`${GOOGLE_CALENDAR_API}${path}`, {
     ...options,
     headers: {
@@ -21,6 +22,8 @@ async function googleFetch(
       ...options.headers,
     },
   });
+  // A stale access token gets one forced refresh and retry.
+  if (res.status === 401 && !retried) return googleFetch(path, options, true);
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`Google Calendar API error (${res.status}): ${text}`);

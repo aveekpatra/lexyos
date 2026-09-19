@@ -1,5 +1,6 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
+import { recurrenceValidator } from "./lib/recurrence";
 
 export default defineSchema({
   tasks: defineTable({
@@ -24,8 +25,9 @@ export default defineSchema({
     scheduledStartTime: v.optional(v.string()),
     scheduledEndTime: v.optional(v.string()),
     projectId: v.optional(v.id("projects")),
-    sectionId: v.optional(v.id("sections")),
-    recurrence: v.optional(v.string()), // "daily" | "weekdays" | "weekly" | "biweekly" | "monthly" | "yearly" | ""
+    // Structured rule (see convex/lib/recurrence.ts). Plain strings are legacy
+    // rows ("daily", "weekdays", ...) and are normalised on read.
+    recurrence: v.optional(v.union(v.string(), recurrenceValidator)),
     labels: v.optional(v.array(v.string())),
     parentTaskId: v.optional(v.id("tasks")),
     googleEventId: v.optional(v.string()),       // linked Google Calendar event ID
@@ -39,10 +41,6 @@ export default defineSchema({
     timeZone: v.optional(v.string()),
     googleUpdatedAt: v.optional(v.string()),
     lastSyncedAt: v.optional(v.number()),
-    // Gmail linking fields
-    gmailMessageId: v.optional(v.string()),
-    gmailThreadId: v.optional(v.string()),
-    gmailSubject: v.optional(v.string()),
     sortOrder: v.number(),
     completedAt: v.optional(v.number()),
     userId: v.string(),
@@ -53,9 +51,7 @@ export default defineSchema({
     .index("by_userId_and_scheduledDate", ["userId", "scheduledDate"])
     .index("by_userId_and_dueDate", ["userId", "dueDate"])
     .index("by_parentTaskId", ["parentTaskId"])
-    .index("by_userId_and_sectionId", ["userId", "sectionId"])
-    .index("by_userId_and_googleEventId", ["userId", "googleEventId"])
-    .index("by_userId_and_gmailThreadId", ["userId", "gmailThreadId"]),
+    .index("by_userId_and_googleEventId", ["userId", "googleEventId"]),
 
   projects: defineTable({
     name: v.string(),
@@ -74,19 +70,6 @@ export default defineSchema({
   })
     .index("by_userId", ["userId"])
     .index("by_userId_and_status", ["userId", "status"]),
-
-  sections: defineTable({
-    name: v.string(),
-    sortOrder: v.number(),
-    userId: v.string(),
-  }).index("by_userId", ["userId"]),
-
-  favorites: defineTable({
-    type: v.union(v.literal("project"), v.literal("label")),
-    referenceId: v.string(),
-    sortOrder: v.number(),
-    userId: v.string(),
-  }).index("by_userId", ["userId"]),
 
   calendarEvents: defineTable({
     // Google Calendar event ID + calendar ID (together form the unique key)
@@ -131,27 +114,6 @@ export default defineSchema({
     .index("by_userId", ["userId"])
     .index("by_userId_and_calendarId", ["userId", "googleCalendarId"]),
 
-  emails: defineTable({
-    gmailMessageId: v.string(),
-    gmailThreadId: v.string(),
-    labelIds: v.array(v.string()),
-    snippet: v.string(),
-    subject: v.string(),
-    fromName: v.string(),
-    fromEmail: v.string(),
-    toSummary: v.string(),
-    date: v.number(),
-    hasAttachments: v.boolean(),
-    isUnread: v.boolean(),
-    isStarred: v.boolean(),
-    historyId: v.string(),
-    userId: v.string(),
-  })
-    .index("by_userId_and_date", ["userId", "date"])
-    .index("by_userId_and_threadId", ["userId", "gmailThreadId"])
-    .index("by_userId_and_messageId", ["userId", "gmailMessageId"])
-    .index("by_userId_and_unread", ["userId", "isUnread"]),
-
   pendingSyncQueue: defineTable({
     userId: v.string(),
     taskId: v.id("tasks"),
@@ -166,24 +128,44 @@ export default defineSchema({
     .index("by_userId_and_status", ["userId", "status"])
     .index("by_taskId", ["taskId"]),
 
-  emailSyncState: defineTable({
-    lastHistoryId: v.string(),
-    lastSyncedAt: v.number(),
-    lastFullSyncAt: v.optional(v.number()),
+  // One Google account per user. Tokens are encrypted by the Next server
+  // before they get here (see lib/google-oauth.ts); Convex only stores ciphertext.
+  googleConnections: defineTable({
     userId: v.string(),
-  }).index("by_userId", ["userId"]),
-
-  aiSettings: defineTable({
-    apiKey: v.string(),
-    model: v.optional(v.string()),
-    userId: v.string(),
+    email: v.optional(v.string()),
+    scope: v.string(),
+    accessTokenEnc: v.string(),
+    refreshTokenEnc: v.string(),
+    /** Epoch ms when accessToken expires. */
+    expiresAt: v.number(),
+    connectedAt: v.number(),
+    /** Set when Google refused a refresh; the UI asks to reconnect. */
+    lastError: v.optional(v.string()),
   }).index("by_userId", ["userId"]),
 
   userPreferences: defineTable({
     theme: v.optional(v.string()),
     projectSort: v.optional(v.string()),
+    /** Free-form settings blob, merged shallowly by userPreferences.update. Shape: lib/settings.ts */
+    prefs: v.optional(v.any()),
     userId: v.string(),
   }).index("by_userId", ["userId"]),
+
+  // Personal API tokens for MCP and integrations. Only a hash is stored.
+  apiTokens: defineTable({
+    name: v.string(),
+    prefix: v.string(),
+    hash: v.string(),
+    /** The plain key, sealed by the Next server so Settings can show it again. */
+    keyEnc: v.optional(v.string()),
+    scope: v.union(v.literal("read"), v.literal("write"), v.literal("readwrite")),
+    createdAt: v.number(),
+    lastUsedAt: v.optional(v.number()),
+    revokedAt: v.optional(v.number()),
+    userId: v.string(),
+  })
+    .index("by_userId", ["userId"])
+    .index("by_hash", ["hash"]),
 
   aiChats: defineTable({
     messages: v.array(v.object({

@@ -1,6 +1,6 @@
 /**
- * One code path for "pull a window of Google events into Convex" so the planner
- * and the rail sync button cannot interleave, and so neither can infer
+ * One code path for "pull a window of Google events into Convex" so the board
+ * and the sidebar sync button cannot interleave, and so neither can infer
  * deletions from a partial fetch.
  */
 import { startOfDay, addDays, subDays } from "date-fns";

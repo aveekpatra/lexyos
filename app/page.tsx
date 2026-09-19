@@ -7,10 +7,9 @@ import {
 } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
-import { HugeiconsIcon } from "@hugeicons/react";
-import { Layers01Icon } from "@hugeicons/core-free-icons";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
+import { IoPrism } from "react-icons/io5";
 
 function RedirectToTimeline() {
   const router = useRouter();
@@ -35,10 +34,10 @@ export default function Home() {
           <div className="flex max-w-sm flex-col items-center gap-8 text-center">
             <div className="flex flex-col items-center gap-2">
               <div className="mb-2 flex size-12 items-center justify-center rounded-xl bg-primary text-primary-foreground">
-                <HugeiconsIcon icon={Layers01Icon} size={24} color="currentColor" />
+                <IoPrism size={24} />
               </div>
               <h1 className="text-3xl font-semibold tracking-tight">
-                UniFocus
+                Mindbook
               </h1>
               <p className="text-sm text-muted-foreground">
                 AI-powered productivity. Tasks and projects — unified.
