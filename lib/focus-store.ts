@@ -22,15 +22,41 @@ export interface FocusSession {
   lengths: { focus: number; short: number; long: number; rounds: number };
 }
 
+/*
+ * Persistence is the timestamps: a running phase stores its absolute end, a
+ * paused one its remaining time. Reloading therefore needs no clock: the
+ * remaining time is recomputed from `endsAt` whenever it is read. The store
+ * mirrors to localStorage on every change and FocusTimer syncs it to the
+ * account settings, so the session also follows the user across devices.
+ */
+const KEY = "unifocus:focus";
 let session: FocusSession | null = null;
+let hydrated = false;
 const listeners = new Set<() => void>();
-const emit = () => listeners.forEach((l) => l());
+const emit = () => {
+  try { if (session) localStorage.setItem(KEY, JSON.stringify(session)); else localStorage.removeItem(KEY); } catch { /* ignore */ }
+  listeners.forEach((l) => l());
+};
+function hydrate() {
+  if (hydrated) return;
+  hydrated = true;
+  try { const raw = localStorage.getItem(KEY); if (raw) session = JSON.parse(raw) as FocusSession; } catch { /* ignore */ }
+}
 
 const store = {
   subscribe(cb: () => void) { listeners.add(cb); return () => { listeners.delete(cb); }; },
-  get: () => session,
+  get: () => { hydrate(); return session; },
   getServer: () => null as FocusSession | null,
 };
+
+/** Adopt a session from another device (account settings). No-op if identical. */
+export function adoptFocus(next: FocusSession | null) {
+  hydrate();
+  if (JSON.stringify(next) === JSON.stringify(session)) return;
+  session = next;
+  emit();
+}
+export function currentFocus(): FocusSession | null { hydrate(); return session; }
 
 export function startFocus(input: { taskId: string | null; taskTitle: string; lengths: FocusSession["lengths"] }) {
   const ms = input.lengths.focus * 60_000;

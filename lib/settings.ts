@@ -2,6 +2,7 @@
 
 import { useCallback, useMemo } from "react";
 import { useQuery, useMutation } from "convex/react";
+import type { FocusSession } from "@/lib/focus-store";
 import { api } from "@/convex/_generated/api";
 
 /**
@@ -63,6 +64,8 @@ export interface Settings {
     kanbanSort: "priority" | "date" | "created" | "alpha";
     timeboxOpen: boolean;
     projectSort: "manual" | "name" | "priority" | "dueDate" | "recent";
+    /** Running or paused Pomodoro, so it survives reload and follows the account. */
+    focusSession: FocusSession | null;
   };
   shortcuts: {
     palette: Shortcut;
@@ -99,7 +102,7 @@ export const DEFAULT_SETTINGS: Settings = {
   dueDates: { indicatorWithinDays: 3, reminderNotifications: false },
   pomodoro: { workMin: 25, shortBreakMin: 5, longBreakMin: 15, roundsBeforeLongBreak: 4, autoStartBreaks: true, autoStartNext: false, sound: true },
   ai: { approval: "ask", showReasoning: false, schedulingPreferences: "" },
-  ui: { sidebarCollapsed: false, kanbanView: "overview", kanbanShowDone: false, kanbanSort: "priority", timeboxOpen: true, projectSort: "manual" },
+  ui: { sidebarCollapsed: false, kanbanView: "overview", kanbanShowDone: false, kanbanSort: "priority", timeboxOpen: true, projectSort: "manual", focusSession: null },
   shortcuts: { palette: "mod+/", help: "?", overview: "shift+o", days: "shift+d", today: "shift+t", quickAdd: "1" },
 };
 

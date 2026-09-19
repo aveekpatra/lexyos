@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { useUser } from "@clerk/nextjs";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { GOOGLE_CALENDAR_SCOPE } from "@/lib/google-oauth";
@@ -92,6 +92,13 @@ function readSnoozed(): boolean {
     return false;
   }
 }
+const snoozeListeners = new Set<() => void>();
+const snoozeStore = {
+  subscribe(cb: () => void) { snoozeListeners.add(cb); return () => { snoozeListeners.delete(cb); }; },
+  get: () => readSnoozed(),
+  getServer: () => true,
+  set(until: number) { try { localStorage.setItem(SNOOZE_KEY, String(until)); } catch { /* ignore */ } snoozeListeners.forEach((l) => l()); },
+};
 
 /**
  * Prompts to connect Google Calendar. Opens on its own when the account is
@@ -109,14 +116,15 @@ export function ConnectGoogleDialog({
   const params = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
-  const [snoozed, setSnoozed] = useState<boolean>(() => (typeof window === "undefined" ? true : readSnoozed()));
+  const snoozed = useSyncExternalStore(snoozeStore.subscribe, snoozeStore.get, snoozeStore.getServer);
+  const [dismissed, setDismissed] = useState(false);
   const { connect, busy } = useConnectGoogle();
 
   const result = params.get("google");
   const reason = params.get("reason");
 
   // Auto-open when not connected (or needs reconnect) and not snoozed.
-  const autoOpen = status !== undefined && (!status.connected || status.needsReconnect) && !snoozed;
+  const autoOpen = status !== undefined && (!status.connected || status.needsReconnect) && !snoozed && !dismissed;
 
   // Clear the ?google=... marker once we have shown it, and re-check the connection.
   useEffect(() => {
@@ -128,10 +136,8 @@ export function ConnectGoogleDialog({
 
   const open = forcedOpen || autoOpen;
   const close = (snooze: boolean) => {
-    if (snooze) {
-      try { localStorage.setItem(SNOOZE_KEY, String(Date.now() + SNOOZE_MS)); } catch { /* ignore */ }
-    }
-    setSnoozed(true);
+    if (snooze) snoozeStore.set(Date.now() + SNOOZE_MS);
+    setDismissed(true);
     onOpenChange(false);
   };
 

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useFocusSession, pauseFocus, resumeFocus, stopFocus, nextPhase } from "@/lib/focus-store";
+import { useFocusSession, pauseFocus, resumeFocus, stopFocus, nextPhase, adoptFocus } from "@/lib/focus-store";
 import { useSettings } from "@/lib/settings";
 import { IoPause, IoPlay, IoClose, IoPlaySkipForward, IoTimer } from "react-icons/io5";
 
@@ -13,10 +13,25 @@ import { IoPause, IoPlay, IoClose, IoPlaySkipForward, IoTimer } from "react-icon
  */
 export function FocusTimer() {
   const session = useFocusSession();
-  const { settings } = useSettings();
+  const { settings, update, loaded } = useSettings();
   const router = useRouter();
   const [now, setNow] = useState(() => Date.now());
   const firedFor = useRef<number | null>(null);
+
+  // Account sync. Local changes go up; a session from another device comes down
+  // only when there is nothing running here.
+  const remote = loaded ? settings.ui.focusSession : undefined;
+  const remoteKey = JSON.stringify(remote ?? null);
+  const localKey = JSON.stringify(session);
+  const adopted = useRef(false);
+  useEffect(() => {
+    if (remote === undefined) return;
+    if (!adopted.current) {
+      adopted.current = true;
+      if (!session && remote) { adoptFocus(remote); return; }
+    }
+    if (remoteKey !== localKey) void update("ui", { focusSession: session });
+  }, [remote, remoteKey, localKey, session, update]);
 
   useEffect(() => {
     if (!session?.running) return;

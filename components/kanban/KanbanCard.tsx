@@ -17,10 +17,12 @@ import { normalizeRecurrence, shortRecurrenceLabel } from "@/convex/lib/recurren
 import { RecurrencePopover } from "@/components/tasks/RecurrencePopover";
 import { PRIORITY_COLORS } from "@/lib/constants";
 import { setDraggingTaskId } from "@/lib/drag-store";
+import { startFocus, useFocusSession } from "@/lib/focus-store";
 import { useSettings, formatClock } from "@/lib/settings";
 import {
   IoEllipseOutline,
   IoRepeat,
+  IoTimer,
 } from "react-icons/io5";
 
 interface KanbanCardProps {
@@ -73,6 +75,8 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue, context = "
   const dateStr = task.dueDate || task.scheduledDate;
 
   const { settings } = useSettings();
+  const focusSession = useFocusSession();
+  const focusingThis = focusSession?.taskId === task._id;
   const color = PRIORITY_COLORS[task.priority] || PRIORITY_COLORS.p4;
   const clock = settings.calendar.timeFormat;
   const fmtTime = (t: string) => formatClock(t, clock);
@@ -163,6 +167,18 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue, context = "
           >
             {task.title}
           </span>
+          {/* Start focus: appears on hover, or stays lit while this task is the one in focus */}
+          {!isDone && (
+            <button
+              onClick={(e) => { e.stopPropagation(); if (focusingThis) return; startFocus({ taskId: task._id, taskTitle: task.title, lengths: { focus: settings.pomodoro.workMin, short: settings.pomodoro.shortBreakMin, long: settings.pomodoro.longBreakMin, rounds: settings.pomodoro.roundsBeforeLongBreak } }); }}
+              onContextMenu={(e) => e.stopPropagation()}
+              aria-label={focusingThis ? "In focus" : "Start focus"}
+              title={focusingThis ? "In focus" : "Start focus"}
+              className={`-my-1 -mr-1.5 flex size-6 shrink-0 items-center justify-center rounded-full transition-[opacity,background-color,color] ${focusingThis ? "bg-brand/10 text-brand opacity-100" : "text-text-faint opacity-0 hover:bg-black/[0.06] hover:text-text-strong group-hover:opacity-100 focus-visible:opacity-100 dark:hover:bg-white/[0.08]"}`}
+            >
+              <IoTimer className="size-3.5" />
+            </button>
+          )}
         </div>
 
         {/* Row 2: Meta chips */}
