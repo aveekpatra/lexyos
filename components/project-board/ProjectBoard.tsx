@@ -276,7 +276,7 @@ function ProjectOverview({ project, tasks, onUpdate }: {
             className="mt-2 text-[15px] leading-6 text-text-secondary"
           />
           <section className="mt-8">
-            <h2 className="mb-2 text-[12px] font-medium uppercase tracking-[0.06em] text-text-faint">Context</h2>
+            <h2 className="mb-2 text-[13px] font-semibold text-text-strong">Context</h2>
             <MarkdownEditor
               docKey={project._id}
               value={project.notes ?? ""}
@@ -286,7 +286,7 @@ function ProjectOverview({ project, tasks, onUpdate }: {
           </section>
         </main>
 
-        <aside className="flex flex-col gap-7 lg:pt-2">
+        <aside className="flex flex-col gap-3 lg:pt-2 [&>section:not(.meta)]:rounded-[16px] [&>section:not(.meta)]:bg-black/[0.03] [&>section:not(.meta)]:p-2 dark:[&>section:not(.meta)]:bg-white/[0.05]">
           <section>
             <RailHeading>Properties</RailHeading>
             <div className="flex flex-col gap-1">

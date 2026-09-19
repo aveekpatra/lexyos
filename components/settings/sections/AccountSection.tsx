@@ -20,7 +20,7 @@ export function AccountSection() {
     const blob = new Blob([JSON.stringify({ exportedAt: new Date().toISOString(), projects, tasks }, null, 2)], { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = `mindbook-export-${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = `lexyos-export-${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(a.href);
   };
@@ -47,7 +47,7 @@ export function AccountSection() {
       </Section>
 
       <Section title="About">
-        <Row label="Mindbook" hint={`Version ${pkg.version}`} />
+        <Row label="Lexyos" hint={`Version ${pkg.version}`} />
       </Section>
     </>
   );

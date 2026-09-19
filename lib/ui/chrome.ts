@@ -75,7 +75,7 @@ export const menuInput =
 
 /** Section label inside a menu shell. */
 export const menuSectionLabel =
-  "px-3.5 pb-1 pt-2 text-[11px] font-medium uppercase tracking-[0.06em] text-text-faint";
+  "px-3.5 pb-1 pt-2 text-[12px] font-semibold text-text-secondary";
 
 /* ── Board columns ──
    Every board (Inbox overview, day, week, month, project) uses one rule:

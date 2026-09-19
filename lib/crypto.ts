@@ -5,7 +5,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:
 function key(): Buffer {
   const secret = process.env.AGENT_SECRET;
   if (!secret) throw new Error("AGENT_SECRET is not set");
-  return createHash("sha256").update(`mindbook-seal:${secret}`).digest();
+  return createHash("sha256").update(`mindbook-seal:${secret}` /* historical label; changing it would orphan sealed keys */).digest();
 }
 
 export function seal(plain: string): string {

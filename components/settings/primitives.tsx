@@ -164,5 +164,5 @@ export function ShortcutRecorder({ value, fallback, onChange }: { value: Shortcu
 
 export function Tag({ children, tone }: { children: React.ReactNode; tone?: "brand" | "muted" | "green" }) {
   const cls = tone === "brand" ? "bg-brand/10 text-brand" : tone === "green" ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" : "bg-black/[0.05] text-text-muted dark:bg-white/[0.08]";
-  return <span className={`inline-flex h-5 items-center rounded-full px-2 text-[10px] font-semibold uppercase tracking-wide ${cls}`}>{children}</span>;
+  return <span className={`inline-flex h-5 items-center rounded-full px-2 text-[10.5px] font-semibold ${cls}`}>{children}</span>;
 }

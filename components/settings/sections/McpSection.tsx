@@ -35,13 +35,13 @@ export function McpSection() {
     window.open(href, "_blank", "noopener");
   };
 
-  const cursorLink = `cursor://anysphere.cursor-deeplink/mcp/install?name=mindbook&config=${typeof window !== "undefined" ? btoa(JSON.stringify({ url: mcpUrl })) : ""}`;
-  const vscodeLink = `vscode:mcp/install?${encodeURIComponent(JSON.stringify({ name: "mindbook", type: "http", url: mcpUrl }))}`;
-  const claudeCodeCmd = `claude mcp add --transport http mindbook ${mcpUrl}`;
+  const cursorLink = `cursor://anysphere.cursor-deeplink/mcp/install?name=lexyos&config=${typeof window !== "undefined" ? btoa(JSON.stringify({ url: mcpUrl })) : ""}`;
+  const vscodeLink = `vscode:mcp/install?${encodeURIComponent(JSON.stringify({ name: "lexyos", type: "http", url: mcpUrl }))}`;
+  const claudeCodeCmd = `claude mcp add --transport http lexyos ${mcpUrl}`;
 
   return (
     <>
-      <Section title="Connect an assistant" description="Each one signs in with your Mindbook account. Nothing to paste except the server URL, and that goes on your clipboard for you.">
+      <Section title="Connect an assistant" description="Each one signs in with your Lexyos account. Nothing to paste except the server URL, and that goes on your clipboard for you.">
         <Row label="Claude" hint={<>Opens Claude connectors. Press <b>Add custom connector</b>, paste the URL, then <b>Connect</b>.</>} icon={<Glyph>C</Glyph>}>
           <button onClick={() => connectVia("claude", "https://claude.ai/settings/connectors")} className={bluePill}>
             {copied === "claude" ? <IoCheckmarkCircle className="size-3.5" /> : <IoOpenOutline className="size-3.5" />}{copied === "claude" ? "URL copied" : "Connect Claude"}
@@ -110,7 +110,7 @@ function ApiKey({ mcpUrl, copy, copied }: { mcpUrl: string; copy: (t: string, k:
   };
 
   const masked = info ? `${info.key.slice(0, 6)}${"•".repeat(28)}` : "";
-  const setup = JSON.stringify({ mcpServers: { mindbook: { url: mcpUrl, headers: { Authorization: `Bearer ${info && shown ? info.key : "YOUR_KEY"}` } } } }, null, 2);
+  const setup = JSON.stringify({ mcpServers: { lexyos: { url: mcpUrl, headers: { Authorization: `Bearer ${info && shown ? info.key : "YOUR_KEY"}` } } } }, null, 2);
 
   return (
     <Section title="API key (fallback)" description="For scripts and clients without OAuth. Sent as a bearer token.">

@@ -284,7 +284,7 @@ export default function TaskDetail({ taskId }: { taskId: Id<"tasks"> }) {
           </main>
 
           {/* Properties rail */}
-          <aside className="flex flex-col gap-7 lg:pt-2">
+          <aside className="flex flex-col gap-3 lg:pt-2 [&>section:not(.meta)]:rounded-[16px] [&>section:not(.meta)]:bg-black/[0.03] [&>section:not(.meta)]:p-2 dark:[&>section:not(.meta)]:bg-white/[0.05]">
             <section>
               <RailHeading>Properties</RailHeading>
               <div className="flex flex-col gap-1">
@@ -418,7 +418,7 @@ export default function TaskDetail({ taskId }: { taskId: Id<"tasks"> }) {
               )}
             </section>
 
-            <section className="flex flex-col gap-1 border-t border-line px-3 pt-4 text-[12px] text-text-faint">
+            <section className="meta flex flex-col gap-1 px-3 pt-2 text-[12px] text-text-faint">
               <span title={format(new Date(task._creationTime), "PPpp")}>
                 Created {formatDistanceToNow(task._creationTime, { addSuffix: true })}
               </span>

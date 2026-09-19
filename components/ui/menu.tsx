@@ -193,7 +193,7 @@ export function MenuGroupLabel({
   return (
     <MenuPrimitive.GroupLabel
       className={cn(
-        "px-3.5 pb-1 pt-2 text-[11px] font-medium uppercase tracking-[0.06em] text-text-faint data-inset:ps-9",
+        "px-3.5 pb-1 pt-2 text-[12px] font-semibold text-text-secondary data-inset:ps-9",
         className,
       )}
       data-inset={inset}

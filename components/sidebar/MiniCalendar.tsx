@@ -69,7 +69,7 @@ export function MiniCalendar() {
         months: "relative",
         month: "flex flex-col gap-1",
         month_caption: "flex h-8 items-center pl-1.5",
-        caption_label: "text-[12px] font-medium uppercase tracking-[0.06em] text-text-faint",
+        caption_label: "text-[12px] font-semibold text-text-strong",
         nav: "absolute right-0 top-0 flex h-8 items-center gap-0.5",
         button_previous: "flex size-7 items-center justify-center rounded-full text-text-faint transition-colors hover:bg-black/[0.05] hover:text-text-strong disabled:opacity-30 dark:hover:bg-white/[0.06]",
         button_next: "flex size-7 items-center justify-center rounded-full text-text-faint transition-colors hover:bg-black/[0.05] hover:text-text-strong disabled:opacity-30 dark:hover:bg-white/[0.06]",

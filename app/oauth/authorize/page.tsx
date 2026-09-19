@@ -53,7 +53,7 @@ export default async function Authorize({ searchParams }: { searchParams: Promis
       <div className="flex items-center gap-3">
         <span className="flex size-10 items-center justify-center rounded-xl bg-primary text-primary-foreground"><IoPrism size={20} /></span>
         <div>
-          <h1 className="text-[17px] font-semibold text-text-strong">Connect {client.name} to Mindbook</h1>
+          <h1 className="text-[17px] font-semibold text-text-strong">Connect {client.name} to Lexyos</h1>
           <p className="text-[12.5px] text-text-muted">It will return you to {redirectHost}</p>
         </div>
       </div>

@@ -90,7 +90,7 @@ export function SettingsDialog({ open, onOpenChange, onOpenGoogle, initialSectio
             <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
               {NAV.map((g) => (
                 <div key={g.group} className="mt-3">
-                  <div className="mb-1 px-3.5 text-[11px] font-medium uppercase tracking-[0.06em] text-text-faint">{g.group}</div>
+                  <div className="mb-1 px-3.5 text-[12px] font-semibold text-text-secondary">{g.group}</div>
                   <div className="flex flex-col gap-0.5">
                     {g.items.map((it) => {
                       const active = section === it.id;

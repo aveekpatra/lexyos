@@ -156,7 +156,7 @@ export function ConnectGoogleDialog({
               ? `Connected as ${status.email ?? "your Google account"}. Tasks with a date sync both ways.`
               : needsReconnect
                 ? "Google stopped accepting the saved connection. Connect again to resume syncing."
-                : "Mindbook mirrors dated tasks to your calendar and pulls events back in. Nothing syncs until an account is connected."}
+                : "Lexyos mirrors dated tasks to your calendar and pulls events back in. Nothing syncs until an account is connected."}
           </DialogDescription>
         </DialogHeader>
         <DialogPanel>

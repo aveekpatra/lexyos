@@ -302,7 +302,7 @@ const FloatingPill = memo(function FloatingPill({
                   <IoSparkles size={17} className="mb-2 text-[#62646a] dark:text-white/50" />
                   <p className="mb-1 text-[13px] font-semibold text-[#17181b] dark:text-white">How can I help?</p>
                   <p className="mb-5 text-center text-[13px] text-[#62646a] dark:text-white/60">
-                    Ask anything or tell Mindbook what you need
+                    Ask anything or tell Lexyos what you need
                   </p>
                   <div className="flex flex-wrap justify-center gap-2">
                     {SUGGESTION_CHIPS.map(({ label, Icon }) => (

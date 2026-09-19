@@ -25,7 +25,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Mindbook",
+  title: "Lexyos",
   description: "AI-powered productivity system",
 };
 

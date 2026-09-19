@@ -61,7 +61,7 @@ export function protectedResourceMetadata(origin: string) {
     authorization_servers: [origin],
     scopes_supported: [...SCOPES],
     bearer_methods_supported: ["header"],
-    resource_name: "Mindbook",
+    resource_name: "Lexyos",
   };
 }
 

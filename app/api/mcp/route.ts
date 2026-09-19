@@ -43,8 +43,8 @@ const handler = createMcpHandler(
     }
   },
   {
-    serverInfo: { name: "mindbook", version: "1.0.0" },
-    instructions: "Mindbook is the user's task and time manager. Dates are YYYY-MM-DD, times HH:MM 24h. Ask before delete_task; everything else may be done directly.",
+    serverInfo: { name: "lexyos", version: "1.0.0" },
+    instructions: "Lexyos is the user's task and time manager. Dates are YYYY-MM-DD, times HH:MM 24h. Ask before delete_task; everything else may be done directly.",
   },
 );
 

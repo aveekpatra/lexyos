@@ -8,7 +8,7 @@
 
 export function RailHeading({ children }: { children: React.ReactNode }) {
   return (
-    <h2 className="mb-2 px-3 text-[12px] font-medium uppercase tracking-[0.06em] text-text-faint">{children}</h2>
+    <h2 className="mb-1 px-3 text-[12px] font-semibold text-text-secondary">{children}</h2>
   );
 }
 

@@ -34,7 +34,7 @@ export function HelpDialog({ open, onOpenChange }: { open: boolean; onOpenChange
             <div className="mb-3 flex size-14 items-center justify-center rounded-full bg-brand/10 text-brand">
               <IoHelpCircle className="size-7" aria-hidden />
             </div>
-            <DialogTitle className="text-[20px] font-semibold leading-snug tracking-[-0.01em] text-text-strong">How Mindbook works</DialogTitle>
+            <DialogTitle className="text-[20px] font-semibold leading-snug tracking-[-0.01em] text-text-strong">How Lexyos works</DialogTitle>
             <p className="mt-1 max-w-[320px] text-[13px] leading-relaxed text-text-muted">
               Everything is a task. Inbox shows all of them by time, a project shows its own by status.
             </p>
@@ -115,7 +115,7 @@ export function HelpDialog({ open, onOpenChange }: { open: boolean; onOpenChange
 function Group({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section>
-      <h3 className="mb-1.5 px-3.5 text-[11px] font-medium uppercase tracking-[0.06em] text-text-faint">{title}</h3>
+      <h3 className="mb-1.5 px-3.5 text-[12px] font-semibold text-text-secondary">{title}</h3>
       <div className="overflow-hidden rounded-[16px] bg-black/[0.03] dark:bg-white/[0.05] [&>*+*]:border-t [&>*+*]:border-black/[0.05] dark:[&>*+*]:border-white/[0.06]">
         {children}
       </div>

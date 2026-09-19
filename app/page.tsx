@@ -46,7 +46,7 @@ export default function Home() {
                 <IoPrism size={24} />
               </div>
               <h1 className="text-3xl font-semibold tracking-tight">
-                Mindbook
+                Lexyos
               </h1>
               <p className="text-sm text-muted-foreground">
                 AI-powered productivity. Tasks and projects — unified.

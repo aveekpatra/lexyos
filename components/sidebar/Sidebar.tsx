@@ -120,7 +120,7 @@ export function Sidebar({ onOpenSearch, onOpenHelp, onOpenGoogle, onOpenSettings
           <>
             <span className="flex min-w-0 flex-1 items-center gap-2.5 pl-3 text-[14px] font-medium text-text-strong">
               <UserButton appearance={{ elements: { avatarBox: { width: 22, height: 22 } } }} />
-              <span className="truncate">Mindbook</span>
+              <span className="truncate">Lexyos</span>
             </span>
             <Circle label="Collapse sidebar" onClick={toggleCollapsed}>
               <SidebarGlyph className="size-[18px]" />
@@ -178,7 +178,7 @@ export function Sidebar({ onOpenSearch, onOpenHelp, onOpenGoogle, onOpenSettings
       <div className={`mt-5 flex min-h-0 flex-1 flex-col ${gutter}`}>
         <div className={`group/head flex h-8 shrink-0 items-center ${collapsed ? "justify-center" : "gap-1 pl-3.5 pr-1"}`}>
           {!collapsed && (
-            <span className="min-w-0 flex-1 truncate text-[12px] font-medium uppercase tracking-[0.06em] text-text-faint">Projects</span>
+            <span className="min-w-0 flex-1 truncate text-[12px] font-semibold text-text-secondary">Projects</span>
           )}
           {!collapsed && (
             <Menu>
@@ -238,7 +238,7 @@ export function Sidebar({ onOpenSearch, onOpenHelp, onOpenGoogle, onOpenSettings
             <div className="mt-3">
               <button
                 onClick={() => setShowArchived((v) => !v)}
-                className="flex h-8 w-full items-center gap-1.5 pl-3.5 pr-2 text-[12px] font-medium uppercase tracking-[0.06em] text-text-faint hover:text-text-secondary"
+                className="flex h-8 w-full items-center gap-1.5 pl-3.5 pr-2 text-[12px] font-semibold text-text-faint hover:text-text-secondary"
               >
                 <span className="flex-1 text-left">Archived</span>
                 <span className="tabular-nums">{archived.length}</span>
