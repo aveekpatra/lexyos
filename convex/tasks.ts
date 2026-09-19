@@ -691,6 +691,9 @@ export const bulkUpsertFromGoogle = mutation({
         googleUpdatedAt: v.optional(v.string()),
         // Convex task ID stored in Google's extendedProperties for round-trip identification
         unifocusTaskId: v.optional(v.string()),
+        /** Present when this row stands for a whole recurring series (googleEventId is the master). */
+        googleRecurringEventId: v.optional(v.string()),
+        recurrence: v.optional(recurrenceValidator),
       })
     ),
     // When the events were read from Google (ms). lastSyncedAt is stamped with
@@ -734,6 +737,18 @@ export const bulkUpsertFromGoogle = mutation({
       }
       const parsed = parseGoogleDateTime(event.startDateTime, event.endDateTime, event.startDate);
 
+      // A series row replaces every flattened per-instance copy of the same series
+      // (ids look like "<master>_20260922T070000Z"). Completed copies stay as history.
+      if (event.googleRecurringEventId) {
+        const prefix = `${event.googleRecurringEventId}_`;
+        for (const t of existingTasks) {
+          if (t.source !== "google_calendar" || !t.googleEventId?.startsWith(prefix)) continue;
+          if (t.status === "done") continue;
+          await ctx.db.delete("tasks", t._id);
+          existingByGoogleId.delete(t.googleEventId);
+        }
+      }
+
       if (existing) {
         // Update — but DON'T overwrite if user edited more recently than Google's update
         // This prevents the sync from reverting user's drag/resize/rename changes
@@ -753,8 +768,27 @@ export const bulkUpsertFromGoogle = mutation({
           lastSyncedAt: syncStamp,
         };
 
-        // Only overwrite content fields if Google's version is newer (user didn't edit since last sync)
-        if (!userEditedSinceSync) {
+        if (event.googleRecurringEventId) {
+          // Series: the rule and metadata always follow Google. The date follows
+          // Google's next instance unless the user already rolled this task past it
+          // by completing it here, in which case the local roll wins.
+          patch.googleRecurringEventId = event.googleRecurringEventId;
+          if (event.recurrence) patch.recurrence = event.recurrence;
+          patch.title = event.title;
+          patch.description = event.description;
+          patch.location = event.location;
+          const rolledAhead = !!existing.dueDate && !!parsed.dueDate && existing.dueDate > parsed.dueDate && existing.status !== "done";
+          if (!rolledAhead) {
+            patch.isAllDay = event.isAllDay;
+            patch.dueDate = parsed.dueDate;
+            patch.dueTime = parsed.dueTime;
+            patch.scheduledDate = parsed.scheduledDate;
+            patch.scheduledStartTime = parsed.scheduledStartTime;
+            patch.scheduledEndTime = parsed.scheduledEndTime;
+            if (existing.status === "done") { patch.status = "todo"; patch.completedAt = undefined; }
+          }
+        } else if (!userEditedSinceSync) {
+          // Only overwrite content fields if Google's version is newer (user didn't edit since last sync)
           patch.title = event.title;
           patch.description = event.description;
           patch.location = event.location;
@@ -781,6 +815,8 @@ export const bulkUpsertFromGoogle = mutation({
           scheduledEndTime: parsed.scheduledEndTime,
           googleEventId: event.googleEventId,
           googleCalendarId: event.googleCalendarId,
+          googleRecurringEventId: event.googleRecurringEventId,
+          recurrence: event.recurrence,
           source: "google_calendar",
           location: event.location,
           isAllDay: event.isAllDay,

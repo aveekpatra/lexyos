@@ -7,6 +7,8 @@ import {
   getCalendarEventsIncremental,
   getCalendarEventsWithSyncToken,
 } from "@/lib/calendar-api";
+import { collapseGoogleEvents } from "@/lib/calendar-series";
+import { localDateStr } from "@/lib/time-utils";
 
 export const maxDuration = 60;
 
@@ -26,6 +28,7 @@ export async function POST() {
     convex.setAuth(token);
 
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const today = localDateStr(new Date());
     const prefsRow = await convex.query(api.userPreferences.get, {});
     const showDeclined = !!(prefsRow?.prefs as { calendar?: { showDeclinedEvents?: boolean } } | undefined)?.calendar?.showDeclinedEvents;
 
@@ -55,24 +58,26 @@ export async function POST() {
 
         if (result.fullSyncRequired) {
           // syncToken expired — fall back to full sync for this calendar
-          await fullSyncCalendar(convex, calendar.id, tz, showDeclined);
+          await fullSyncCalendar(convex, calendar.id, tz, today, showDeclined);
           method = "full (token expired)";
         } else {
           // Process incremental changes: upserts for live events, deletes for
           // cancelled ones (the whole point of an incremental feed).
           if (result.events.length > 0) {
             const fetchedAt = Date.now();
+            // A cancelled instance of a series is not a deletion of the task; the
+            // series refetch inside collapse decides what the live task looks like.
             const cancelledIds = result.events
-              .filter((e) => e.status === "cancelled")
+              .filter((e) => e.status === "cancelled" && !e.recurringEventId)
               .map((e) => e.id);
-            const mapped = mapEventsToTaskFormat(result.events, tz, showDeclined);
-            if (mapped.length > 0) {
-              await convex.mutation(api.tasks.bulkUpsertFromGoogle, { events: mapped, fetchedAt });
+            const { rows } = await collapseGoogleEvents(result.events, { tz, today, showDeclined, refetchSeries: true });
+            if (rows.length > 0) {
+              await convex.mutation(api.tasks.bulkUpsertFromGoogle, { events: rows, fetchedAt });
             }
             if (cancelledIds.length > 0) {
               await convex.mutation(api.tasks.removeGoogleEventsByIds, { googleEventIds: cancelledIds });
             }
-            totalEvents += mapped.length + cancelledIds.length;
+            totalEvents += rows.length + cancelledIds.length;
           }
 
           // Save new syncToken
@@ -88,7 +93,7 @@ export async function POST() {
       } else {
         // No syncToken — do a full sync for this calendar
         method = "full (first sync)";
-        await fullSyncCalendar(convex, calendar.id, tz, showDeclined);
+        await fullSyncCalendar(convex, calendar.id, tz, today, showDeclined);
       }
     }
 
@@ -113,6 +118,7 @@ async function fullSyncCalendar(
   convex: ConvexHttpClient,
   calendarId: string,
   tz: string,
+  today: string,
   showDeclined = false,
 ) {
   const now = new Date();
@@ -128,9 +134,9 @@ async function fullSyncCalendar(
   );
 
   if (result.events.length > 0) {
-    const mapped = mapEventsToTaskFormat(result.events, tz, showDeclined);
-    if (mapped.length > 0) {
-      await convex.mutation(api.tasks.bulkUpsertFromGoogle, { events: mapped, fetchedAt });
+    const { rows } = await collapseGoogleEvents(result.events, { tz, today, showDeclined });
+    if (rows.length > 0) {
+      await convex.mutation(api.tasks.bulkUpsertFromGoogle, { events: rows, fetchedAt });
     }
   }
 
@@ -145,48 +151,4 @@ async function fullSyncCalendar(
       syncToken: result.nextSyncToken,
     });
   }
-}
-
-/** Map raw Google Calendar events to the format expected by bulkUpsertFromGoogle. */
-function mapEventsToTaskFormat(
-  events: Array<{
-    id: string;
-    calendarId?: string;
-    summary?: string;
-    description?: string;
-    location?: string;
-    start: { dateTime?: string; date?: string; timeZone?: string };
-    end: { dateTime?: string; date?: string; timeZone?: string };
-    status?: string;
-    htmlLink?: string;
-    calendarColor?: string;
-    colorId?: string;
-    updated?: string;
-    extendedProperties?: { private?: Record<string, string> };
-    attendees?: Array<{ self?: boolean; responseStatus?: string }>;
-  }>,
-  tz: string,
-  showDeclined = false,
-) {
-  return events
-    .filter((e) => e.status !== "cancelled")
-    .filter((e) => showDeclined || !e.attendees?.some((a) => a.self && a.responseStatus === "declined"))
-    .map((e) => ({
-      googleEventId: e.id,
-      googleCalendarId: e.calendarId || "primary",
-      title: e.summary || "(No title)",
-      description: e.description,
-      location: e.location,
-      startDateTime: e.start.dateTime,
-      startDate: e.start.date,
-      endDateTime: e.end.dateTime,
-      endDate: e.end.date,
-      timeZone: tz,
-      googleStatus: e.status,
-      htmlLink: e.htmlLink,
-      calendarColor: e.calendarColor,
-      isAllDay: !e.start.dateTime && !!e.start.date,
-      googleUpdatedAt: e.updated || undefined,
-      unifocusTaskId: e.extendedProperties?.private?.unifocus_id || undefined,
-    }));
 }

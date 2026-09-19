@@ -22,7 +22,9 @@ import {
 
 /** Should changes to this task be synced back to Google Calendar? */
 export function shouldSyncToGoogle(task: Doc<"tasks">): boolean {
-  return !!task.googleEventId;
+  // A task that mirrors a recurring series must never rewrite the master:
+  // moving or renaming it would change every instance in Google (and Todoist).
+  return !!task.googleEventId && !task.googleRecurringEventId;
 }
 
 /** Format time parts into ISO datetime string (no timezone suffix) */
@@ -48,6 +50,8 @@ export async function syncTaskUpdateToGoogle(
   changes: Record<string, unknown>,
 ): Promise<{ googleEventId: string; googleCalendarId: string } | null> {
   const tz = getUserTz();
+  // A series mirror is never written back; Google (or Todoist) owns the rule.
+  if (task.googleRecurringEventId) return null;
 
   // clearDueDate resets to today in Convex — update the Google event to today too
   if ("clearDueDate" in changes && changes.clearDueDate && task.googleEventId) {

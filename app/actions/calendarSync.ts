@@ -8,7 +8,8 @@ import {
   deleteCalendarEvent,
   type CreateEventInput,
 } from "@/lib/calendar-api";
-import { addDaysToDateStr, endTimeFor, DEFAULT_EVENT_MINUTES } from "@/lib/time-utils";
+import { addDaysToDateStr, endTimeFor, DEFAULT_EVENT_MINUTES, localDateStr } from "@/lib/time-utils";
+import { collapseGoogleEvents, type SyncRow } from "@/lib/calendar-series";
 
 /**
  * Fetch events from Google Calendar and return them in the format
@@ -20,7 +21,7 @@ import { addDaysToDateStr, endTimeFor, DEFAULT_EVENT_MINUTES } from "@/lib/time-
  * - endDateTime -> parsed into scheduledEndTime
  */
 export interface GoogleEventsForSync {
-  events: ReturnType<typeof mapEventForSync>[];
+  events: SyncRow[];
   /** false when at least one calendar failed: the list is partial and must not
    *  be used to infer deletions. */
   complete: boolean;
@@ -31,41 +32,15 @@ export async function fetchGoogleEventsForSync(
   timeMin: string,
   timeMax: string,
   userTimeZone?: string,
+  userToday?: string,
+  showDeclined?: boolean,
 ): Promise<GoogleEventsForSync> {
   const tz = userTimeZone || Intl.DateTimeFormat().resolvedOptions().timeZone;
   // Google returns dateTime values pre-converted to `tz` with DST applied.
   const { events, failedCalendarIds } = await getCalendarEventsDetailed(timeMin, timeMax, tz);
-  return {
-    events: events.map((e) => mapEventForSync(e, tz)),
-    complete: failedCalendarIds.length === 0,
-    failedCalendarIds,
-  };
-}
-
-function mapEventForSync(
-  e: Awaited<ReturnType<typeof getCalendarEventsDetailed>>["events"][number],
-  tz: string,
-) {
-  return {
-    googleEventId: e.id,
-    googleCalendarId: e.calendarId || "primary",
-    title: e.summary || "(No title)",
-    description: e.description,
-    location: e.location,
-    // Pass through directly — Google already gave us local time in `tz`.
-    startDateTime: e.start.dateTime,
-    startDate: e.start.date,
-    endDateTime: e.end.dateTime,
-    endDate: e.end.date,
-    timeZone: tz,
-    googleStatus: e.status,
-    htmlLink: e.htmlLink,
-    calendarColor: e.calendarColor,
-    isAllDay: !e.start.dateTime && !!e.start.date,
-    googleUpdatedAt: e.updated || undefined,
-    // Pass through the Convex task ID if set via extendedProperties (round-trip identification)
-    unifocusTaskId: e.extendedProperties?.private?.unifocus_id || undefined,
-  };
+  const today = userToday ?? localDateStr(new Date());
+  const { rows } = await collapseGoogleEvents(events, { tz, today, showDeclined: !!showDeclined });
+  return { events: rows, complete: failedCalendarIds.length === 0, failedCalendarIds };
 }
 
 /**

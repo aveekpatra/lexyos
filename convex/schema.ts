@@ -35,6 +35,8 @@ export default defineSchema({
     /** Project board column. Falls back to the column matching `status`. */
     columnId: v.optional(v.string()),
     googleEventId: v.optional(v.string()),       // linked Google Calendar event ID
+    /** Set when googleEventId is a series master: Google owns the rule, we only roll locally. */
+    googleRecurringEventId: v.optional(v.string()),
     googleCalendarId: v.optional(v.string()),     // which calendar it's on (default "primary")
     // Calendar-sourced task fields
     source: v.optional(v.union(v.literal("local"), v.literal("google_calendar"))),

@@ -65,6 +65,35 @@ export interface GoogleEvent {
     private?: Record<string, string>;
     shared?: Record<string, string>;
   };
+  /** Set on an expanded instance: the id of the series master. */
+  recurringEventId?: string;
+  originalStartTime?: { dateTime?: string; date?: string };
+  /** Set on a series master: RRULE lines. */
+  recurrence?: string[];
+  attendees?: Array<{ self?: boolean; responseStatus?: string }>;
+}
+
+/** One event by id (used for series masters, to read the RRULE). */
+export async function getEvent(calendarId: string, eventId: string): Promise<GoogleEvent> {
+  const res = await googleFetch(`/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`);
+  const e = (await res.json()) as GoogleEvent;
+  return { ...e, calendarId };
+}
+
+/** Expanded instances of one series inside [timeMin, timeMax). */
+export async function getSeriesInstances(calendarId: string, masterId: string, timeMin: string, timeMax: string, timeZone?: string): Promise<GoogleEvent[]> {
+  const out: GoogleEvent[] = [];
+  let pageToken: string | undefined;
+  do {
+    const params = new URLSearchParams({ timeMin, timeMax, maxResults: "250" });
+    if (timeZone) params.set("timeZone", timeZone);
+    if (pageToken) params.set("pageToken", pageToken);
+    const res = await googleFetch(`/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(masterId)}/instances?${params}`);
+    const data = await res.json();
+    for (const e of data.items ?? []) out.push({ ...(e as GoogleEvent), calendarId });
+    pageToken = data.nextPageToken || undefined;
+  } while (pageToken);
+  return out;
 }
 
 export async function getCalendarList(): Promise<GoogleCalendar[]> {

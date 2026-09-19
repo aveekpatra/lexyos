@@ -100,8 +100,8 @@ export async function POST() {
             const task = await convex.query(api.tasks.getById, {
               id: item.taskId,
             });
-            if (!task || !task.googleEventId) {
-              // No Google event to update — mark done
+            if (!task || !task.googleEventId || task.googleRecurringEventId) {
+              // No Google event to update, or a series master we never rewrite: mark done
               await convex.mutation(api.syncQueue.markDone, { id: item._id });
               processed++;
               continue;

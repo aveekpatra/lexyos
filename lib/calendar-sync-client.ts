@@ -11,7 +11,7 @@ import { localDateStr } from "@/lib/time-utils";
 
 type BulkUpsert = ReactMutation<typeof api.tasks.bulkUpsertFromGoogle>;
 type RemoveDeleted = ReactMutation<typeof api.tasks.removeDeletedGoogleEvents>;
-type FetchEvents = (timeMin: string, timeMax: string, tz: string) => Promise<GoogleEventsForSync>;
+type FetchEvents = (timeMin: string, timeMax: string, tz: string, today?: string) => Promise<GoogleEventsForSync>;
 
 // ReactMutation is callable, so a plain async function satisfies these in tests.
 export interface CalendarSyncDeps {
@@ -61,7 +61,7 @@ export function runCalendarSync(
     const userTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
     const fetchStartedAt = Date.now();
-    const { events, complete, failedCalendarIds } = await fetchEvents(timeMin, timeMax, userTz);
+    const { events, complete, failedCalendarIds } = await fetchEvents(timeMin, timeMax, userTz, localDateStr(new Date()));
 
     let upserted = 0;
     if (events.length > 0) {
