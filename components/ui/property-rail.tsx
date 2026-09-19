@@ -21,6 +21,22 @@ export function PropertyRow({ label, children }: { label: string; children: Reac
   );
 }
 
+/** Radial progress ring. `size` in px; label defaults to the percentage. */
+export function RadialProgress({ value, total, size = 64, stroke = 6, label }: { value: number; total: number; size?: number; stroke?: number; label?: React.ReactNode }) {
+  const pct = total > 0 ? Math.min(1, value / total) : 0;
+  const r = (size - stroke) / 2;
+  const c = 2 * Math.PI * r;
+  return (
+    <span className="relative inline-flex shrink-0 items-center justify-center" style={{ width: size, height: size }}>
+      <svg viewBox={`0 0 ${size} ${size}`} className="absolute inset-0 -rotate-90">
+        <circle cx={size / 2} cy={size / 2} r={r} className="fill-none stroke-black/[0.07] dark:stroke-white/[0.1]" strokeWidth={stroke} />
+        <circle cx={size / 2} cy={size / 2} r={r} className={`fill-none ${pct >= 1 ? "stroke-emerald-500" : "stroke-brand"} transition-[stroke-dashoffset] duration-500`} strokeWidth={stroke} strokeLinecap="round" strokeDasharray={c} strokeDashoffset={c * (1 - pct)} />
+      </svg>
+      <span className="relative text-[12px] font-semibold tabular-nums text-text-strong">{label ?? `${Math.round(pct * 100)}%`}</span>
+    </span>
+  );
+}
+
 export function Dot({ color }: { color: string }) {
   return <span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: color }} />;
 }

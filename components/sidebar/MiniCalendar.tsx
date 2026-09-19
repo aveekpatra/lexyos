@@ -78,9 +78,9 @@ export function MiniCalendar() {
         weekday: "h-6 text-center text-[10px] font-medium text-text-faint",
         week: "",
         day: "p-0 text-center",
-        day_button: "relative mx-auto flex size-7 items-center justify-center rounded-full text-[12px] font-medium text-text-secondary transition-colors hover:bg-black/[0.05] hover:text-text-strong dark:hover:bg-white/[0.06]",
-        today: "[&>button]:font-bold [&>button]:text-text-strong",
-        selected: "[&>button]:bg-text-strong [&>button]:text-white [&>button]:hover:bg-text-strong dark:[&>button]:bg-white dark:[&>button]:text-black",
+        day_button: "relative mx-auto flex size-7 items-center justify-center rounded-full text-[12px] font-medium text-text-secondary transition-colors hover:bg-brand hover:text-white",
+        today: "[&>button]:font-semibold [&>button]:text-text-strong",
+        selected: "[&>button]:bg-brand [&>button]:text-white [&>button]:hover:bg-brand-strong",
         outside: "[&>button]:text-text-faint/60",
         hidden: "invisible",
       }}

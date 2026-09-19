@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "motion/react";
 import { useQuery, useMutation } from "convex/react";
@@ -14,9 +14,11 @@ import { MarkdownEditor } from "@/components/editor/MarkdownEditor";
 import { Menu, MenuTrigger, MenuPopup, MenuItem } from "@/components/ui/menu";
 import { DatePickerPopover } from "@/components/tasks/TaskPropertyPopovers";
 import { ProjectMenuItems, DeleteProjectDialog } from "@/components/projects/ProjectActions";
-import { RailHeading, PropertyRow, Dot } from "@/components/ui/property-rail";
+import { RailHeading, PropertyRow, Dot, RadialProgress } from "@/components/ui/property-rail";
+import { projectSignals } from "@/lib/project-signals";
 import { glassIconButton, glassAction, softPill as pill, emptyPill as pillEmpty, BOARD_COLUMN_WIDTH } from "@/lib/ui/chrome";
 import { PRIORITY_COLORS, PRIORITY_LABELS, STATUS_OPTIONS, type TaskStatus } from "@/lib/constants";
+import { useSettings, matchesShortcut } from "@/lib/settings";
 import { format, parseISO } from "date-fns";
 import { useQuickAdd } from "@/lib/quick-add";
 import {
@@ -45,6 +47,27 @@ export default function ProjectBoard({ projectId }: { projectId: Id<"projects"> 
   const project = useQuery(api.projects.getById, { id: projectId });
   const tasks = useQuery(api.tasks.list, { projectId });
   const [tab, setTab] = useState<Tab>("board");
+  // Digits 1..5 focus a column's add field, same as the timeline; the quick-add shortcut takes the first.
+  const [focusColumn, setFocusColumn] = useState<TaskStatus | null>(null);
+  const [focusTick, setFocusTick] = useState(0);
+  const { settings: boardSettings } = useSettings();
+  useEffect(() => {
+    if (tab !== "board") return;
+    function onKey(e: KeyboardEvent) {
+      const t = e.target as HTMLElement;
+      if (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable) return;
+      let idx = -1;
+      if (matchesShortcut(e, boardSettings.shortcuts.quickAdd) && !/^[0-9]$/.test(e.key)) idx = 0;
+      else if (!e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && /^[1-9]$/.test(e.key)) idx = Number(e.key) - 1;
+      const col = STATUS_OPTIONS[idx];
+      if (!col) return;
+      e.preventDefault();
+      setFocusColumn(col.value);
+      setFocusTick((n) => n + 1);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [tab, boardSettings.shortcuts.quickAdd]);
   const [sortBy, setSortBy] = useState<SortBy>("priority");
   const [deleteOpen, setDeleteOpen] = useState(false);
   const updateProject = useMutation(api.projects.update);
@@ -91,7 +114,7 @@ export default function ProjectBoard({ projectId }: { projectId: Id<"projects"> 
       {/* Header: same bar as the Inbox board */}
       <div className="flex shrink-0 items-center justify-between gap-3 px-5 py-2">
         <div className="flex min-w-0 items-center gap-3.5">
-          <h1 className="flex min-w-0 items-center gap-2 text-[15px] font-bold tracking-tight text-text-strong">
+          <h1 className="flex min-w-0 items-center gap-2 text-[15px] font-semibold tracking-tight text-text-strong">
             <Folder open className="size-[18px]" style={{ color: project.color }} />
             <span className="truncate">{project.name}</span>
             <span className="text-[13px] font-medium text-text-faint">{openCount}</span>
@@ -135,7 +158,7 @@ export default function ProjectBoard({ projectId }: { projectId: Id<"projects"> 
 
       {tab === "board" ? (
         <div className="flex flex-1 gap-3 overflow-x-auto overflow-y-hidden scroll-px-3 px-3 pb-3 pt-1 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-          {STATUS_OPTIONS.map((s) => (
+          {STATUS_OPTIONS.map((s, i) => (
             <StatusColumn
               key={s.value}
               status={s.value}
@@ -144,6 +167,8 @@ export default function ProjectBoard({ projectId }: { projectId: Id<"projects"> 
               tasks={sort(byStatus.get(s.value) ?? [])}
               projectId={project._id}
               defaultDueDate={project.dueDate}
+              shortcut={String(i + 1)}
+              focusToken={focusColumn === s.value ? focusTick : 0}
             />
           ))}
         </div>
@@ -163,13 +188,16 @@ export default function ProjectBoard({ projectId }: { projectId: Id<"projects"> 
 
 /* ─── Status column: same shell as the Inbox columns, drop sets status ─── */
 
-function StatusColumn({ status, label, color, tasks, projectId, defaultDueDate }: {
+function StatusColumn({ status, label, color, tasks, projectId, defaultDueDate, shortcut, focusToken }: {
   status: TaskStatus;
   label: string;
   color: string;
   tasks: Doc<"tasks">[];
   projectId: Id<"projects">;
   defaultDueDate?: string;
+  shortcut: string;
+  /** Changes when a keyboard shortcut asks this column to take focus. */
+  focusToken: number;
 }) {
   const { create: quickCreate } = useQuickAdd();
   const updateTask = useMutation(api.tasks.update);
@@ -178,6 +206,11 @@ function StatusColumn({ status, label, color, tasks, projectId, defaultDueDate }
   const [isOver, setIsOver] = useState(false);
   const counter = useRef(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (!focusToken) return;
+    inputRef.current?.focus();
+    inputRef.current?.scrollIntoView({ inline: "nearest", block: "nearest", behavior: "smooth" });
+  }, [focusToken]);
 
   const add = useCallback(async (open: boolean) => {
     const t = title.trim();
@@ -214,7 +247,7 @@ function StatusColumn({ status, label, color, tasks, projectId, defaultDueDate }
       )}
       <div className="flex items-center gap-2 px-3 pb-2.5 pt-3.5">
         <span className="size-2.5 rounded-full" style={{ backgroundColor: color }} />
-        <span className="text-[14px] font-bold tracking-tight text-text-strong">{label}</span>
+        <span className="text-[14px] font-semibold tracking-tight text-text-strong">{label}</span>
         <span className="text-[12px] font-medium text-text-muted">{tasks.length}</span>
       </div>
 
@@ -232,6 +265,9 @@ function StatusColumn({ status, label, color, tasks, projectId, defaultDueDate }
           }}
           className="w-0 min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-text-faint"
         />
+        <kbd className="inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-black/[0.05] text-[10px] font-medium text-text-faint dark:bg-white/[0.08]">
+          {shortcut}
+        </kbd>
       </div>
 
       <div className="flex flex-1 flex-col gap-1.5 overflow-y-auto px-3 pb-3 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
@@ -253,8 +289,9 @@ function ProjectOverview({ project, tasks, onUpdate }: {
   const name = nameDraft?.id === project._id ? nameDraft.v : project.name;
   const description = descDraft?.id === project._id ? descDraft.v : project.description ?? "";
   const archived = project.status === "archived";
-  const done = tasks.filter((t) => t.status === "done").length;
+  const done = tasks.filter((t) => t.status === "done" && !t.parentTaskId).length;
   const total = tasks.filter((t) => !t.parentTaskId).length;
+  const signals = useMemo(() => projectSignals(tasks), [tasks]);
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
@@ -275,7 +312,7 @@ function ProjectOverview({ project, tasks, onUpdate }: {
             minRows={1}
             className="mt-2 text-[15px] leading-6 text-text-secondary"
           />
-          <section className="mt-8">
+          <section className="mt-8 px-2">
             <h2 className="mb-2 text-[13px] font-semibold text-text-strong">Context</h2>
             <MarkdownEditor
               docKey={project._id}
@@ -343,13 +380,13 @@ function ProjectOverview({ project, tasks, onUpdate }: {
 
           <section>
             <RailHeading>Progress</RailHeading>
-            <div className="px-3">
-              <div className="mb-2 flex items-baseline justify-between text-[13px]">
-                <span className="text-text-muted">{done} of {total} done</span>
-                <span className="tabular-nums text-text-faint">{total ? Math.round((done / total) * 100) : 0}%</span>
-              </div>
-              <div className="h-1.5 overflow-hidden rounded-full bg-black/[0.06] dark:bg-white/[0.08]">
-                <div className="h-full rounded-full bg-brand transition-[width]" style={{ width: `${total ? (done / total) * 100 : 0}%` }} />
+            <div className="px-3 pb-1">
+              <div className="flex items-center gap-4">
+                <RadialProgress value={done} total={total} size={68} stroke={7} />
+                <div className="flex flex-col text-[13px]">
+                  <span className="font-medium text-text-strong">{done} of {total} done</span>
+                  <span className="text-text-muted">{total === 0 ? "No tasks yet" : done === total ? "Everything is done" : `${total - done} left`}</span>
+                </div>
               </div>
               <div className="mt-3 flex flex-col gap-1 text-[13px] text-text-secondary">
                 {STATUS_OPTIONS.map((s) => {
@@ -364,6 +401,18 @@ function ProjectOverview({ project, tasks, onUpdate }: {
                   );
                 })}
               </div>
+            </div>
+          </section>
+
+          <section>
+            <RailHeading>Signals</RailHeading>
+            <div className="flex flex-col">
+              {signals.map((s) => (
+                <div key={s.label} className="grid h-9 grid-cols-[1fr_auto] items-center rounded-full px-3 text-[13px]">
+                  <span className="text-text-muted">{s.label}</span>
+                  <span className={`tabular-nums ${s.tone === "warn" ? "text-rose-600 dark:text-rose-400" : s.tone === "good" ? "text-emerald-600 dark:text-emerald-400" : "text-text-strong"}`}>{s.value}</span>
+                </div>
+              ))}
             </div>
           </section>
         </aside>

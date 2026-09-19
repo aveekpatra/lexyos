@@ -189,7 +189,7 @@ export function TimeboxPanel() {
       {/* Header: column header geometry, controls are soft white capsules on the grey */}
       <div className="flex h-14 shrink-0 items-center gap-2 px-3">
         <div className="flex min-w-0 flex-1 items-baseline gap-2">
-          <span className="text-[14px] font-bold tracking-tight text-text-strong">{isToday(day) ? "Today" : format(day, "EEEE")}</span>
+          <span className="text-[14px] font-semibold tracking-tight text-text-strong">{isToday(day) ? "Today" : format(day, "EEEE")}</span>
           <span className="truncate text-[12px] font-medium text-text-muted">{format(day, "EEE, MMM d")}</span>
         </div>
         <div className="flex items-center gap-1">

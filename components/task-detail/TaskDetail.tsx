@@ -19,7 +19,7 @@ import {
 import { MarkdownEditor } from "@/components/editor/MarkdownEditor";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AutoTextarea } from "@/components/ui/auto-textarea";
-import { RailHeading, PropertyRow, Dot } from "@/components/ui/property-rail";
+import { RailHeading, PropertyRow, Dot, RadialProgress } from "@/components/ui/property-rail";
 import {
   softPill as pill,
   emptyPill as pillEmpty,
@@ -248,7 +248,7 @@ export default function TaskDetail({ taskId }: { taskId: Id<"tasks"> }) {
               className={`text-[26px] font-semibold leading-[1.3] tracking-[-0.015em] ${isDone ? "text-text-muted line-through decoration-text-faint" : "text-text-strong"}`}
             />
 
-            <div className="mt-5">
+            <div className="mt-5 px-2">
               <MarkdownEditor
                 docKey={task._id}
                 value={task.description ?? ""}
@@ -258,11 +258,14 @@ export default function TaskDetail({ taskId }: { taskId: Id<"tasks"> }) {
             </div>
 
             {/* Sub-issues */}
-            <section className="mt-12">
-              <div className="mb-2 flex items-baseline justify-between px-3">
-                <h2 className="text-[13px] font-medium text-text-muted">Sub-issues</h2>
+            <section className="mt-10 rounded-[16px] bg-black/[0.03] p-2 dark:bg-white/[0.05]">
+              <div className="mb-1 flex items-center justify-between px-3 py-1">
+                <h2 className="text-[13px] font-semibold text-text-strong">Sub-issues</h2>
                 {subtasks && subtasks.length > 0 && (
-                  <span className="text-[12px] tabular-nums text-text-faint">{doneSubs}/{subtasks.length} done</span>
+                  <span className="flex items-center gap-2 text-[12px] tabular-nums text-text-muted">
+                    {doneSubs} of {subtasks.length} done
+                    <RadialProgress value={doneSubs} total={subtasks.length} size={22} stroke={3} label="" />
+                  </span>
                 )}
               </div>
               <div className="flex flex-col gap-0.5">

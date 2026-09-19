@@ -309,19 +309,19 @@ export default function KanbanBoard() {
             <button
               onClick={() => setFilterProject(null)}
               title="Clear project filter"
-              className="group inline-flex items-center gap-1.5 rounded-full bg-black/[0.04] px-2.5 py-1 text-[14px] font-bold tracking-tight text-text-strong transition-colors hover:bg-black/[0.07] dark:bg-white/[0.06] dark:hover:bg-white/[0.1]"
+              className="group inline-flex items-center gap-1.5 rounded-full bg-black/[0.04] px-2.5 py-1 text-[14px] font-semibold tracking-tight text-text-strong transition-colors hover:bg-black/[0.07] dark:bg-white/[0.06] dark:hover:bg-white/[0.1]"
             >
               <Folder open className="size-4" style={{ color: activeProject?.color ?? "#71717a" }} />
               <span className="max-w-[220px] truncate">{filterProject === "" ? "No project" : activeProject?.name ?? "Project"}</span>
               <IoClose className="size-3.5 text-text-faint transition-colors group-hover:text-text-secondary" />
             </button>
           ) : overdueView ? (
-            <h1 className="flex items-center gap-2 text-[15px] font-bold tracking-tight text-text-strong">
+            <h1 className="flex items-center gap-2 text-[15px] font-semibold tracking-tight text-text-strong">
               <IoAlertCircle className="size-4 text-[#ef4444]" />
               Overdue
             </h1>
           ) : (
-            <h1 className="text-[15px] font-bold tracking-tight text-text-strong">Inbox</h1>
+            <h1 className="text-[15px] font-semibold tracking-tight text-text-strong">Inbox</h1>
           )}
           {!overdueView && (
             <Segmented
@@ -476,7 +476,7 @@ function BoardColumn({ column, isAdding, onStartAdd, onStopAdd, apply, showDone,
       )}
 
       <div className="flex items-baseline gap-2 px-3 pb-2.5 pt-3.5">
-        <span className="text-[14px] font-bold tracking-tight text-text-strong">{column.title}</span>
+        <span className="text-[14px] font-semibold tracking-tight text-text-strong">{column.title}</span>
         {column.subtitle && <span className="text-[12px] font-medium text-text-muted">{column.subtitle}</span>}
         {threshold !== null && plannedMin > 0 && (
           <span title={`${plannedH}h planned of a ${threshold}h day`} className={`ml-auto text-[12px] font-medium tabular-nums ${plannedH > threshold ? "text-amber-600" : "text-text-faint"}`}>{plannedH}h</span>
@@ -508,7 +508,7 @@ function BoardColumn({ column, isAdding, onStartAdd, onStopAdd, apply, showDone,
         {sortedOverdue.length > 0 && (
           <div className="mb-4">
             <div className="mb-2 flex items-center gap-2">
-              <span className="text-[13px] font-bold text-[#ef4444]">Overdue</span>
+              <span className="text-[13px] font-semibold text-[#ef4444]">Overdue</span>
               <span className="text-[13px] font-medium text-text-secondary">{sortedOverdue.length}</span>
             </div>
             <div className="flex flex-col gap-1.5">{sortedOverdue.map((t) => <KanbanCard key={t._id} task={t} isOverdue />)}</div>

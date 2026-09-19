@@ -12,6 +12,7 @@ import {
   IoCalendar,
   IoClose,
   IoContract,
+  IoCreateOutline,
   IoExpand,
   IoFlash,
   IoHelpCircle,
@@ -64,6 +65,16 @@ const FloatingPill = memo(function FloatingPill({
   // Convex persistence
   const savedChat = useQuery(api.aiChats.get);
   const saveChat = useMutation(api.aiChats.save);
+  const clearSaved = useMutation(api.aiChats.clear);
+  /** Blank canvas: forget the conversation here and in Convex. */
+  const newChat = () => {
+    _persistedMessages = [];
+    _msgCounter = 0;
+    setMessages([]);
+    setInput("");
+    void clearSaved({});
+    inputRef.current?.focus();
+  };
 
   // Hydrate from Convex once on load
   useEffect(() => {
@@ -236,6 +247,11 @@ const FloatingPill = memo(function FloatingPill({
               <span className="flex-1 text-[13px] font-medium text-[#17181b] dark:text-white">
                 Agent
               </span>
+              {hasMessages && (
+                <button type="button" onClick={newChat} title="New chat" aria-label="New chat" className={headerBtn}>
+                  <IoCreateOutline size={15} />
+                </button>
+              )}
               <button type="button" onClick={() => onOpenChange(false)} title="Minimize" className={headerBtn}>
                 <IoRemove size={16} />
               </button>
