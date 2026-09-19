@@ -10,6 +10,15 @@ import { ConvexHttpClient } from "convex/browser";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { describeRecurrence, normalizeRecurrence, shortRecurrenceLabel, type Recurrence } from "@/convex/lib/recurrence";
+import { projectColumns, columnForTask, newColumnId, DEFAULT_COLUMNS, COLUMN_PALETTE, type BoardColumn } from "@/convex/lib/columns";
+
+/** Column definitions from the agent (names, optional colour/status) into stored columns with ids. */
+function buildColumns(input?: Array<{ name: string; color?: string; status?: BoardColumn["status"] }>): BoardColumn[] | undefined {
+  if (!input || input.length === 0) return undefined;
+  const out: BoardColumn[] = [];
+  for (const c of input) out.push({ id: newColumnId(c.name, out), name: c.name, color: c.color ?? COLUMN_PALETTE[out.length % COLUMN_PALETTE.length], status: c.status });
+  return out;
+}
 
 // ─── Recurrence schema (mirrors convex/lib/recurrence.ts) ───
 const weekdaySchema = z.enum(["mon", "tue", "wed", "thu", "fri", "sat", "sun"]);
@@ -141,13 +150,14 @@ export function createTools(auth: ToolAuth): Record<string, any> {
     }),
 
     get_task: ({
-      description: `Get a single task by its ID. Returns full task details including title, status, priority, dates, times, project, and description. Use this to verify a task exists and read its current state after creating or updating it.`,
+      description: `One task in full: every property, its description (the task's own context), and its subtasks. Use it to read state after a write, and before editing a task you did not just fetch.`,
       inputSchema: z.object({
         id: z.string().describe("Task ID to retrieve"),
       }),
       execute: safe(async (args: any) => {
         const task = await convex.query(api.tasks.getById, { id: args.id as Id<"tasks"> });
         if (!task) return { error: "Task not found" };
+        const subtasks = await convex.query(api.tasks.getSubtasks, { parentTaskId: task._id });
         return {
           id: task._id,
           title: task.title,
@@ -158,9 +168,13 @@ export function createTools(auth: ToolAuth): Record<string, any> {
           startTime: task.scheduledStartTime,
           endTime: task.scheduledEndTime,
           projectId: task.projectId,
+          columnId: task.columnId,
+          parentTaskId: task.parentTaskId,
+          labels: task.labels,
           source: task.source,
           description: task.description,
           googleEventId: task.googleEventId,
+          subtasks: subtasks.map((s) => ({ id: s._id, title: s.title, status: s.status, priority: s.priority, dueDate: s.dueDate, dueTime: s.dueTime, description: s.description })),
           repeats: (() => {
             const r = normalizeRecurrence(task.recurrence, task.dueDate);
             return r ? describeRecurrence(r, task.dueDate) : undefined;
@@ -179,6 +193,10 @@ export function createTools(auth: ToolAuth): Record<string, any> {
         priority: z.enum(["p1", "p2", "p3", "p4"]).optional().describe("Priority: p1=urgent, p2=high, p3=medium, p4=low"),
         status: z.enum(["todo", "planned", "in_progress", "review"]).optional().describe("Initial status"),
         projectId: z.string().optional().describe("Project ID to assign to"),
+        columnId: z.string().optional().describe("Board column id inside the project (see get_project). Defaults to the column matching status."),
+        parentTaskId: z.string().optional().describe("Make this a subtask of that task"),
+        labels: z.array(z.string()).optional().describe("Free-form labels"),
+        scheduledDate: z.string().optional().describe("Day it is scheduled on (YYYY-MM-DD) when different from dueDate"),
         scheduledStartTime: z.string().optional().describe("Start time in HH:MM format"),
         scheduledEndTime: z.string().optional().describe("End time in HH:MM format"),
         recurrence: recurrenceSchema.optional(),
@@ -194,6 +212,10 @@ export function createTools(auth: ToolAuth): Record<string, any> {
           priority: args.priority as "p1" | "p2" | "p3" | "p4" | undefined,
           status: args.status as "todo" | "planned" | "in_progress" | "review" | undefined,
           projectId: args.projectId as Id<"projects"> | undefined,
+          columnId: args.columnId,
+          parentTaskId: args.parentTaskId as Id<"tasks"> | undefined,
+          labels: args.labels,
+          scheduledDate: args.scheduledDate,
           scheduledStartTime: args.scheduledStartTime,
           scheduledEndTime: args.scheduledEndTime,
           recurrence: args.recurrence as Recurrence | undefined,
@@ -232,9 +254,21 @@ export function createTools(auth: ToolAuth): Record<string, any> {
         scheduledEndTime: z.string().optional().describe("End time (HH:MM)"),
         recurrence: recurrenceSchema.optional().describe("Set or replace the repeat rule"),
         clearRecurrence: z.boolean().optional().describe("true to stop the task repeating"),
+        columnId: z.string().optional().describe("Move to this board column (use 'none' to fall back to the status column)"),
+        parentTaskId: z.string().optional().describe("Make it a subtask of that task (use 'none' to detach)"),
+        labels: z.array(z.string()).optional().describe("Replace labels"),
+        scheduledDate: z.string().optional().describe("YYYY-MM-DD"),
+        clearDueDate: z.boolean().optional().describe("Remove the date entirely"),
+        clearDueTime: z.boolean().optional().describe("Make it all-day"),
       }),
       execute: safe(async (args: any) => {
         const updateArgs: Record<string, unknown> = { id: args.id };
+        if (args.columnId === "none") updateArgs.clearColumnId = true; else if (args.columnId) updateArgs.columnId = args.columnId;
+        if (args.parentTaskId === "none") updateArgs.clearParentTaskId = true; else if (args.parentTaskId) updateArgs.parentTaskId = args.parentTaskId;
+        if (args.labels) updateArgs.labels = args.labels;
+        if (args.scheduledDate) updateArgs.scheduledDate = args.scheduledDate;
+        if (args.clearDueDate) { updateArgs.clearDueDate = true; updateArgs.userDate = today(); }
+        if (args.clearDueTime) updateArgs.clearDueTime = true;
         if (args.clearRecurrence) updateArgs.clearRecurrence = true;
         else if (args.recurrence) updateArgs.recurrence = args.recurrence;
         if (args.title) updateArgs.title = args.title;
@@ -325,22 +359,24 @@ export function createTools(auth: ToolAuth): Record<string, any> {
     }),
 
     search_tasks: ({
-      description: `Search tasks by title text. Use when the user refers to a task by name and you need to find its ID. Returns matching tasks.`,
+      description: `Find tasks by text in title or description. Fast and cheap: call it before creating anything, so you reuse or update an existing task instead of duplicating it. Scope with projectId when the work belongs to a project. Returns up to 15 matches with a description snippet and subtask count.`,
       inputSchema: z.object({
-        query: z.string().describe("Search text to match against task titles"),
+        query: z.string().describe("Text to match against title and description (case-insensitive)"),
+        projectId: z.string().optional().describe("Only search inside this project"),
+        includeDone: z.boolean().optional().describe("Include completed tasks. Default false."),
       }),
       execute: safe(async (args: any) => {
-        const all = await convex.query(api.tasks.list, {});
-        const q = args.query.toLowerCase();
-        const matches = all.filter((t) => t.title.toLowerCase().includes(q));
-        return matches.slice(0, 10).map((t) => ({
-          id: t._id,
-          title: t.title,
-          status: t.status,
-          priority: t.priority,
-          dueDate: t.dueDate,
-          dueTime: t.dueTime,
-          projectId: t.projectId,
+        const all = await convex.query(api.tasks.list, args.projectId ? { projectId: args.projectId as Id<"projects"> } : {});
+        const q = String(args.query).toLowerCase();
+        const pool = all.filter((t) => args.includeDone || t.status !== "done");
+        const matches = pool.filter((t) => t.title.toLowerCase().includes(q) || (t.description ?? "").toLowerCase().includes(q));
+        const children = new Map<string, number>();
+        for (const t of all) if (t.parentTaskId) children.set(t.parentTaskId, (children.get(t.parentTaskId) ?? 0) + 1);
+        return matches.slice(0, 15).map((t) => ({
+          id: t._id, title: t.title, status: t.status, priority: t.priority, dueDate: t.dueDate, dueTime: t.dueTime,
+          projectId: t.projectId, columnId: t.columnId, parentTaskId: t.parentTaskId,
+          descriptionSnippet: t.description ? t.description.slice(0, 160) : undefined,
+          subtasks: children.get(t._id) ?? 0,
         }));
       }),
     }),
@@ -350,64 +386,136 @@ export function createTools(auth: ToolAuth): Record<string, any> {
     // ═══════════════════════════════════════════
 
     list_projects: ({
-      description: `List all active projects. Returns project id, name, color, priority, dates. Use this to find project IDs when the user mentions a project by name.`,
-      inputSchema: z.object({}),
-      execute: safe(async (_args: any) => {
-        const projects = await convex.query(api.projects.list, { status: "active" });
-        return projects.map((p) => ({
-          id: p._id,
-          name: p.name,
-          color: p.color,
-          priority: p.priority,
-          startDate: p.startDate,
-          endDate: p.dueDate,
+      description: `List projects with their id, name, colour, priority, dates, one-line description, board columns, and open/done counts. Use it to resolve a project name to an id. For planning inside a project, follow up with get_project.`,
+      inputSchema: z.object({
+        includeArchived: z.boolean().optional().describe("Also return archived projects. Default false."),
+      }),
+      execute: safe(async (args: any) => {
+        const projects = await convex.query(api.projects.list, args.includeArchived ? {} : { status: "active" });
+        const tasks = await convex.query(api.tasks.list, {});
+        return projects.map((p) => {
+          const mine = tasks.filter((t) => t.projectId === p._id && !t.parentTaskId);
+          return {
+            id: p._id, name: p.name, description: p.description, color: p.color, priority: p.priority, status: p.status,
+            startDate: p.startDate, dueDate: p.dueDate,
+            columns: projectColumns(p).map((c) => ({ id: c.id, name: c.name, status: c.status })),
+            open: mine.filter((t) => t.status !== "done").length, done: mine.filter((t) => t.status === "done").length,
+            hasContext: !!p.notes,
+          };
+        });
+      }),
+    }),
+
+    get_project: ({
+      description: `Everything about one project in a single call: its fields, the Context document (goals, links, decisions, constraints, in the user's words), the board columns, and every task grouped by column with description and subtasks. Call this ONCE before planning, adding, or reorganising work inside a project; it is the long-horizon context. Do not paginate through tasks separately.`,
+      inputSchema: z.object({
+        id: z.string().describe("Project id (from list_projects)"),
+        includeDone: z.boolean().optional().describe("Include completed tasks in the board. Default false."),
+      }),
+      execute: safe(async (args: any) => {
+        const p = await convex.query(api.projects.getById, { id: args.id as Id<"projects"> });
+        if (!p) return { error: "Project not found" };
+        const tasks = await convex.query(api.tasks.list, { projectId: p._id });
+        const columns = projectColumns(p);
+        const subs = new Map<string, typeof tasks>();
+        for (const t of tasks) if (t.parentTaskId) { const arr = subs.get(t.parentTaskId) ?? []; arr.push(t); subs.set(t.parentTaskId, arr); }
+        const shape = (t: (typeof tasks)[number]) => ({
+          id: t._id, title: t.title, status: t.status, priority: t.priority, dueDate: t.dueDate, dueTime: t.dueTime,
+          startTime: t.scheduledStartTime, endTime: t.scheduledEndTime, description: t.description,
+          repeats: (() => { const r = normalizeRecurrence(t.recurrence, t.dueDate); return r ? shortRecurrenceLabel(r) : undefined; })(),
+        });
+        const board = columns.map((c) => ({
+          column: { id: c.id, name: c.name, status: c.status },
+          tasks: tasks
+            .filter((t) => !t.parentTaskId && (args.includeDone || t.status !== "done") && columnForTask(t, columns).id === c.id)
+            .sort((a, b) => a.sortOrder - b.sortOrder)
+            .map((t) => ({ ...shape(t), subtasks: (subs.get(t._id) ?? []).map(shape) })),
         }));
+        return {
+          id: p._id, name: p.name, description: p.description, status: p.status, priority: p.priority, color: p.color,
+          startDate: p.startDate, dueDate: p.dueDate, tags: p.tags,
+          context: p.notes ?? "",
+          columns: columns.map((c) => ({ id: c.id, name: c.name, color: c.color, status: c.status })),
+          board,
+          counts: { open: tasks.filter((t) => !t.parentTaskId && t.status !== "done").length, done: tasks.filter((t) => !t.parentTaskId && t.status === "done").length },
+        };
       }),
     }),
 
     create_project: ({
-      description: `Create a new project. Projects organize tasks into groups.`,
+      description: `Create a project. Give it a one-line description and, when the user has said anything about goals, constraints, links or decisions, put that in context (markdown). Columns default to Todo, Planned, In Progress, Review, Done; pass columns to define a custom board (names in order; a column may map to a status so completing works).`,
       inputSchema: z.object({
         name: z.string().describe("Project name"),
-        color: z.string().optional().describe("Hex color (e.g. '#3b82f6')"),
-        priority: z.enum(["urgent", "high", "medium", "low"]).optional().describe("Project priority"),
-        startDate: z.string().optional().describe("Start date (YYYY-MM-DD)"),
-        endDate: z.string().optional().describe("End date (YYYY-MM-DD)"),
+        description: z.string().optional().describe("One line on what the project is for"),
+        context: z.string().optional().describe("Markdown: goals, links, decisions, constraints, people"),
+        color: z.string().optional().describe("Hex colour, e.g. #3b82f6"),
+        priority: z.enum(["p1", "p2", "p3", "p4"]).optional().describe("p1 urgent, p2 high, p3 medium, p4 low"),
+        startDate: z.string().optional().describe("YYYY-MM-DD"),
+        dueDate: z.string().optional().describe("YYYY-MM-DD"),
+        columns: z.array(z.object({
+          name: z.string(),
+          color: z.string().optional().describe("Hex colour"),
+          status: z.enum(["todo", "planned", "in_progress", "review", "done"]).optional().describe("Status a task takes in this column. Give exactly one column status 'done' if you want completion to land somewhere."),
+        })).optional().describe("Custom board columns in order. Omit for the default template."),
       }),
       execute: safe(async (args: any) => {
+        const columns = buildColumns(args.columns);
         const id = await convex.mutation(api.projects.create, {
-          name: args.name,
-          color: args.color || "#3b82f6",
-          priority: args.priority,
-          startDate: args.startDate,
-          dueDate: args.endDate,
+          name: args.name, description: args.description, notes: args.context,
+          color: args.color || "#3b82f6", priority: args.priority,
+          startDate: args.startDate, dueDate: args.dueDate, columns,
         });
-        return { id, name: args.name, created: true };
+        return { id, name: args.name, created: true, columns: (columns ?? DEFAULT_COLUMNS).map((c) => ({ id: c.id, name: c.name })) };
       }),
     }),
 
     update_project: ({
-      description: `Update an existing project's properties.`,
+      description: `Update a project's fields. Use context to rewrite the Context document (send the full new markdown, not a diff). Use set_project_columns to change the board.`,
       inputSchema: z.object({
-        id: z.string().describe("Project ID"),
-        name: z.string().optional().describe("New name"),
-        color: z.string().optional().describe("New hex color"),
-        priority: z.enum(["urgent", "high", "medium", "low"]).optional().describe("New priority"),
-        startDate: z.string().optional().describe("New start date"),
-        endDate: z.string().optional().describe("New end date"),
+        id: z.string().describe("Project id"),
+        name: z.string().optional(),
+        description: z.string().optional().describe("One-line description"),
+        context: z.string().optional().describe("Full replacement markdown for the Context document"),
+        color: z.string().optional(),
+        priority: z.enum(["p1", "p2", "p3", "p4"]).optional(),
+        status: z.enum(["active", "archived"]).optional(),
+        startDate: z.string().optional(),
+        dueDate: z.string().optional(),
       }),
       execute: safe(async (args: any) => {
-        await convex.mutation(api.projects.update, {
-          id: args.id as Id<"projects">,
-          name: args.name,
-          color: args.color,
-          priority: args.priority,
-          startDate: args.startDate,
-          dueDate: args.endDate,
-        });
+        const patch: Record<string, unknown> = { id: args.id };
+        for (const k of ["name", "description", "color", "priority", "status", "startDate", "dueDate"]) if (args[k] !== undefined) patch[k] = args[k];
+        if (args.context !== undefined) patch.notes = args.context;
+        await convex.mutation(api.projects.update, patch as Parameters<typeof convex.mutation<typeof api.projects.update>>[1]);
         return { id: args.id, updated: true };
       }),
     }),
+
+    set_project_columns: ({
+      description: `Replace a project's board columns (rename, reorder, add, remove). Send the complete list in order. Keep an existing column's id to preserve which tasks sit in it; new columns get an id from their name. Tasks in a removed column fall back to the column matching their status.`,
+      inputSchema: z.object({
+        projectId: z.string(),
+        columns: z.array(z.object({
+          id: z.string().optional().describe("Existing column id to keep; omit for a new column"),
+          name: z.string(),
+          color: z.string().optional(),
+          status: z.enum(["todo", "planned", "in_progress", "review", "done"]).optional(),
+        })).min(1),
+      }),
+      execute: safe(async (args: any) => {
+        const p = await convex.query(api.projects.getById, { id: args.projectId as Id<"projects"> });
+        if (!p) return { error: "Project not found" };
+        const existing = projectColumns(p);
+        const out: BoardColumn[] = [];
+        for (const c of args.columns as Array<{ id?: string; name: string; color?: string; status?: BoardColumn["status"] }>) {
+          const prev = c.id ? existing.find((e) => e.id === c.id) : undefined;
+          out.push({ id: prev?.id ?? newColumnId(c.name, [...existing, ...out]), name: c.name, color: c.color ?? prev?.color ?? COLUMN_PALETTE[out.length % COLUMN_PALETTE.length], status: c.status ?? prev?.status });
+        }
+        await convex.mutation(api.projects.setColumns, { id: p._id, columns: out });
+        return { projectId: p._id, columns: out.map((c) => ({ id: c.id, name: c.name, status: c.status })), updated: true };
+      }),
+    }),
+
 
     // ═══════════════════════════════════════════
     // INTELLIGENCE TOOLS

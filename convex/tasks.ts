@@ -143,6 +143,7 @@ export const create = mutation({
     projectId: v.optional(v.id("projects")),
     recurrence: v.optional(recurrenceValidator),
     labels: v.optional(v.array(v.string())),
+    columnId: v.optional(v.string()),
     parentTaskId: v.optional(v.id("tasks")),
     googleEventId: v.optional(v.string()),
     googleCalendarId: v.optional(v.string()),
@@ -183,6 +184,7 @@ export const create = mutation({
       recurrence: args.recurrence,
       labels: args.labels,
       parentTaskId: args.parentTaskId,
+      columnId: args.columnId,
       googleEventId: args.googleEventId,
       googleCalendarId: args.googleCalendarId,
       source: "local",
@@ -211,6 +213,10 @@ export const update = mutation({
     projectId: v.optional(v.id("projects")),
     recurrence: v.optional(recurrenceValidator),
     labels: v.optional(v.array(v.string())),
+    columnId: v.optional(v.string()),
+    parentTaskId: v.optional(v.id("tasks")),
+    clearColumnId: v.optional(v.boolean()),
+    clearParentTaskId: v.optional(v.boolean()),
     sortOrder: v.optional(v.number()),
     googleEventId: v.optional(v.string()),
     googleCalendarId: v.optional(v.string()),
@@ -237,7 +243,7 @@ export const update = mutation({
     }
 
     const { id, clearDueDate, clearDueTime, clearScheduledDate, clearScheduledStartTime,
-      clearScheduledEndTime, clearProjectId, clearRecurrence, clearDescription,
+      clearScheduledEndTime, clearProjectId, clearRecurrence, clearDescription, clearColumnId, clearParentTaskId,
       userDate, ...updates } = args;
 
     if (args.recurrence) validateRecurrence(args.recurrence);
@@ -246,6 +252,12 @@ export const update = mutation({
     const patch: Record<string, unknown> = {};
     for (const [key, val] of Object.entries(updates)) {
       if (val !== undefined) patch[key] = val;
+    }
+    if (clearColumnId) patch.columnId = undefined;
+    if (clearParentTaskId) patch.parentTaskId = undefined;
+    if (args.parentTaskId) {
+      const parent = await ctx.db.get("tasks", args.parentTaskId);
+      if (!parent || parent.userId !== identity.subject || parent._id === id) throw new Error("Parent task not found");
     }
 
     // When dueTime changes, keep scheduledStartTime in sync and preserve duration

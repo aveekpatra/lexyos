@@ -34,7 +34,7 @@ export function GeneralSection() {
       <Section title="Inbox" description="How the board opens and what sits beside it.">
         <Row label="Default view">
           <Segmented layoutId="settings-view" size="sm" value={g.defaultView} onChange={(v) => { update("general", { defaultView: v }); update("ui", { kanbanView: v }); }}
-            items={[{ value: "overview", label: "Overview" }, { value: "days", label: "Days" }]} />
+            items={[{ value: "days", label: "Days" }, { value: "overview", label: "Overview" }]} />
         </Row>
         <Row label="Timebox panel" hint="The day grid beside the board">
           <Toggle on={timeboxOpen} onChange={setTimeboxOpen} />

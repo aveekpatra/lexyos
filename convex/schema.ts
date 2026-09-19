@@ -32,6 +32,8 @@ export default defineSchema({
     recurrence: v.optional(v.union(v.string(), recurrenceValidator)),
     labels: v.optional(v.array(v.string())),
     parentTaskId: v.optional(v.id("tasks")),
+    /** Project board column. Falls back to the column matching `status`. */
+    columnId: v.optional(v.string()),
     googleEventId: v.optional(v.string()),       // linked Google Calendar event ID
     googleCalendarId: v.optional(v.string()),     // which calendar it's on (default "primary")
     // Calendar-sourced task fields
@@ -67,6 +69,14 @@ export default defineSchema({
     client: v.optional(v.string()),
     tags: v.optional(v.array(v.string())),
     notes: v.optional(v.string()),
+    /** Board columns. Absent means the default template (todo, planned, in progress, review, done). */
+    columns: v.optional(v.array(v.object({
+      id: v.string(),
+      name: v.string(),
+      color: v.string(),
+      /** Status a task takes when moved here. Custom columns leave it unset. */
+      status: v.optional(v.union(v.literal("todo"), v.literal("planned"), v.literal("in_progress"), v.literal("review"), v.literal("done"))),
+    }))),
     sortOrder: v.number(),
     userId: v.string(),
   })

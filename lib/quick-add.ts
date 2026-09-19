@@ -18,6 +18,7 @@ export function useQuickAdd() {
     projectId?: Id<"projects">;
     status?: "todo" | "planned" | "in_progress" | "review" | "done";
     dueTime?: string;
+    columnId?: string;
   }) => {
     return await createTask({
       title: input.title.trim() || "New task",
@@ -25,6 +26,7 @@ export function useQuickAdd() {
       dueTime: input.dueTime,
       projectId: input.projectId,
       status: input.status,
+      columnId: input.columnId,
       priority: settings.general.defaultPriority,
       placeAtTop: settings.general.newTaskPosition === "top",
       userDate: localDateStr(new Date()),

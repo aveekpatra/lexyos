@@ -1,4 +1,9 @@
 import { v } from "convex/values";
+
+const COLUMNS = v.array(v.object({
+      id: v.string(), name: v.string(), color: v.string(),
+      status: v.optional(v.union(v.literal("todo"), v.literal("planned"), v.literal("in_progress"), v.literal("review"), v.literal("done"))),
+    }));
 import { agentValidator, getIdentity } from "./lib/actor";
 import { query, mutation } from "./_generated/server";
 
@@ -77,6 +82,7 @@ export const create = mutation({
     client: v.optional(v.string()),
     tags: v.optional(v.array(v.string())),
     notes: v.optional(v.string()),
+    columns: v.optional(COLUMNS),
   },
   handler: async (ctx, args) => {
     const identity = await getIdentity(ctx, args.agent);
@@ -100,6 +106,7 @@ export const create = mutation({
       client: args.client,
       tags: args.tags,
       notes: args.notes,
+      columns: args.columns,
       status: "active",
       sortOrder: maxOrder + 1,
       userId,
@@ -123,6 +130,7 @@ export const update = mutation({
     client: v.optional(v.string()),
     tags: v.optional(v.array(v.string())),
     notes: v.optional(v.string()),
+    columns: v.optional(COLUMNS),
     sortOrder: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
@@ -208,5 +216,26 @@ export const remove = mutation({
       await ctx.db.patch("tasks", task._id, { projectId: undefined });
     }
     await ctx.db.delete("projects", args.id);
+  },
+});
+
+/**
+ * Replace the board columns. Tasks whose column disappears fall back to the
+ * column matching their status (see convex/lib/columns.ts), so nothing is lost.
+ */
+export const setColumns = mutation({
+  args: { agent: agentValidator, id: v.id("projects"), columns: COLUMNS },
+  handler: async (ctx, args) => {
+    const identity = await getIdentity(ctx, args.agent);
+    if (!identity) throw new Error("Not authenticated");
+    const project = await ctx.db.get("projects", args.id);
+    if (!project || project.userId !== identity.subject) throw new Error("Project not found");
+    if (args.columns.length === 0) throw new Error("A board needs at least one column");
+    const ids = new Set(args.columns.map((c) => c.id));
+    if (ids.size !== args.columns.length) throw new Error("Column ids must be unique");
+    await ctx.db.patch("projects", args.id, { columns: args.columns });
+    // Drop stale columnId references so placement falls back cleanly.
+    const tasks = await ctx.db.query("tasks").withIndex("by_userId_and_projectId", (q) => q.eq("userId", identity.subject).eq("projectId", args.id)).collect();
+    for (const t of tasks) if (t.columnId && !ids.has(t.columnId)) await ctx.db.patch("tasks", t._id, { columnId: undefined });
   },
 });

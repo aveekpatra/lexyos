@@ -12,7 +12,7 @@ import { sha256 } from "@/lib/crypto";
 
 export const maxDuration = 60;
 
-const READ_TOOLS = new Set(["list_tasks", "get_task", "search_tasks", "list_projects", "get_today_summary", "find_free_time"]);
+const READ_TOOLS = new Set(["list_tasks", "get_task", "search_tasks", "list_projects", "get_project", "get_today_summary", "find_free_time"]);
 
 function agentSecret() {
   const s = process.env.AGENT_SECRET;
@@ -44,7 +44,13 @@ const handler = createMcpHandler(
   },
   {
     serverInfo: { name: "lexyos", version: "1.0.0" },
-    instructions: "Lexyos is the user's task and time manager. Dates are YYYY-MM-DD, times HH:MM 24h. Ask before delete_task; everything else may be done directly.",
+    instructions: [
+      "Lexyos is the user's personal task, project, and time manager. Dates are YYYY-MM-DD, times HH:MM 24h.",
+      "Where context lives: a PROJECT carries long-horizon context (its Context document, columns, and every task with subtasks); a TASK carries its own context in its description and subtasks; the INBOX is everything without a project.",
+      "Working method: (1) before creating anything, search_tasks (scoped with projectId when the work belongs to a project) so you update or reuse instead of duplicating; (2) for anything inside a project, call get_project once and plan from it, do not page through list_tasks; (3) for quick inbox items, search_tasks or list_tasks is enough; (4) after a write, read it back with get_task or get_project and report what you read.",
+      "Projects: create_project accepts description, context (markdown), and custom columns; set_project_columns renames, reorders, adds or removes columns. Tasks: create_task and update_task accept every property, including columnId, parentTaskId (subtasks), labels, schedule and recurrence.",
+      "Ask before delete_task. Everything else may be done directly.",
+    ].join(" "),
   },
 );
 

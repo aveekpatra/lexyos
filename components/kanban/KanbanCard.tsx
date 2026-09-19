@@ -94,6 +94,7 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue, context = "
 
   const handleDragStart = useCallback((e: React.DragEvent) => {
     e.dataTransfer.setData("text/plain", task._id);
+    e.dataTransfer.setData("application/task-status", task.status);
     e.dataTransfer.setData("application/source-date", dateStr || "");
     e.dataTransfer.effectAllowed = "move";
     setDraggingTaskId(task._id);

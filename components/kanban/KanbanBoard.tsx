@@ -328,7 +328,7 @@ export default function KanbanBoard() {
               layoutId="kanban-view"
               value={view}
               onChange={setView}
-              items={[{ value: "overview", label: "Overview" }, { value: "days", label: "Days" }]}
+              items={[{ value: "days", label: "Days" }, { value: "overview", label: "Overview" }]}
             />
           )}
         </div>

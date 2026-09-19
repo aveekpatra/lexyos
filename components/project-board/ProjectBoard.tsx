@@ -11,13 +11,14 @@ import { Segmented } from "@/components/ui/segmented";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AutoTextarea } from "@/components/ui/auto-textarea";
 import { MarkdownEditor } from "@/components/editor/MarkdownEditor";
-import { Menu, MenuTrigger, MenuPopup, MenuItem } from "@/components/ui/menu";
+import { Menu, MenuTrigger, MenuPopup, MenuItem, MenuSeparator } from "@/components/ui/menu";
 import { DatePickerPopover } from "@/components/tasks/TaskPropertyPopovers";
 import { ProjectMenuItems, DeleteProjectDialog } from "@/components/projects/ProjectActions";
 import { RailHeading, PropertyRow, Dot, RadialProgress } from "@/components/ui/property-rail";
 import { projectSignals } from "@/lib/project-signals";
 import { glassIconButton, glassAction, softPill as pill, emptyPill as pillEmpty, BOARD_COLUMN_WIDTH } from "@/lib/ui/chrome";
 import { PRIORITY_COLORS, PRIORITY_LABELS, STATUS_OPTIONS, type TaskStatus } from "@/lib/constants";
+import { projectColumns, columnForTask, statusForColumn, newColumnId, COLUMN_PALETTE, type BoardColumn } from "@/convex/lib/columns";
 import { useSettings, matchesShortcut } from "@/lib/settings";
 import { format, parseISO } from "date-fns";
 import { useQuickAdd } from "@/lib/quick-add";
@@ -26,6 +27,7 @@ import {
   IoCheckmarkCircle,
   IoEllipsisHorizontal,
   IoAddCircle,
+  IoAdd,
 } from "react-icons/io5";
 import { Folder } from "@/components/ui/folder";
 
@@ -48,7 +50,10 @@ export default function ProjectBoard({ projectId }: { projectId: Id<"projects"> 
   const tasks = useQuery(api.tasks.list, { projectId });
   const [tab, setTab] = useState<Tab>("board");
   // Digits 1..5 focus a column's add field, same as the timeline; the quick-add shortcut takes the first.
-  const [focusColumn, setFocusColumn] = useState<TaskStatus | null>(null);
+  const [focusColumn, setFocusColumn] = useState<string | null>(null);
+  const columns = useMemo(() => projectColumns(project), [project]);
+  const setColumns = useMutation(api.projects.setColumns);
+  const saveColumns = useCallback((next: BoardColumn[]) => setColumns({ id: projectId, columns: next }), [setColumns, projectId]);
   const [focusTick, setFocusTick] = useState(0);
   const { settings: boardSettings } = useSettings();
   useEffect(() => {
@@ -59,15 +64,15 @@ export default function ProjectBoard({ projectId }: { projectId: Id<"projects"> 
       let idx = -1;
       if (matchesShortcut(e, boardSettings.shortcuts.quickAdd) && !/^[0-9]$/.test(e.key)) idx = 0;
       else if (!e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && /^[1-9]$/.test(e.key)) idx = Number(e.key) - 1;
-      const col = STATUS_OPTIONS[idx];
+      const col = columns[idx];
       if (!col) return;
       e.preventDefault();
-      setFocusColumn(col.value);
+      setFocusColumn(col.id);
       setFocusTick((n) => n + 1);
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [tab, boardSettings.shortcuts.quickAdd]);
+  }, [tab, boardSettings.shortcuts.quickAdd, columns]);
   const [sortBy, setSortBy] = useState<SortBy>("priority");
   const [deleteOpen, setDeleteOpen] = useState(false);
   const updateProject = useMutation(api.projects.update);
@@ -83,12 +88,9 @@ export default function ProjectBoard({ projectId }: { projectId: Id<"projects"> 
     return out;
   }, [sortBy]);
 
-  const byStatus = useMemo(() => {
-    const map = new Map<TaskStatus, Doc<"tasks">[]>();
-    for (const s of STATUS_OPTIONS) map.set(s.value, []);
-    for (const t of tasks ?? []) if (!t.parentTaskId) map.get(t.status)?.push(t);
-    return map;
-  }, [tasks]);
+  const byColumn = new Map<string, Doc<"tasks">[]>();
+  for (const c of columns) byColumn.set(c.id, []);
+  for (const t of tasks ?? []) if (!t.parentTaskId) byColumn.get(columnForTask(t, columns).id)?.push(t);
 
   if (project === undefined || tasks === undefined) {
     return (
@@ -158,19 +160,21 @@ export default function ProjectBoard({ projectId }: { projectId: Id<"projects"> 
 
       {tab === "board" ? (
         <div className="flex flex-1 gap-3 overflow-x-auto overflow-y-hidden scroll-px-3 px-3 pb-3 pt-1 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-          {STATUS_OPTIONS.map((s, i) => (
+          {columns.map((c, i) => (
             <StatusColumn
-              key={s.value}
-              status={s.value}
-              label={s.label}
-              color={s.color}
-              tasks={sort(byStatus.get(s.value) ?? [])}
+              key={c.id}
+              column={c}
+              index={i}
+              columns={columns}
+              onSaveColumns={saveColumns}
+              tasks={sort(byColumn.get(c.id) ?? [])}
               projectId={project._id}
               defaultDueDate={project.dueDate}
-              shortcut={String(i + 1)}
-              focusToken={focusColumn === s.value ? focusTick : 0}
+              shortcut={i < 9 ? String(i + 1) : ""}
+              focusToken={focusColumn === c.id ? focusTick : 0}
             />
           ))}
+          <AddColumn columns={columns} onSave={saveColumns} />
         </div>
       ) : (
         <ProjectOverview project={project} tasks={tasks} onUpdate={(patch) => updateProject({ id: project._id, ...patch })} />
@@ -188,10 +192,11 @@ export default function ProjectBoard({ projectId }: { projectId: Id<"projects"> 
 
 /* ─── Status column: same shell as the Inbox columns, drop sets status ─── */
 
-function StatusColumn({ status, label, color, tasks, projectId, defaultDueDate, shortcut, focusToken }: {
-  status: TaskStatus;
-  label: string;
-  color: string;
+function StatusColumn({ column, index, columns, onSaveColumns, tasks, projectId, defaultDueDate, shortcut, focusToken }: {
+  column: BoardColumn;
+  index: number;
+  columns: BoardColumn[];
+  onSaveColumns: (next: BoardColumn[]) => Promise<unknown>;
   tasks: Doc<"tasks">[];
   projectId: Id<"projects">;
   defaultDueDate?: string;
@@ -199,6 +204,30 @@ function StatusColumn({ status, label, color, tasks, projectId, defaultDueDate, 
   /** Changes when a keyboard shortcut asks this column to take focus. */
   focusToken: number;
 }) {
+  const { id: columnId, name: label, color } = column;
+  const status: TaskStatus = column.status ?? "todo";
+  const [renaming, setRenaming] = useState(false);
+  const [nameDraft, setNameDraft] = useState(label);
+  const nameRef = useRef<HTMLInputElement>(null);
+  useEffect(() => { if (renaming) requestAnimationFrame(() => { nameRef.current?.focus(); nameRef.current?.select(); }); }, [renaming]);
+  const commitRename = () => {
+    setRenaming(false);
+    const n = nameDraft.trim();
+    if (!n || n === label) { setNameDraft(label); return; }
+    void onSaveColumns(columns.map((c) => (c.id === columnId ? { ...c, name: n } : c)));
+  };
+  const move = (dir: -1 | 1) => {
+    const j = index + dir;
+    if (j < 0 || j >= columns.length) return;
+    const next = [...columns]; [next[index], next[j]] = [next[j], next[index]];
+    void onSaveColumns(next);
+  };
+  const recolor = (c: string) => void onSaveColumns(columns.map((x) => (x.id === columnId ? { ...x, color: c } : x)));
+  const remove = () => {
+    if (columns.length <= 1) return;
+    if (tasks.length && !window.confirm(`Delete "${label}"? Its ${tasks.length} task(s) move to the first column.`)) return;
+    void onSaveColumns(columns.filter((c) => c.id !== columnId));
+  };
   const { create: quickCreate } = useQuickAdd();
   const updateTask = useMutation(api.tasks.update);
   const router = useRouter();
@@ -215,11 +244,11 @@ function StatusColumn({ status, label, color, tasks, projectId, defaultDueDate, 
   const add = useCallback(async (open: boolean) => {
     const t = title.trim();
     if (!t && !open) return;
-    const id = await quickCreate({ title: t || "New task", status, projectId, dueDate: defaultDueDate });
+    const id = await quickCreate({ title: t || "New task", status, projectId, dueDate: defaultDueDate, columnId });
     setTitle("");
     if (open && id) router.push(`/task/${id}`);
     else inputRef.current?.focus();
-  }, [title, status, projectId, defaultDueDate, quickCreate, router]);
+  }, [title, status, projectId, defaultDueDate, quickCreate, router, columnId]);
 
   const onDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault();
@@ -227,13 +256,14 @@ function StatusColumn({ status, label, color, tasks, projectId, defaultDueDate, 
     setIsOver(false);
     const id = e.dataTransfer.getData("text/plain") as Id<"tasks">;
     if (!id || tasks.some((t) => t._id === id)) return;
-    await updateTask({ id, status, projectId });
-  }, [tasks, status, projectId, updateTask]);
+    const current = (e.dataTransfer.getData("application/task-status") || "todo") as TaskStatus;
+    await updateTask({ id, columnId, status: statusForColumn(column, current), projectId });
+  }, [tasks, column, columnId, projectId, updateTask]);
 
   return (
     <div
-      data-column-id={status}
-      className={`relative flex flex-col overflow-hidden rounded-[18px] bg-black/[0.035] dark:bg-white/[0.04] ${BOARD_COLUMN_WIDTH}`}
+      data-column-id={columnId}
+      className={`group/col relative flex flex-col overflow-hidden rounded-[18px] bg-black/[0.035] dark:bg-white/[0.04] ${BOARD_COLUMN_WIDTH}`}
       onDragEnter={(e) => { e.preventDefault(); counter.current++; setIsOver(true); }}
       onDragLeave={() => { counter.current--; if (counter.current <= 0) { counter.current = 0; setIsOver(false); } }}
       onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
@@ -245,10 +275,40 @@ function StatusColumn({ status, label, color, tasks, projectId, defaultDueDate, 
           className="pointer-events-none absolute inset-2 z-20 rounded-xl border-2 border-dashed border-brand/60 bg-brand/5"
         />
       )}
-      <div className="flex items-center gap-2 px-3 pb-2.5 pt-3.5">
-        <span className="size-2.5 rounded-full" style={{ backgroundColor: color }} />
-        <span className="text-[14px] font-semibold tracking-tight text-text-strong">{label}</span>
+      <div className="flex h-11 items-center gap-2 pl-3 pr-1.5 pt-1">
+        <span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: color }} />
+        {renaming ? (
+          <input
+            ref={nameRef}
+            value={nameDraft}
+            onChange={(e) => setNameDraft(e.target.value)}
+            onBlur={commitRename}
+            onKeyDown={(e) => { if (e.key === "Enter") commitRename(); if (e.key === "Escape") { setNameDraft(label); setRenaming(false); } }}
+            className="h-7 min-w-0 flex-1 rounded-full bg-surface-0 px-2 text-[14px] font-semibold tracking-tight text-text-strong outline-none ring-1 ring-inset ring-line-strong dark:bg-white/[0.06]"
+          />
+        ) : (
+          <button onDoubleClick={() => { setNameDraft(label); setRenaming(true); }} className="min-w-0 truncate text-left text-[14px] font-semibold tracking-tight text-text-strong" title="Double-click to rename">{label}</button>
+        )}
         <span className="text-[12px] font-medium text-text-muted">{tasks.length}</span>
+        <span className="flex-1" />
+        <Menu>
+          <MenuTrigger render={<button aria-label={`${label} column options`} className="flex size-7 shrink-0 items-center justify-center rounded-full text-text-faint opacity-0 transition-[opacity,background-color,color] hover:bg-black/[0.06] hover:text-text-strong focus-visible:opacity-100 group-hover/col:opacity-100 data-popup-open:opacity-100 dark:hover:bg-white/[0.08]" />}>
+            <IoEllipsisHorizontal className="size-4" />
+          </MenuTrigger>
+          <MenuPopup align="end" className="w-[200px]">
+            <MenuItem onClick={() => { setNameDraft(label); setRenaming(true); }}>Rename</MenuItem>
+            <MenuItem disabled={index === 0} onClick={() => move(-1)}>Move left</MenuItem>
+            <MenuItem disabled={index === columns.length - 1} onClick={() => move(1)}>Move right</MenuItem>
+            <MenuSeparator />
+            <div className="flex flex-wrap gap-1.5 px-3 py-2">
+              {COLUMN_PALETTE.map((c) => (
+                <button key={c} aria-label={`Colour ${c}`} onClick={() => recolor(c)} className={`size-5 rounded-full ring-2 ring-offset-1 ring-offset-transparent transition-transform hover:scale-110 ${c === color ? "ring-text-strong" : "ring-transparent"}`} style={{ backgroundColor: c }} />
+              ))}
+            </div>
+            <MenuSeparator />
+            <MenuItem disabled={columns.length <= 1} onClick={remove} className="text-rose-600 data-highlighted:text-rose-600">Delete column</MenuItem>
+          </MenuPopup>
+        </Menu>
       </div>
 
       <div className="mx-3 mb-2.5 flex h-9 items-center gap-2 overflow-hidden rounded-full bg-surface-0 px-1.5 transition-shadow focus-within:ring-1 focus-within:ring-inset focus-within:ring-line-strong dark:bg-white/[0.05] dark:focus-within:ring-white/[0.14]">
@@ -417,6 +477,41 @@ function ProjectOverview({ project, tasks, onUpdate }: {
           </section>
         </aside>
       </div>
+    </div>
+  );
+}
+
+
+/** Trailing stub that adds a column to the board. */
+function AddColumn({ columns, onSave }: { columns: BoardColumn[]; onSave: (next: BoardColumn[]) => Promise<unknown> }) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState("");
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => { if (editing) requestAnimationFrame(() => ref.current?.focus()); }, [editing]);
+  const commit = () => {
+    const n = name.trim();
+    setEditing(false); setName("");
+    if (!n) return;
+    const color = COLUMN_PALETTE[columns.length % COLUMN_PALETTE.length];
+    void onSave([...columns, { id: newColumnId(n, columns), name: n, color }]);
+  };
+  return (
+    <div className="flex w-[220px] shrink-0 flex-col pt-1">
+      {editing ? (
+        <input
+          ref={ref}
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => { if (e.key === "Enter") commit(); if (e.key === "Escape") { setName(""); setEditing(false); } }}
+          placeholder="Column name"
+          className="h-9 rounded-full bg-surface-0 px-3.5 text-[13px] text-text-strong outline-none ring-1 ring-inset ring-line-strong placeholder:text-text-faint dark:bg-white/[0.06]"
+        />
+      ) : (
+        <button onClick={() => setEditing(true)} className="flex h-9 items-center gap-2 rounded-full px-3 text-[13px] text-text-faint transition-colors hover:bg-black/[0.04] hover:text-text-strong dark:hover:bg-white/[0.06]">
+          <IoAdd className="size-4" /> Add column
+        </button>
+      )}
     </div>
   );
 }
