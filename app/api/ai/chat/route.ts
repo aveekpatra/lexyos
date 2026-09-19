@@ -1,8 +1,7 @@
 import { generateText, stepCountIs } from "ai";
-import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { createTools } from "@/lib/ai/tools";
 import { auth } from "@clerk/nextjs/server";
-import { AGENT_MODEL, AGENT_MODEL_SETTINGS } from "@/lib/ai/agent-model";
+import { agentModel } from "@/lib/ai/agent-model";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "@/convex/_generated/api";
 import { mergeSettings } from "@/lib/settings";
@@ -122,8 +121,7 @@ export async function POST(req: Request) {
       }
     }
 
-    const openrouter = createOpenRouter({ apiKey: process.env.OPENROUTER_API_KEY });
-    const model = openrouter(AGENT_MODEL, AGENT_MODEL_SETTINGS);
+    const { model, providerOptions } = agentModel();
     const tools = createTools(token);
 
     // User preferences the agent should honour (scheduling notes, clock format).
@@ -146,6 +144,7 @@ export async function POST(req: Request) {
     // stepCountIs(10) allows up to 10 rounds of tool calls before forcing a text response.
     const result = await generateText({
       model,
+      providerOptions,
       system: SYSTEM_PROMPT + prefsBlock,
       messages: history,
       tools,
