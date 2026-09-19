@@ -5,6 +5,8 @@ import { recurrenceValidator } from "./lib/recurrence";
 export default defineSchema({
   tasks: defineTable({
     title: v.string(),
+    /** Legacy: sections were removed; older documents may still carry this. */
+    sectionId: v.optional(v.string()),
     description: v.optional(v.string()),
     status: v.union(
       v.literal("todo"),
