@@ -93,37 +93,50 @@ export async function collapseGoogleEvents(
   const horizon = opts.horizonDays ?? 60;
   const timeMin = new Date(`${opts.today}T00:00:00`).toISOString();
   const timeMax = new Date(Date.parse(timeMin) + horizon * 86400000).toISOString();
-  const seriesIds: string[] = [];
+  const seriesIds = [...series.keys()].map((k) => k.slice(k.indexOf(SEP) + 1));
 
-  for (const [key, s] of series) {
-    const masterId = key.slice(key.indexOf(SEP) + 1);
-    seriesIds.push(masterId);
-    let instances = s.instances;
-    if (opts.refetchSeries || instances.length === 0) {
-      try { instances = await getSeriesInstances(s.calendarId, masterId, timeMin, timeMax, opts.tz); } catch { /* keep what we have */ }
+  // Each series costs one master read (for the RRULE) and, when asked, one
+  // instances read. Dozens of series must fit inside the route's time budget,
+  // so they resolve concurrently, a few at a time.
+  const entries = [...series.entries()];
+  const resolved: Array<SyncRow | null> = new Array(entries.length).fill(null);
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < entries.length) {
+      const idx = cursor++;
+      const [key, s] = entries[idx];
+      const masterId = key.slice(key.indexOf(SEP) + 1);
+      let instances = s.instances;
+      const [fetchedInstances, master] = await Promise.all([
+        opts.refetchSeries || instances.length === 0
+          ? getSeriesInstances(s.calendarId, masterId, timeMin, timeMax, opts.tz).catch(() => null)
+          : Promise.resolve(null),
+        getEvent(s.calendarId, masterId).catch(() => null),
+      ]);
+      if (fetchedInstances) instances = fetchedInstances;
+      const live = instances
+        .filter((i) => i.status !== "cancelled" && (opts.showDeclined || !declinedBySelf(i)))
+        .sort((a, b) => dateOf(a).localeCompare(dateOf(b)));
+      const upcoming = live.find((i) => dateOf(i) >= opts.today);
+      if (!upcoming) continue; // nothing ahead inside the horizon: no live task
+      const hasCount = (master?.recurrence ?? []).some((r) => /COUNT=/i.test(r));
+      const recurrence = parseRRule(master?.recurrence, {
+        anchorDate: dateOf(upcoming),
+        anchorStart: timeOf(upcoming.start.dateTime),
+        anchorEnd: timeOf(upcoming.end.dateTime),
+        lastInstanceDate: hasCount ? dateOf(live[live.length - 1]) : undefined,
+      });
+      resolved[idx] = {
+        ...rowFromEvent({ ...upcoming, calendarId: s.calendarId, calendarColor: upcoming.calendarColor ?? master?.calendarColor }, opts.tz),
+        googleEventId: masterId,
+        googleRecurringEventId: masterId,
+        recurrence,
+        htmlLink: master?.htmlLink ?? upcoming.htmlLink,
+        googleUpdatedAt: master?.updated ?? upcoming.updated ?? undefined,
+      };
     }
-    const live = instances
-      .filter((i) => i.status !== "cancelled" && (opts.showDeclined || !declinedBySelf(i)))
-      .sort((a, b) => dateOf(a).localeCompare(dateOf(b)));
-    const upcoming = live.find((i) => dateOf(i) >= opts.today);
-    if (!upcoming) continue; // nothing ahead inside the horizon: no live task
-    let master: GoogleEvent | null = null;
-    try { master = await getEvent(s.calendarId, masterId); } catch { master = null; }
-    const hasCount = (master?.recurrence ?? []).some((r) => /COUNT=/i.test(r));
-    const recurrence = parseRRule(master?.recurrence, {
-      anchorDate: dateOf(upcoming),
-      anchorStart: timeOf(upcoming.start.dateTime),
-      anchorEnd: timeOf(upcoming.end.dateTime),
-      lastInstanceDate: hasCount ? dateOf(live[live.length - 1]) : undefined,
-    });
-    rows.push({
-      ...rowFromEvent({ ...upcoming, calendarId: s.calendarId, calendarColor: upcoming.calendarColor ?? master?.calendarColor }, opts.tz),
-      googleEventId: masterId,
-      googleRecurringEventId: masterId,
-      recurrence,
-      htmlLink: master?.htmlLink ?? upcoming.htmlLink,
-      googleUpdatedAt: master?.updated ?? upcoming.updated ?? undefined,
-    });
-  }
+  };
+  await Promise.all(Array.from({ length: Math.min(8, entries.length) }, worker));
+  for (const r of resolved) if (r) rows.push(r);
   return { rows, seriesIds };
 }

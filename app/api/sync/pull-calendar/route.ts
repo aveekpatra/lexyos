@@ -45,8 +45,10 @@ export async function POST() {
     let totalEvents = 0;
     let method = "none";
 
+    const failed: string[] = [];
     for (const calendar of selectedCalendars) {
       const syncState = syncStateMap.get(calendar.id);
+      try {
 
       if (syncState?.syncToken) {
         // Incremental sync using syncToken
@@ -95,13 +97,19 @@ export async function POST() {
         method = "full (first sync)";
         await fullSyncCalendar(convex, calendar.id, tz, today, showDeclined);
       }
+      } catch (err) {
+        // Keep going: the other calendars still get their pull and cursor.
+        console.error(`[PullCalendar] calendar ${calendar.id} failed:`, err instanceof Error ? err.message : err);
+        failed.push(calendar.id);
+      }
     }
 
     return Response.json({
       method,
       calendars: selectedCalendars.length,
       totalEvents,
-      message: `Calendar sync complete (${method})`,
+      failed,
+      message: `Calendar sync complete (${method})${failed.length ? `, ${failed.length} calendar(s) failed` : ""}`,
     });
   } catch (err) {
     if (isGoogleNotConnected(err)) return Response.json({ error: "google_not_connected" }, { status: 409 });
