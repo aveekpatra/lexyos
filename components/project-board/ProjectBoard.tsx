@@ -21,7 +21,7 @@ import { format, parseISO } from "date-fns";
 import { useQuickAdd } from "@/lib/quick-add";
 import {
   IoArrowDown,
-  IoCheckmark,
+  IoCheckmarkCircle,
   IoEllipsisHorizontal,
   IoAddCircle,
 } from "react-icons/io5";
@@ -116,7 +116,7 @@ export default function ProjectBoard({ projectId }: { projectId: Id<"projects"> 
                 {(Object.keys(SORT_LABELS) as SortBy[]).map((s) => (
                   <MenuItem key={s} onClick={() => setSortBy(s)}>
                     {SORT_LABELS[s]}
-                    {sortBy === s && <IoCheckmark className="ml-auto size-3.5" />}
+                    {sortBy === s && <IoCheckmarkCircle className="ml-auto size-3.5" />}
                   </MenuItem>
                 ))}
               </MenuPopup>
@@ -301,7 +301,7 @@ function ProjectOverview({ project, tasks, onUpdate }: {
                       <MenuItem key={s} onClick={() => onUpdate({ status: s })}>
                         <Dot color={s === "active" ? "#22c55e" : "#71717a"} />
                         {s === "active" ? "Active" : "Archived"}
-                        {project.status === s && <IoCheckmark className="ml-auto size-3.5" />}
+                        {project.status === s && <IoCheckmarkCircle className="ml-auto size-3.5" />}
                       </MenuItem>
                     ))}
                   </MenuPopup>
@@ -318,7 +318,7 @@ function ProjectOverview({ project, tasks, onUpdate }: {
                       <MenuItem key={p} onClick={() => onUpdate({ priority: p })}>
                         <Dot color={PRIORITY_COLORS[p]} />
                         {PRIORITY_LABELS[p]}
-                        {project.priority === p && <IoCheckmark className="ml-auto size-3.5" />}
+                        {project.priority === p && <IoCheckmarkCircle className="ml-auto size-3.5" />}
                       </MenuItem>
                     ))}
                   </MenuPopup>

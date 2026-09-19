@@ -1,5 +1,7 @@
 "use client";
 
+import { IoCheckmarkCircle } from "react-icons/io5";
+
 import { Combobox as ComboboxPrimitive } from "@base-ui/react/combobox";
 import { ChevronsUpDownIcon, XIcon } from "lucide-react";
 import * as React from "react";
@@ -215,20 +217,7 @@ export function ComboboxItem({
       {...props}
     >
       <ComboboxPrimitive.ItemIndicator className="col-start-1">
-        <svg
-          aria-hidden="true"
-          fill="none"
-          height="24"
-          stroke="currentColor"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth="2"
-          viewBox="0 0 24 24"
-          width="24"
-          xmlns="http://www.w3.org/2000/svg"
-        >
-          <path d="M5.252 12.7 10.2 18.63 18.748 5.37" />
-        </svg>
+        <IoCheckmarkCircle aria-hidden="true" className="size-full" />
       </ComboboxPrimitive.ItemIndicator>
       <div className="col-start-2">{children}</div>
     </ComboboxPrimitive.Item>

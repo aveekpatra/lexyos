@@ -36,7 +36,7 @@ import {
   IoAdd,
   IoArrowBack,
   IoCalendar,
-  IoCheckmark,
+  IoCheckmarkCircle,
   IoEllipsisHorizontal,
   IoOpen,
   IoRepeat,
@@ -208,7 +208,7 @@ export default function TaskDetail({ taskId }: { taskId: Id<"tasks"> }) {
           </button>
         )}
         <button onClick={handleToggleComplete} className={isDone ? bluePill : glassAction}>
-          <IoCheckmark className="size-3.5" />
+          <IoCheckmarkCircle className="size-3.5" />
           {isDone ? "Done" : recurrence ? "Complete occurrence" : "Mark done"}
         </button>
 
@@ -441,7 +441,7 @@ export default function TaskDetail({ taskId }: { taskId: Id<"tasks"> }) {
 }
 
 function Tick() {
-  return <IoCheckmark className="ml-auto size-3.5" />;
+  return <IoCheckmarkCircle className="ml-auto size-3.5" />;
 }
 
 /* ─── Sub-issue row: capsule, same 36px as rail rows ─── */
@@ -463,7 +463,7 @@ function SubtaskRow({ task }: { task: Doc<"tasks"> }) {
         className="flex size-4 shrink-0 items-center justify-center rounded-full transition-colors"
         style={{ border: `1.5px solid ${isDone ? "var(--brand)" : color}`, backgroundColor: isDone ? "var(--brand)" : "transparent" }}
       >
-        {isDone && <IoCheckmark className="size-2.5 text-white" />}
+        {isDone && <IoCheckmarkCircle className="size-2.5 text-white" />}
       </button>
       <button
         onClick={() => router.push(`/task/${task._id}`)}

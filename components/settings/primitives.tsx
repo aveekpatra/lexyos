@@ -5,7 +5,7 @@ import { Menu, MenuTrigger, MenuPopup, MenuItem } from "@/components/ui/menu";
 import { Kbd } from "@/components/ui/kbd";
 import { softPill } from "@/lib/ui/chrome";
 import { comboFromEvent, shortcutKeys, type Shortcut } from "@/lib/settings";
-import { IoCheckmark, IoChevronDown } from "react-icons/io5";
+import { IoCheckmarkCircle, IoChevronDown } from "react-icons/io5";
 
 /* Settings vocabulary: one card per group, one 48px row per setting, and a
    small set of controls (toggle, select, number, shortcut recorder) that all
@@ -70,7 +70,7 @@ export function Select<T extends string | number>({ value, options, onChange, wi
         {options.map((o) => (
           <MenuItem key={String(o.value)} onClick={() => onChange(o.value)}>
             {o.label}
-            {o.value === value && <IoCheckmark className="ml-auto size-3.5" />}
+            {o.value === value && <IoCheckmarkCircle className="ml-auto size-3.5" />}
           </MenuItem>
         ))}
       </MenuPopup>

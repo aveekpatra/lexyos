@@ -1,5 +1,7 @@
 "use client";
 
+import { IoCheckmarkCircle } from "react-icons/io5";
+
 import { mergeProps } from "@base-ui/react/merge-props";
 import { Select as SelectPrimitive } from "@base-ui/react/select";
 import { useRender } from "@base-ui/react/use-render";
@@ -183,20 +185,7 @@ export function SelectItem({
       {...props}
     >
       <SelectPrimitive.ItemIndicator className="col-start-1">
-        <svg
-          aria-hidden="true"
-          fill="none"
-          height="24"
-          stroke="currentColor"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth="2"
-          viewBox="0 0 24 24"
-          width="24"
-          xmlns="http://www.w3.org/2000/svg"
-        >
-          <path d="M5.252 12.7 10.2 18.63 18.748 5.37" />
-        </svg>
+        <IoCheckmarkCircle aria-hidden="true" className="size-full" />
       </SelectPrimitive.ItemIndicator>
       <SelectPrimitive.ItemText className="col-start-2 min-w-0">
         {children}

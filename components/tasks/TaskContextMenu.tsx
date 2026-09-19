@@ -23,7 +23,7 @@ import { useRouter } from "next/navigation";
 import { PRIORITY_COLORS, PRIORITY_LABELS } from "@/lib/constants";
 import {
   IoCalendar,
-  IoCheckmark,
+  IoCheckmarkCircle,
   IoCreate,
   IoFolder,
   IoRepeat,
@@ -120,7 +120,7 @@ export function TaskContextMenu({ task, children, className, style }: {
                     <span className="size-2.5 rounded-full" style={{ backgroundColor: PRIORITY_COLORS[p] }} />
                     {PRIORITY_LABELS[p]}
                   </span>
-                  {task.priority === p && <IoCheckmark className="ml-auto size-3.5 !text-brand-strong" />}
+                  {task.priority === p && <IoCheckmarkCircle className="ml-auto size-3.5 !text-brand-strong" />}
                 </MenuItem>
               ))}
             </MenuSubPopup>
@@ -142,7 +142,7 @@ export function TaskContextMenu({ task, children, className, style }: {
                   className={`${itemClass} ${task.dueDate === d.date ? "!text-brand-strong" : ""}`}
                 >
                   {d.label}
-                  {task.dueDate === d.date && <IoCheckmark className="ml-auto size-3.5 !text-brand-strong" />}
+                  {task.dueDate === d.date && <IoCheckmarkCircle className="ml-auto size-3.5 !text-brand-strong" />}
                 </MenuItem>
               ))}
               {task.dueDate && (
@@ -173,7 +173,7 @@ export function TaskContextMenu({ task, children, className, style }: {
                 className={`${itemClass} ${!task.projectId ? "!text-brand-strong" : ""}`}
               >
                 No project
-                {!task.projectId && <IoCheckmark className="ml-auto size-3.5 !text-brand-strong" />}
+                {!task.projectId && <IoCheckmarkCircle className="ml-auto size-3.5 !text-brand-strong" />}
               </MenuItem>
               {projects?.map((p) => (
                 <MenuItem
@@ -185,7 +185,7 @@ export function TaskContextMenu({ task, children, className, style }: {
                     <Folder className="size-4" style={{ color: p.color }} />
                     {p.name}
                   </span>
-                  {task.projectId === p._id && <IoCheckmark className="ml-auto size-3.5 !text-brand-strong" />}
+                  {task.projectId === p._id && <IoCheckmarkCircle className="ml-auto size-3.5 !text-brand-strong" />}
                 </MenuItem>
               ))}
             </MenuSubPopup>
@@ -217,7 +217,7 @@ export function TaskContextMenu({ task, children, className, style }: {
                   className={`${itemClass} ${activePreset === p.id ? "!text-brand-strong" : ""}`}
                 >
                   {p.label}
-                  {activePreset === p.id && <IoCheckmark className="ml-auto size-3.5 !text-brand-strong" />}
+                  {activePreset === p.id && <IoCheckmarkCircle className="ml-auto size-3.5 !text-brand-strong" />}
                 </MenuItem>
               ))}
               <MenuItem onClick={() => router.push(`/task/${task._id}`)} className={itemClass}>
@@ -242,7 +242,7 @@ export function TaskContextMenu({ task, children, className, style }: {
           {/* Mark done */}
           <MenuItem onClick={toggleComplete} className={itemClass}>
             <span className="flex items-center gap-2.5">
-              <IoCheckmark size={14} className="text-text-muted" />
+              <IoCheckmarkCircle size={14} className="text-text-muted" />
               {isDone ? "Mark undone" : "Mark done"}
             </span>
           </MenuItem>

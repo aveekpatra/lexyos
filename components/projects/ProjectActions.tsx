@@ -13,7 +13,7 @@ import { softPill } from "@/lib/ui/chrome";
 import { PROJECT_COLORS } from "@/components/projects/CreateProjectDialog";
 import {
   IoArchive,
-  IoCheckmark,
+  IoCheckmarkCircle,
   IoColorPalette,
   IoCopy,
   IoCreate,
@@ -71,7 +71,7 @@ export function ProjectMenuItems({
                 className="flex size-7 items-center justify-center rounded-full transition-transform hover:scale-110"
                 style={{ backgroundColor: c }}
               >
-                {project.color === c && <IoCheckmark className="size-3.5 text-white" />}
+                {project.color === c && <IoCheckmarkCircle className="size-3.5 text-white" />}
               </button>
             ))}
           </div>

@@ -7,7 +7,7 @@ import { api } from "@/convex/_generated/api";
 import { Dialog, DialogPopup, DialogTitle } from "@/components/ui/dialog";
 import { Folder } from "@/components/ui/folder";
 import { glassIconButton, softPill, bluePill } from "@/lib/ui/chrome";
-import { IoClose, IoFolder, IoCheckmark } from "react-icons/io5";
+import { IoClose, IoFolder, IoCheckmarkCircle } from "react-icons/io5";
 
 export const PROJECT_COLORS = [
   "#ef4444", "#f97316", "#f59e0b", "#22c55e",
@@ -104,7 +104,7 @@ export function CreateProjectDialog({ open, onOpenChange }: { open: boolean; onO
                         className="flex size-8 items-center justify-center rounded-full transition-transform hover:scale-110 active:scale-95"
                         style={{ backgroundColor: c, boxShadow: on ? `0 0 0 2px var(--surface-0), 0 0 0 4px ${c}` : undefined }}
                       >
-                        {on && <IoCheckmark className="size-4 text-white" />}
+                        {on && <IoCheckmarkCircle className="size-4 text-white" />}
                       </button>
                     );
                   })}
