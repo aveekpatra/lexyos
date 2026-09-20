@@ -139,7 +139,9 @@ export const update = mutation({
     const project = await ctx.db.get("projects", args.id);
     if (!project || project.userId !== identity.subject) throw new Error("Project not found");
 
-    const { id, ...updates } = args;
+    // `agent` is who is calling, not a project field: it must never reach the patch.
+    const { agent, id, ...updates } = args;
+    void agent;
     const filtered = Object.fromEntries(
       Object.entries(updates).filter(([, v]) => v !== undefined)
     );

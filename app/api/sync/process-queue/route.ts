@@ -108,7 +108,9 @@ export async function POST() {
             }
 
             const payload = (item.payload || {}) as Record<string, unknown>;
-            const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+            // The server runs in UTC, so its own zone would shift the event.
+            // Use the task's zone, as the push path already does.
+            const tz = task.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone;
             const gUpdates: Record<string, unknown> = {};
 
             // Build Google Calendar update from current task state

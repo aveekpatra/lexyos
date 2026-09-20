@@ -14,6 +14,7 @@ import {
   IoTrash,
 } from "react-icons/io5";
 import { Folder } from "@/components/ui/folder";
+import { PRIORITY_COLORS, PRIORITY_LABELS } from "@/lib/constants";
 
 /**
  * Runs `reset` when `open` transitions from true to false, using React's
@@ -365,6 +366,60 @@ export const ProjectPickerPopover = memo(function ProjectPickerPopover({
             </button>
           </div>
         )}
+      </PopoverPopup>
+    </Popover>
+  );
+});
+
+/* ────────────────────────────────────────────────────────
+ * PriorityPickerPopover
+ * ──────────────────────────────────────────────────────── */
+
+export type TaskPriority = "p1" | "p2" | "p3" | "p4";
+
+const PRIORITY_ORDER: TaskPriority[] = ["p1", "p2", "p3", "p4"];
+
+interface PriorityPickerPopoverProps {
+  value: TaskPriority;
+  onChange: (priority: TaskPriority) => void;
+  children: React.ReactNode;
+}
+
+export const PriorityPickerPopover = memo(function PriorityPickerPopover({
+  value,
+  onChange,
+  children,
+}: PriorityPickerPopoverProps) {
+  const [open, setOpen] = useState(false);
+
+  const select = useCallback((p: TaskPriority) => {
+    onChange(p);
+    setOpen(false);
+  }, [onChange]);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger nativeButton={false} render={<span role="button" tabIndex={0} draggable={false} className="inline-flex cursor-pointer" />}>
+        {children}
+      </PopoverTrigger>
+      {/* Four fixed rows, so no search box: it would only get in the way. */}
+      <PopoverPopup className="w-[196px]" sideOffset={6}>
+        <div className={sectionClass}>Priority</div>
+        <div className="space-y-0.5">
+          {PRIORITY_ORDER.map((p) => (
+            <button
+              data-row
+              key={p}
+              onClick={() => select(p)}
+              className={`${itemClass} ${value === p ? "!text-brand-strong" : ""}`}
+            >
+              <span className="flex items-center gap-2.5">
+                <span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: PRIORITY_COLORS[p] }} />
+                {PRIORITY_LABELS[p]}
+              </span>
+            </button>
+          ))}
+        </div>
       </PopoverPopup>
     </Popover>
   );

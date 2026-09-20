@@ -9,7 +9,7 @@ import { z } from "zod";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
-import { describeRecurrence, normalizeRecurrence, shortRecurrenceLabel, type Recurrence } from "@/convex/lib/recurrence";
+import { alignDateToRecurrence, describeRecurrence, normalizeRecurrence, shortRecurrenceLabel, type Recurrence } from "@/convex/lib/recurrence";
 import { projectColumns, columnForTask, newColumnId, DEFAULT_COLUMNS, COLUMN_PALETTE, type BoardColumn } from "@/convex/lib/columns";
 
 /** Column definitions from the agent (names, optional colour/status) into stored columns with ids. */
@@ -199,10 +199,17 @@ export function createTools(auth: ToolAuth): Record<string, any> {
         scheduledDate: z.string().optional().describe("Day it is scheduled on (YYYY-MM-DD) when different from dueDate"),
         scheduledStartTime: z.string().optional().describe("Start time in HH:MM format"),
         scheduledEndTime: z.string().optional().describe("End time in HH:MM format"),
+        location: z.string().optional().describe("Where it happens; shown on the task and pushed to the calendar event"),
+        isAllDay: z.boolean().optional().describe("true for an all-day item with no clock time"),
         recurrence: recurrenceSchema.optional(),
       }),
       execute: safe(async (args: any) => {
-        const dueDate = args.dueDate || today();
+        const requestedDate = args.dueDate || today();
+        // The repeat rule owns the day. Mirror the server's reconciliation so
+        // the date reported back is the date actually stored.
+        const dueDate = args.recurrence
+          ? alignDateToRecurrence(args.recurrence as Recurrence, requestedDate)
+          : requestedDate;
         const dueTime = args.dueTime || args.scheduledStartTime;
         const id = await convex.mutation(api.tasks.create, {
           title: args.title,
@@ -218,6 +225,8 @@ export function createTools(auth: ToolAuth): Record<string, any> {
           scheduledDate: args.scheduledDate,
           scheduledStartTime: args.scheduledStartTime,
           scheduledEndTime: args.scheduledEndTime,
+          location: args.location,
+          isAllDay: args.isAllDay,
           recurrence: args.recurrence as Recurrence | undefined,
           userDate: today(),
         });
@@ -235,6 +244,9 @@ export function createTools(auth: ToolAuth): Record<string, any> {
         return {
           id, title: args.title, dueDate, created: true,
           repeats: args.recurrence ? describeRecurrence(args.recurrence, dueDate) : undefined,
+          ...(dueDate !== requestedDate
+            ? { movedFrom: requestedDate, note: `dueDate moved from ${requestedDate} to ${dueDate}, the first day the repeat rule lands on. Tell the user.` }
+            : {}),
         };
       }),
     }),
@@ -258,8 +270,16 @@ export function createTools(auth: ToolAuth): Record<string, any> {
         parentTaskId: z.string().optional().describe("Make it a subtask of that task (use 'none' to detach)"),
         labels: z.array(z.string()).optional().describe("Replace labels"),
         scheduledDate: z.string().optional().describe("YYYY-MM-DD"),
+        location: z.string().optional().describe("Where it happens"),
+        isAllDay: z.boolean().optional().describe("true for an all-day item with no clock time"),
+        position: z.enum(["top", "bottom"]).optional().describe("Move it to the top or bottom of its list or board column"),
         clearDueDate: z.boolean().optional().describe("Remove the date entirely"),
         clearDueTime: z.boolean().optional().describe("Make it all-day"),
+        clearScheduledStartTime: z.boolean().optional().describe("Remove the start time"),
+        clearScheduledEndTime: z.boolean().optional().describe("Remove the end time, leaving an open-ended block"),
+        clearDescription: z.boolean().optional().describe("Empty the description"),
+        clearLabels: z.boolean().optional().describe("Remove all labels"),
+        clearLocation: z.boolean().optional().describe("Remove the location"),
       }),
       execute: safe(async (args: any) => {
         const updateArgs: Record<string, unknown> = { id: args.id };
@@ -269,6 +289,9 @@ export function createTools(auth: ToolAuth): Record<string, any> {
         if (args.scheduledDate) updateArgs.scheduledDate = args.scheduledDate;
         if (args.clearDueDate) { updateArgs.clearDueDate = true; updateArgs.userDate = today(); }
         if (args.clearDueTime) updateArgs.clearDueTime = true;
+        for (const f of ["clearScheduledStartTime", "clearScheduledEndTime", "clearDescription", "clearLabels", "clearLocation"]) if (args[f]) updateArgs[f] = true;
+        if (args.location !== undefined) updateArgs.location = args.location;
+        if (args.isAllDay !== undefined) updateArgs.isAllDay = args.isAllDay;
         if (args.clearRecurrence) updateArgs.clearRecurrence = true;
         else if (args.recurrence) updateArgs.recurrence = args.recurrence;
         if (args.title) updateArgs.title = args.title;
@@ -284,6 +307,17 @@ export function createTools(auth: ToolAuth): Record<string, any> {
         }
         if (args.scheduledStartTime) updateArgs.scheduledStartTime = args.scheduledStartTime;
         if (args.scheduledEndTime) updateArgs.scheduledEndTime = args.scheduledEndTime;
+        // Ordering is a sortOrder against its neighbours, so resolve "top" and
+        // "bottom" against the list the task is actually landing in.
+        if (args.position) {
+          const before = await convex.query(api.tasks.getById, { id: args.id as Id<"tasks"> });
+          const targetProject = (args.projectId && args.projectId !== "none" ? args.projectId : before?.projectId) as Id<"projects"> | undefined;
+          const siblings = await convex.query(api.tasks.list, targetProject ? { projectId: targetProject } : {});
+          if (siblings.length > 0) {
+            const orders = siblings.map((t) => t.sortOrder);
+            updateArgs.sortOrder = args.position === "top" ? Math.min(...orders) - 1 : Math.max(...orders) + 1;
+          }
+        }
 
         await convex.mutation(api.tasks.update, updateArgs as Parameters<typeof convex.mutation<typeof api.tasks.update>>[1]);
 
@@ -298,7 +332,19 @@ export function createTools(auth: ToolAuth): Record<string, any> {
           console.warn("[AI] Failed to enqueue sync:", err);
         }
 
-        return { id: args.id, updated: true };
+        // Read back: the server reconciles dueDate against the repeat rule, so
+        // the stored row is the only honest thing to report.
+        const after = await convex.query(api.tasks.getById, { id: args.id as Id<"tasks"> });
+        const rec = after ? normalizeRecurrence(after.recurrence, after.dueDate) : undefined;
+        return {
+          id: args.id, updated: true,
+          dueDate: after?.dueDate,
+          dueTime: after?.dueTime,
+          repeats: rec ? describeRecurrence(rec, after?.dueDate) : undefined,
+          ...(args.dueDate && after?.dueDate && after.dueDate !== args.dueDate
+            ? { movedFrom: args.dueDate, note: `dueDate moved from ${args.dueDate} to ${after.dueDate}, the first day the repeat rule lands on. Tell the user.` }
+            : {}),
+        };
       }),
     }),
 
@@ -452,6 +498,9 @@ export function createTools(auth: ToolAuth): Record<string, any> {
         priority: z.enum(["p1", "p2", "p3", "p4"]).optional().describe("p1 urgent, p2 high, p3 medium, p4 low"),
         startDate: z.string().optional().describe("YYYY-MM-DD"),
         dueDate: z.string().optional().describe("YYYY-MM-DD"),
+        icon: z.string().optional().describe("Icon name shown next to the project"),
+        client: z.string().optional().describe("Who the work is for"),
+        tags: z.array(z.string()).optional().describe("Free-form tags"),
         columns: z.array(z.object({
           name: z.string(),
           color: z.string().optional().describe("Hex colour"),
@@ -464,6 +513,7 @@ export function createTools(auth: ToolAuth): Record<string, any> {
           name: args.name, description: args.description, notes: args.context,
           color: args.color || "#3b82f6", priority: args.priority,
           startDate: args.startDate, dueDate: args.dueDate, columns,
+          icon: args.icon, client: args.client, tags: args.tags,
         });
         return { id, name: args.name, created: true, columns: (columns ?? DEFAULT_COLUMNS).map((c) => ({ id: c.id, name: c.name })) };
       }),
@@ -478,16 +528,25 @@ export function createTools(auth: ToolAuth): Record<string, any> {
         context: z.string().optional().describe("Full replacement markdown for the Context document"),
         color: z.string().optional(),
         priority: z.enum(["p1", "p2", "p3", "p4"]).optional(),
-        status: z.enum(["active", "archived"]).optional(),
+        status: z.enum(["active", "archived"]).optional().describe("'archived' shelves the project without deleting it"),
         startDate: z.string().optional(),
         dueDate: z.string().optional(),
+        icon: z.string().optional(),
+        client: z.string().optional(),
+        tags: z.array(z.string()).optional().describe("Replaces the whole tag list"),
       }),
       execute: safe(async (args: any) => {
         const patch: Record<string, unknown> = { id: args.id };
-        for (const k of ["name", "description", "color", "priority", "status", "startDate", "dueDate"]) if (args[k] !== undefined) patch[k] = args[k];
+        for (const k of ["name", "description", "color", "priority", "status", "startDate", "dueDate", "icon", "client", "tags"]) if (args[k] !== undefined) patch[k] = args[k];
         if (args.context !== undefined) patch.notes = args.context;
         await convex.mutation(api.projects.update, patch as Parameters<typeof convex.mutation<typeof api.projects.update>>[1]);
-        return { id: args.id, updated: true };
+        // Read back so the agent reports what was stored, not what it sent.
+        const after = await convex.query(api.projects.getById, { id: args.id as Id<"projects"> });
+        return {
+          id: args.id, updated: true,
+          name: after?.name, description: after?.description, status: after?.status,
+          context: after?.notes ?? "",
+        };
       }),
     }),
 
@@ -513,6 +572,21 @@ export function createTools(auth: ToolAuth): Record<string, any> {
         }
         await convex.mutation(api.projects.setColumns, { id: p._id, columns: out });
         return { projectId: p._id, columns: out.map((c) => ({ id: c.id, name: c.name, status: c.status })), updated: true };
+      }),
+    }),
+
+    delete_project: ({
+      description: `Permanently delete a project. IMPORTANT: This is irreversible — confirm with the user BEFORE calling this tool. Its tasks are NOT deleted: they are detached and fall back to the inbox. To keep a project but take it out of the way, prefer update_project with status 'archived' instead.`,
+      inputSchema: z.object({
+        id: z.string().describe("Project id (from list_projects)"),
+      }),
+      execute: safe(async (args: any) => {
+        // Read first: after the delete there is nothing left to report from.
+        const p = await convex.query(api.projects.getById, { id: args.id as Id<"projects"> });
+        if (!p) return { error: "Project not found" };
+        const tasks = await convex.query(api.tasks.list, { projectId: p._id });
+        await convex.mutation(api.projects.remove, { id: p._id });
+        return { id: p._id, name: p.name, deleted: true, tasksDetached: tasks.length };
       }),
     }),
 

@@ -188,6 +188,54 @@ export function validateRecurrence(rec: Recurrence): void {
   }
 }
 
+// ─── anchoring ───
+
+/**
+ * Does `date` sit on a day the rule can actually produce? A weekly rule owns
+ * the weekday, a monthly rule the day of month, a yearly rule the month and
+ * day; a date that disagrees with its own rule is a contradiction, not a
+ * variation. Rules that take their day from the anchor always fit.
+ */
+export function dateFitsRecurrence(rec: Recurrence, date: string): boolean {
+  if (!isValidDate(date)) return true;
+  switch (rec.freq) {
+    case "daily":
+      return true;
+    case "weekly":
+      return rec.slots.some((s) => s.day === weekdayOf(date));
+    case "monthly": {
+      if (rec.day === undefined) return true;
+      const [y, m, d] = parts(date);
+      return rec.day === "last" ? d === daysInMonth(y, m) : d === Math.min(rec.day, daysInMonth(y, m));
+    }
+    case "yearly": {
+      if (rec.month === undefined && rec.day === undefined) return true;
+      const [y, m, d] = parts(date);
+      const month = rec.month ?? m;
+      const day = rec.day ?? d;
+      return m === month && d === Math.min(day, daysInMonth(y, month));
+    }
+  }
+}
+
+/**
+ * The first date on or after `date` that the rule can land on. Returns `date`
+ * unchanged when it already fits, so callers can compare and report the move.
+ * The result becomes the task's anchor, which is what sets an interval rule's
+ * phase, so no interval arithmetic is needed here.
+ */
+export function alignDateToRecurrence(rec: Recurrence, date: string): string {
+  if (!isValidDate(date) || dateFitsRecurrence(rec, date)) return date;
+  // A weekly rule always matches inside one week; month and year rules need
+  // at most a few steps, so a bounded scan is enough and stays exact.
+  const limit = rec.freq === "weekly" ? 7 : 800;
+  for (let i = 1; i <= limit; i++) {
+    const candidate = addDays(date, i);
+    if (dateFitsRecurrence(rec, candidate)) return candidate;
+  }
+  return date;
+}
+
 // ─── next occurrence ───
 
 /**

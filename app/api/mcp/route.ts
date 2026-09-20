@@ -48,8 +48,9 @@ const handler = createMcpHandler(
       "Lexyos is the user's personal task, project, and time manager. Dates are YYYY-MM-DD, times HH:MM 24h.",
       "Where context lives: a PROJECT carries long-horizon context (its Context document, columns, and every task with subtasks); a TASK carries its own context in its description and subtasks; the INBOX is everything without a project.",
       "Working method: (1) before creating anything, search_tasks (scoped with projectId when the work belongs to a project) so you update or reuse instead of duplicating; (2) for anything inside a project, call get_project once and plan from it, do not page through list_tasks; (3) for quick inbox items, search_tasks or list_tasks is enough; (4) after a write, read it back with get_task or get_project and report what you read.",
-      "Projects: create_project accepts description, context (markdown), and custom columns; set_project_columns renames, reorders, adds or removes columns. Tasks: create_task and update_task accept every property, including columnId, parentTaskId (subtasks), labels, schedule and recurrence.",
-      "Ask before delete_task. Everything else may be done directly.",
+      "Projects: create_project accepts description, context (markdown), and custom columns; update_project rewrites them later (send context in full, not a diff); set_project_columns renames, reorders, adds or removes columns; update_project with status 'archived' shelves a project and delete_project removes it, leaving its tasks in the inbox. Tasks: create_task and update_task accept every property, including columnId, parentTaskId (subtasks), labels, schedule and recurrence.",
+      "A task's date must be a day its repeat rule can land on, so setting a rule the date contradicts moves the date forward to the next matching day; the result says so when it happens, and you should pass that on.",
+      "Ask before delete_task and delete_project. Everything else may be done directly.",
     ].join(" "),
   },
 );

@@ -7,7 +7,7 @@ import { api } from "@/convex/_generated/api";
 import type { Doc } from "@/convex/_generated/dataModel";
 import {
   DatePickerPopover, TimePickerPopover, DurationPickerPopover, ProjectPickerPopover,
-  TaskChip, formatDuration, computeDuration,
+  PriorityPickerPopover, TaskChip, formatDuration, computeDuration,
 } from "@/components/tasks/TaskPropertyPopovers";
 import { TaskContextMenu } from "@/components/tasks/TaskContextMenu";
 import { format, parseISO, isPast, isToday } from "date-fns";
@@ -15,12 +15,12 @@ import { isGoogleCalEvent } from "@/lib/task-utils";
 import { syncTaskUpdateToGoogle, syncCompletionResultToGoogle } from "@/lib/google-sync";
 import { normalizeRecurrence, shortRecurrenceLabel } from "@/convex/lib/recurrence";
 import { RecurrencePopover } from "@/components/tasks/RecurrencePopover";
-import { PRIORITY_COLORS } from "@/lib/constants";
+import { PRIORITY_COLORS, PRIORITY_LABELS } from "@/lib/constants";
 import { setDraggingTaskId } from "@/lib/drag-store";
 import { startFocus, useFocusSession } from "@/lib/focus-store";
 import { useSettings, formatClock } from "@/lib/settings";
 import {
-  IoEllipseOutline,
+  IoCalendar,
   IoRepeat,
   IoTimer,
 } from "react-icons/io5";
@@ -78,6 +78,7 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue, context = "
   const focusSession = useFocusSession();
   const focusingThis = focusSession?.taskId === task._id;
   const color = PRIORITY_COLORS[task.priority] || PRIORITY_COLORS.p4;
+  const isNotablePriority = task.priority === "p1" || task.priority === "p2";
   const clock = settings.calendar.timeFormat;
   const fmtTime = (t: string) => formatClock(t, clock);
   let dateColor = "#a1a1aa";
@@ -134,32 +135,24 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue, context = "
       >
         {/* Row 1: Priority circle + Title */}
         <div className="flex min-w-0 items-start gap-2.5">
-          {/* Priority circle or calendar icon */}
-          {isCalendarSource ? (
-            <button
-              onClick={(e) => { e.stopPropagation(); toggleComplete({ id: task._id }); }}
-              onContextMenu={(e) => e.stopPropagation()}
-              className="mt-0.5 flex shrink-0 items-center justify-center"
-            >
-              <IoEllipseOutline size={16} style={{ color: isDone ? "#71717a" : calColor || "#059669" }} />
-            </button>
-          ) : (
-            <button
-              onClick={(e) => { e.stopPropagation(); toggleComplete({ id: task._id }); }}
-              onContextMenu={(e) => e.stopPropagation()}
-              className="mt-0.5 flex size-[16px] shrink-0 items-center justify-center rounded-full transition-colors"
-              style={{
-                border: `2px solid ${isDone ? "#93c5fd" : color}`,
-                backgroundColor: isDone ? "#71717a" : "transparent",
-              }}
-            >
-              {isDone && (
-                <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
-                  <path d="M1.5 4L3.2 5.7L6.5 2.3" stroke="#ffffff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              )}
-            </button>
-          )}
+          {/* One circle for every task, always the priority colour: same
+              geometry, same meaning, whether or not it came from a calendar.
+              Which calendar it came from is a chip below, not this circle. */}
+          <button
+            onClick={(e) => { e.stopPropagation(); toggleComplete({ id: task._id }); }}
+            onContextMenu={(e) => e.stopPropagation()}
+            className="mt-0.5 flex size-[16px] shrink-0 items-center justify-center rounded-full transition-colors"
+            style={{
+              border: `2px solid ${isDone ? "#93c5fd" : color}`,
+              backgroundColor: isDone ? "#71717a" : "transparent",
+            }}
+          >
+            {isDone && (
+              <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
+                <path d="M1.5 4L3.2 5.7L6.5 2.3" stroke="#ffffff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            )}
+          </button>
 
           {/* Title — max 2 lines, click to open detail */}
           <span
@@ -185,6 +178,28 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue, context = "
         {/* Row 2: Meta chips */}
         {hasChips && (
           <div className="flex flex-wrap items-center gap-1.5 pl-[26px]" draggable={false} onClick={(e) => e.stopPropagation()} onContextMenu={(e) => e.stopPropagation()}>
+            {/* Priority chip. Urgent and High earn a permanent place; the
+                quieter two stay out of the way until the card is hovered. */}
+            <PriorityPickerPopover
+              value={task.priority}
+              onChange={(p) => syncUpdateTask({ id: task._id, priority: p })}
+            >
+              <TaskChip active className={isNotablePriority ? "" : "opacity-0 group-hover:opacity-100"}>
+                <span className="flex items-center gap-1.5">
+                  <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: color }} />
+                  <span className="text-text-secondary">{PRIORITY_LABELS[task.priority]}</span>
+                </span>
+              </TaskChip>
+            </PriorityPickerPopover>
+            {/* Which calendar this came from, now that the circle shows priority */}
+            {isCalendarSource && (
+              <TaskChip active>
+                <span className="flex items-center gap-1.5">
+                  <IoCalendar size={11} style={{ color: calColor || "#059669" }} />
+                  <span className="text-text-secondary">Calendar</span>
+                </span>
+              </TaskChip>
+            )}
             {/* Sidebar: duration first */}
             {isSidebar && duration && (
               <DurationPickerPopover

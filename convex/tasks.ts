@@ -7,6 +7,8 @@ import {
   normalizeRecurrence,
   validateRecurrence,
   nextOccurrence,
+  alignDateToRecurrence,
+  type StoredRecurrence,
 } from "./lib/recurrence";
 
 // ─── "HH:MM" helpers (kept local so the Convex bundle has no app imports) ───
@@ -147,6 +149,8 @@ export const create = mutation({
     parentTaskId: v.optional(v.id("tasks")),
     googleEventId: v.optional(v.string()),
     googleCalendarId: v.optional(v.string()),
+    location: v.optional(v.string()),
+    isAllDay: v.optional(v.boolean()),
     // Client-provided local date (format: "YYYY-MM-DD") to avoid UTC drift on the server.
     // Falls back to server UTC date if not provided.
     userDate: v.optional(v.string()),
@@ -170,14 +174,20 @@ export const create = mutation({
     const today = args.userDate || new Date().toISOString().slice(0, 10);
     if (args.recurrence) validateRecurrence(args.recurrence);
 
+    // A date that disagrees with the repeat rule (a Monday under "every Sun")
+    // would show on one day while claiming another, so the rule wins and the
+    // date moves forward to the first day the rule can actually land on.
+    const rawDue = args.dueDate || today;
+    const dueDate = args.recurrence ? alignDateToRecurrence(args.recurrence, rawDue) : rawDue;
+
     return await ctx.db.insert("tasks", {
       title: args.title,
       description: args.description,
       status: args.status ?? "todo",
       priority: args.priority ?? "p3",
-      dueDate: args.dueDate || today,
+      dueDate,
       dueTime: args.dueTime,
-      scheduledDate: args.scheduledDate,
+      scheduledDate: args.scheduledDate === rawDue ? dueDate : args.scheduledDate,
       scheduledStartTime: args.scheduledStartTime,
       scheduledEndTime: args.scheduledEndTime,
       projectId: args.projectId,
@@ -187,6 +197,8 @@ export const create = mutation({
       columnId: args.columnId,
       googleEventId: args.googleEventId,
       googleCalendarId: args.googleCalendarId,
+      location: args.location,
+      isAllDay: args.isAllDay,
       source: "local",
       sortOrder: args.placeAtTop ? minOrder - 1 : maxOrder + 1,
       userId,
@@ -220,6 +232,8 @@ export const update = mutation({
     sortOrder: v.optional(v.number()),
     googleEventId: v.optional(v.string()),
     googleCalendarId: v.optional(v.string()),
+    location: v.optional(v.string()),
+    isAllDay: v.optional(v.boolean()),
     // Explicit clear flags — when true, clear the corresponding field
     clearDueDate: v.optional(v.boolean()),
     clearDueTime: v.optional(v.boolean()),
@@ -229,6 +243,8 @@ export const update = mutation({
     clearProjectId: v.optional(v.boolean()),
     clearRecurrence: v.optional(v.boolean()),
     clearDescription: v.optional(v.boolean()),
+    clearLabels: v.optional(v.boolean()),
+    clearLocation: v.optional(v.boolean()),
     // Client-provided local date (format: "YYYY-MM-DD") to avoid UTC drift on the server.
     // Used by clearDueDate/clearScheduledDate handlers to reset to "today" in the user's timezone.
     userDate: v.optional(v.string()),
@@ -242,9 +258,11 @@ export const update = mutation({
       throw new Error("Task not found");
     }
 
-    const { id, clearDueDate, clearDueTime, clearScheduledDate, clearScheduledStartTime,
-      clearScheduledEndTime, clearProjectId, clearRecurrence, clearDescription, clearColumnId, clearParentTaskId,
-      userDate, ...updates } = args;
+    // `agent` is who is calling, not a task field: it must never reach the patch.
+    const { agent, id, clearDueDate, clearDueTime, clearScheduledDate, clearScheduledStartTime,
+      clearScheduledEndTime, clearProjectId, clearRecurrence, clearDescription, clearLabels, clearLocation,
+      clearColumnId, clearParentTaskId, userDate, ...updates } = args;
+    void agent;
 
     if (args.recurrence) validateRecurrence(args.recurrence);
 
@@ -322,6 +340,23 @@ export const update = mutation({
     if (clearProjectId) patch.projectId = undefined;
     if (clearRecurrence) patch.recurrence = undefined;
     if (clearDescription) patch.description = undefined;
+    if (clearLabels) patch.labels = undefined;
+    if (clearLocation) patch.location = undefined;
+
+    // Whenever the date or the rule moves, reconcile them: a task must never
+    // sit on a day its own repeat rule cannot produce. Deliberately scoped to
+    // edits that touch one of the two, so renaming a task never reschedules it.
+    if (!clearRecurrence && (patch.recurrence !== undefined || patch.dueDate !== undefined)) {
+      const due = (patch.dueDate as string | undefined) ?? task.dueDate;
+      const rec = normalizeRecurrence((patch.recurrence ?? task.recurrence) as StoredRecurrence | undefined, due);
+      if (rec && due) {
+        const aligned = alignDateToRecurrence(rec, due);
+        if (aligned !== due) {
+          patch.dueDate = aligned;
+          patch.scheduledDate = aligned;
+        }
+      }
+    }
 
     await ctx.db.patch("tasks", id, patch);
   },
