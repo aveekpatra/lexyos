@@ -75,7 +75,6 @@ export default defineSchema({
     columns: v.optional(v.array(v.object({
       id: v.string(),
       name: v.string(),
-      color: v.string(),
       /** Status a task takes when moved here. Custom columns leave it unset. */
       status: v.optional(v.union(v.literal("todo"), v.literal("planned"), v.literal("in_progress"), v.literal("review"), v.literal("done"))),
     }))),

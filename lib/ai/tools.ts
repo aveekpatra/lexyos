@@ -10,13 +10,13 @@ import { ConvexHttpClient } from "convex/browser";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { alignDateToRecurrence, describeRecurrence, normalizeRecurrence, shortRecurrenceLabel, type Recurrence } from "@/convex/lib/recurrence";
-import { projectColumns, columnForTask, newColumnId, DEFAULT_COLUMNS, COLUMN_PALETTE, type BoardColumn } from "@/convex/lib/columns";
+import { projectColumns, columnForTask, newColumnId, DEFAULT_COLUMNS, type BoardColumn } from "@/convex/lib/columns";
 
 /** Column definitions from the agent (names, optional colour/status) into stored columns with ids. */
-function buildColumns(input?: Array<{ name: string; color?: string; status?: BoardColumn["status"] }>): BoardColumn[] | undefined {
+function buildColumns(input?: Array<{ name: string; status?: BoardColumn["status"] }>): BoardColumn[] | undefined {
   if (!input || input.length === 0) return undefined;
   const out: BoardColumn[] = [];
-  for (const c of input) out.push({ id: newColumnId(c.name, out), name: c.name, color: c.color ?? COLUMN_PALETTE[out.length % COLUMN_PALETTE.length], status: c.status });
+  for (const c of input) out.push({ id: newColumnId(c.name, out), name: c.name, status: c.status });
   return out;
 }
 
@@ -481,7 +481,7 @@ export function createTools(auth: ToolAuth): Record<string, any> {
           id: p._id, name: p.name, description: p.description, status: p.status, priority: p.priority, color: p.color,
           startDate: p.startDate, dueDate: p.dueDate, tags: p.tags,
           context: p.notes ?? "",
-          columns: columns.map((c) => ({ id: c.id, name: c.name, color: c.color, status: c.status })),
+          columns: columns.map((c) => ({ id: c.id, name: c.name, status: c.status })),
           board,
           counts: { open: tasks.filter((t) => !t.parentTaskId && t.status !== "done").length, done: tasks.filter((t) => !t.parentTaskId && t.status === "done").length },
         };
@@ -503,7 +503,6 @@ export function createTools(auth: ToolAuth): Record<string, any> {
         tags: z.array(z.string()).optional().describe("Free-form tags"),
         columns: z.array(z.object({
           name: z.string(),
-          color: z.string().optional().describe("Hex colour"),
           status: z.enum(["todo", "planned", "in_progress", "review", "done"]).optional().describe("Status a task takes in this column. Give exactly one column status 'done' if you want completion to land somewhere."),
         })).optional().describe("Custom board columns in order. Omit for the default template."),
       }),
@@ -557,7 +556,6 @@ export function createTools(auth: ToolAuth): Record<string, any> {
         columns: z.array(z.object({
           id: z.string().optional().describe("Existing column id to keep; omit for a new column"),
           name: z.string(),
-          color: z.string().optional(),
           status: z.enum(["todo", "planned", "in_progress", "review", "done"]).optional(),
         })).min(1),
       }),
@@ -566,9 +564,9 @@ export function createTools(auth: ToolAuth): Record<string, any> {
         if (!p) return { error: "Project not found" };
         const existing = projectColumns(p);
         const out: BoardColumn[] = [];
-        for (const c of args.columns as Array<{ id?: string; name: string; color?: string; status?: BoardColumn["status"] }>) {
+        for (const c of args.columns as Array<{ id?: string; name: string; status?: BoardColumn["status"] }>) {
           const prev = c.id ? existing.find((e) => e.id === c.id) : undefined;
-          out.push({ id: prev?.id ?? newColumnId(c.name, [...existing, ...out]), name: c.name, color: c.color ?? prev?.color ?? COLUMN_PALETTE[out.length % COLUMN_PALETTE.length], status: c.status ?? prev?.status });
+          out.push({ id: prev?.id ?? newColumnId(c.name, [...existing, ...out]), name: c.name, status: c.status ?? prev?.status });
         }
         await convex.mutation(api.projects.setColumns, { id: p._id, columns: out });
         return { projectId: p._id, columns: out.map((c) => ({ id: c.id, name: c.name, status: c.status })), updated: true };

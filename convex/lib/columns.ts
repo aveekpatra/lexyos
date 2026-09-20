@@ -1,18 +1,18 @@
 /**
  * Project board columns. Every project starts from the default template;
- * the user or an agent can rename, recolour, add, remove, and reorder. A
+ * the user or an agent can rename, add, remove, and reorder. A
  * task sits in `columnId` when that column still exists, otherwise in the
  * column whose status matches, otherwise in the first column.
  */
 export type TaskStatus = "todo" | "planned" | "in_progress" | "review" | "done";
-export type BoardColumn = { id: string; name: string; color: string; status?: TaskStatus };
+export type BoardColumn = { id: string; name: string; status?: TaskStatus };
 
 export const DEFAULT_COLUMNS: BoardColumn[] = [
-  { id: "todo", name: "Todo", color: "#94a3b8", status: "todo" },
-  { id: "planned", name: "Planned", color: "#3b82f6", status: "planned" },
-  { id: "in_progress", name: "In Progress", color: "#f59e0b", status: "in_progress" },
-  { id: "review", name: "Review", color: "#8b5cf6", status: "review" },
-  { id: "done", name: "Done", color: "#22c55e", status: "done" },
+  { id: "todo", name: "Todo", status: "todo" },
+  { id: "planned", name: "Planned", status: "planned" },
+  { id: "in_progress", name: "In Progress", status: "in_progress" },
+  { id: "review", name: "Review", status: "review" },
+  { id: "done", name: "Done", status: "done" },
 ];
 
 export function projectColumns(project: { columns?: BoardColumn[] | null } | null | undefined): BoardColumn[] {
@@ -42,4 +42,3 @@ export function newColumnId(name: string, existing: BoardColumn[]): string {
   return id;
 }
 
-export const COLUMN_PALETTE = ["#94a3b8", "#3b82f6", "#f59e0b", "#8b5cf6", "#22c55e", "#ef4444", "#14b8a6", "#ec4899", "#f97316", "#64748b"];

@@ -1,7 +1,7 @@
 import { v } from "convex/values";
 
 const COLUMNS = v.array(v.object({
-      id: v.string(), name: v.string(), color: v.string(),
+      id: v.string(), name: v.string(),
       status: v.optional(v.union(v.literal("todo"), v.literal("planned"), v.literal("in_progress"), v.literal("review"), v.literal("done"))),
     }));
 import { agentValidator, getIdentity } from "./lib/actor";

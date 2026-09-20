@@ -18,7 +18,7 @@ import { RailHeading, PropertyRow, Dot, RadialProgress } from "@/components/ui/p
 import { projectSignals } from "@/lib/project-signals";
 import { glassIconButton, glassAction, softPill as pill, emptyPill as pillEmpty, BOARD_COLUMN_WIDTH, pillEndCap } from "@/lib/ui/chrome";
 import { PRIORITY_COLORS, PRIORITY_LABELS, STATUS_OPTIONS, type TaskStatus } from "@/lib/constants";
-import { projectColumns, columnForTask, statusForColumn, newColumnId, COLUMN_PALETTE, type BoardColumn } from "@/convex/lib/columns";
+import { projectColumns, columnForTask, statusForColumn, newColumnId, type BoardColumn } from "@/convex/lib/columns";
 import { useSettings, matchesShortcut } from "@/lib/settings";
 import { format, parseISO } from "date-fns";
 import { useQuickAdd } from "@/lib/quick-add";
@@ -203,7 +203,7 @@ function StatusColumn({ column, index, columns, onSaveColumns, tasks, projectId,
   /** Changes when a keyboard shortcut asks this column to take focus. */
   focusToken: number;
 }) {
-  const { id: columnId, name: label, color } = column;
+  const { id: columnId, name: label } = column;
   const status: TaskStatus = column.status ?? "todo";
   const [renaming, setRenaming] = useState(false);
   const [nameDraft, setNameDraft] = useState(label);
@@ -221,7 +221,6 @@ function StatusColumn({ column, index, columns, onSaveColumns, tasks, projectId,
     const next = [...columns]; [next[index], next[j]] = [next[j], next[index]];
     void onSaveColumns(next);
   };
-  const recolor = (c: string) => void onSaveColumns(columns.map((x) => (x.id === columnId ? { ...x, color: c } : x)));
   const remove = () => {
     if (columns.length <= 1) return;
     if (tasks.length && !window.confirm(`Delete "${label}"? Its ${tasks.length} task(s) move to the first column.`)) return;
@@ -275,7 +274,6 @@ function StatusColumn({ column, index, columns, onSaveColumns, tasks, projectId,
         />
       )}
       <div className="flex h-11 items-center gap-2 pl-3 pr-1.5 pt-1">
-        <span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: color }} />
         {renaming ? (
           <input
             ref={nameRef}
@@ -298,12 +296,6 @@ function StatusColumn({ column, index, columns, onSaveColumns, tasks, projectId,
             <MenuItem onClick={() => { setNameDraft(label); setRenaming(true); }}>Rename</MenuItem>
             <MenuItem disabled={index === 0} onClick={() => move(-1)}>Move left</MenuItem>
             <MenuItem disabled={index === columns.length - 1} onClick={() => move(1)}>Move right</MenuItem>
-            <MenuSeparator />
-            <div className="flex flex-wrap gap-1.5 px-3 py-2">
-              {COLUMN_PALETTE.map((c) => (
-                <button key={c} aria-label={`Colour ${c}`} onClick={() => recolor(c)} className={`size-5 rounded-full ring-2 ring-offset-1 ring-offset-transparent transition-transform hover:scale-110 ${c === color ? "ring-text-strong" : "ring-transparent"}`} style={{ backgroundColor: c }} />
-              ))}
-            </div>
             <MenuSeparator />
             <MenuItem disabled={columns.length <= 1} onClick={remove} className="text-rose-600 data-highlighted:text-rose-600">Delete column</MenuItem>
           </MenuPopup>
@@ -491,8 +483,7 @@ function AddColumn({ columns, onSave }: { columns: BoardColumn[]; onSave: (next:
     const n = name.trim();
     setEditing(false); setName("");
     if (!n) return;
-    const color = COLUMN_PALETTE[columns.length % COLUMN_PALETTE.length];
-    void onSave([...columns, { id: newColumnId(n, columns), name: n, color }]);
+    void onSave([...columns, { id: newColumnId(n, columns), name: n }]);
   };
   return (
     <div className="flex w-[220px] shrink-0 flex-col pt-1">
