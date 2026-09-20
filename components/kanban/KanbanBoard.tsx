@@ -11,20 +11,18 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Segmented } from "@/components/ui/segmented";
 import { SidebarGlyph } from "@/components/ui/sidebar-glyph";
 import { Menu, MenuTrigger, MenuPopup, MenuSeparator, MenuCheckboxItem, MenuGroup, MenuGroupLabel, MenuRadioGroup, MenuRadioItem } from "@/components/ui/menu";
-import { DatePickerPopover } from "@/components/tasks/TaskPropertyPopovers";
 import { glassAction, glassIconButton, BOARD_COLUMN_WIDTH } from "@/lib/ui/chrome";
 import {
   format, isToday, isTomorrow, isYesterday, startOfWeek, endOfWeek, addWeeks, addDays,
   endOfMonth, parseISO, isBefore, startOfDay, isSameDay, differenceInCalendarDays,
 } from "date-fns";
-import { getOverdueTasks } from "@/lib/task-utils";
+import { getOverdueTasks, projectedOccurrences, type ProjectedOccurrence } from "@/lib/task-utils";
 import { useTimeboxOpen } from "@/lib/timebox-store";
 import { useSettings, matchesShortcut } from "@/lib/settings";
 import { useQuickAdd } from "@/lib/quick-add";
 import { useUiPref } from "@/lib/ui-prefs";
 import { durationMinutes } from "@/lib/time-utils";
 import {
-  IoCalendar,
   IoClose,
   IoChevronBack,
   IoChevronForward,
@@ -61,6 +59,8 @@ type Col = {
   covers: (date: Date) => boolean;
   tasks: Doc<"tasks">[];
   overdueTasks: Doc<"tasks">[];
+  /** Future dates repeating tasks will claim, so a spoken-for day looks it. */
+  projected: ProjectedOccurrence[];
   isToday?: boolean;
 };
 
@@ -133,6 +133,21 @@ export default function KanbanBoard() {
     const overdue = getOverdueTasks(tasks).filter((t) => !t.parentTaskId);
     const dateOf = (t: Doc<"tasks">) => (t.dueDate || t.scheduledDate ? parseISO((t.dueDate || t.scheduledDate)!) : null);
 
+    // One pass over the whole visible window, then bucketed by day below.
+    const windowFrom = DAY_STR(addDays(today, Math.min(0, range.from)));
+    const windowTo = DAY_STR(addDays(today, Math.max(range.to, 62)));
+    const byDate = new Map<string, ProjectedOccurrence[]>();
+    for (const occ of projectedOccurrences(active, windowFrom, windowTo)) {
+      const bucketed = byDate.get(occ.date);
+      if (bucketed) bucketed.push(occ); else byDate.set(occ.date, [occ]);
+    }
+    const projectedOn = (ds: string) => byDate.get(ds) ?? [];
+    const projectedIn = (pred: (d: Date) => boolean) => {
+      const out: ProjectedOccurrence[] = [];
+      for (const [ds, list] of byDate) if (pred(parseISO(ds))) out.push(...list);
+      return out;
+    };
+
     if (overdueView) {
       // Overdue plus the two most plausible landing days, so rescheduling is a drag away.
       const tomorrow = addDays(today, 1);
@@ -140,12 +155,12 @@ export default function KanbanBoard() {
         id: `date-${DAY_STR(d)}`, title, subtitle: format(d, "EEE, MMM d"), date: DAY_STR(d), dropDate: DAY_STR(d),
         covers: (x: Date) => isSameDay(x, d),
         tasks: active.filter((t) => { const td = dateOf(t); return !!td && isSameDay(td, d); }),
-        overdueTasks: [], isToday: isToday(d),
+        overdueTasks: [], projected: projectedOn(DAY_STR(d)), isToday: isToday(d),
       });
       return [
         {
           id: "overdue", title: "Overdue", subtitle: `${overdue.length} ${overdue.length === 1 ? "task" : "tasks"}`,
-          dropDate: DAY_STR(today), covers: () => false, tasks: [], overdueTasks: overdue,
+          dropDate: DAY_STR(today), covers: () => false, tasks: [], overdueTasks: overdue, projected: [],
         },
         dayCol(today, "Today"),
         dayCol(tomorrow, "Tomorrow"),
@@ -167,6 +182,7 @@ export default function KanbanBoard() {
           covers: (d: Date) => isSameDay(d, day),
           tasks: active.filter((t) => { const d = dateOf(t); return !!d && isSameDay(d, day); }),
           overdueTasks: isToday(day) ? overdue : [],
+          projected: projectedOn(ds),
           isToday: isToday(day),
         } satisfies Col;
       });
@@ -185,10 +201,10 @@ export default function KanbanBoard() {
     const bucket = (pred: (d: Date) => boolean) => active.filter((t) => { const d = dateOf(t); return !!d && pred(d); });
 
     return [
-      { id: "today", title: "Today", subtitle: format(now, "EEE, MMM d"), shortcut: "1", dropDate: DAY_STR(today), covers: coversToday, tasks: bucket(coversToday), overdueTasks: overdue, isToday: true },
-      { id: "this-week", title: "This Week", subtitle: `${format(weekStart, "MMM d")} to ${format(weekEnd, "MMM d")}`, shortcut: "2", dropDate: DAY_STR(isBefore(addDays(today, 1), addDays(weekEnd, 1)) ? addDays(today, 1) : today), covers: coversWeek, tasks: bucket(coversWeek), overdueTasks: [] },
-      { id: "next-week", title: "Next Week", subtitle: `${format(nextWeekStart, "MMM d")} to ${format(nextWeekEnd, "MMM d")}`, shortcut: "3", dropDate: DAY_STR(nextWeekStart), covers: coversNext, tasks: bucket(coversNext), overdueTasks: [] },
-      { id: "this-month", title: "This Month", subtitle: format(monthEnd, "MMMM"), shortcut: "4", dropDate: DAY_STR(addDays(nextWeekEnd, 1)), covers: coversMonth, tasks: bucket(coversMonth), overdueTasks: [] },
+      { id: "today", title: "Today", subtitle: format(now, "EEE, MMM d"), shortcut: "1", dropDate: DAY_STR(today), covers: coversToday, tasks: bucket(coversToday), overdueTasks: overdue, projected: projectedIn(coversToday), isToday: true },
+      { id: "this-week", title: "This Week", subtitle: `${format(weekStart, "MMM d")} to ${format(weekEnd, "MMM d")}`, shortcut: "2", dropDate: DAY_STR(isBefore(addDays(today, 1), addDays(weekEnd, 1)) ? addDays(today, 1) : today), covers: coversWeek, tasks: bucket(coversWeek), overdueTasks: [], projected: projectedIn(coversWeek) },
+      { id: "next-week", title: "Next Week", subtitle: `${format(nextWeekStart, "MMM d")} to ${format(nextWeekEnd, "MMM d")}`, shortcut: "3", dropDate: DAY_STR(nextWeekStart), covers: coversNext, tasks: bucket(coversNext), overdueTasks: [], projected: projectedIn(coversNext) },
+      { id: "this-month", title: "This Month", subtitle: format(monthEnd, "MMMM"), shortcut: "4", dropDate: DAY_STR(addDays(nextWeekEnd, 1)), covers: coversMonth, tasks: bucket(coversMonth), overdueTasks: [], projected: projectedIn(coversMonth) },
     ];
   }, [tasks, view, range, overdueView, weekStartsOn]);
 
@@ -343,11 +359,6 @@ export default function KanbanBoard() {
               <button onClick={() => nudge(1)} aria-label="Later" className={glassIconButton}>
                 <IoChevronForward className="size-4" />
               </button>
-              <DatePickerPopover value={undefined} onChange={(d) => d && scrollToDate(d)}>
-                <button aria-label="Jump to date" className={glassIconButton}>
-                  <IoCalendar className="size-[15px]" />
-                </button>
-              </DatePickerPopover>
             </div>
           )}
           <Menu>
@@ -453,10 +464,17 @@ function BoardColumn({ column, isAdding, onStartAdd, onStopAdd, apply, showDone,
 
   const sortedTasks = apply(column.tasks);
   const sortedOverdue = apply(column.overdueTasks);
+  const projected = useMemo(
+    () => apply(column.projected.map((o) => o.task))
+      .flatMap((t) => column.projected.filter((o) => o.task._id === t._id))
+      .sort((a, b) => a.date.localeCompare(b.date) || (a.start ?? "23:59").localeCompare(b.start ?? "23:59")),
+    [column.projected, apply],
+  );
   // Settings: workday threshold. Hours already planned in this column.
   const threshold = settings.calendar.workdayThresholdEnabled && column.date ? settings.calendar.workdayThresholdHours : null;
   const plannedMin = threshold !== null
     ? [...column.tasks, ...column.overdueTasks].reduce((sum, t) => sum + (durationMinutes(t.scheduledStartTime, t.scheduledEndTime) ?? (t.dueTime || t.scheduledStartTime ? settings.general.defaultDurationMin : 0)), 0)
+      + projected.reduce((sum, o) => sum + (durationMinutes(o.start, o.end) ?? (o.start ? settings.general.defaultDurationMin : 0)), 0)
     : 0;
   const plannedH = Math.round((plannedMin / 60) * 10) / 10;
   const isPast = !!column.date && isBefore(parseISO(column.date), startOfDay(new Date()));
@@ -516,6 +534,15 @@ function BoardColumn({ column, isAdding, onStartAdd, onStopAdd, apply, showDone,
         )}
         {sortedTasks.length > 0 && (
           <div className="flex flex-col gap-1.5">{sortedTasks.map((t) => <KanbanCard key={t._id} task={t} />)}</div>
+        )}
+        {/* Dates a repeating task will claim. Shown after the real ones: they
+            are what the day already owes, not work you can act on yet. */}
+        {projected.length > 0 && (
+          <div className={`flex flex-col gap-1.5 ${sortedTasks.length > 0 ? "mt-1.5" : ""}`}>
+            {projected.map((o) => (
+              <KanbanCard key={o.key} task={o.task} projection={{ date: o.date, start: o.start, end: o.end }} />
+            ))}
+          </div>
         )}
         {showDone && doneTasks.length > 0 && (
           <div className="mt-4 border-t border-line-strong pt-3">

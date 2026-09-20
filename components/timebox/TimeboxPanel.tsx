@@ -12,7 +12,7 @@ import { useResizableWidth } from "@/hooks/use-resizable-width";
 import { ResizeHandle } from "@/components/ui/resize-handle";
 import { useTimeboxDate, useTimeboxOpen } from "@/lib/timebox-store";
 import { syncTaskUpdateToGoogle, syncCompletionResultToGoogle } from "@/lib/google-sync";
-import { isGoogleCalEvent } from "@/lib/task-utils";
+import { isGoogleCalEvent, projectedOccurrences } from "@/lib/task-utils";
 import { PRIORITY_COLORS } from "@/lib/constants";
 import { useSettings, formatClock } from "@/lib/settings";
 import {
@@ -63,13 +63,29 @@ export function TimeboxPanel() {
   const timed = useMemo(() => dayTasks.filter((t) => resolveTaskBlock(t) !== null), [dayTasks]);
   const allDay = useMemo(() => dayTasks.filter((t) => resolveTaskBlock(t) === null && t.status !== "done"), [dayTasks]);
 
+  // Dates this day is already spoken for by a repeating task whose live row
+  // sits on an earlier date. Without them the grid looks free and you plan
+  // straight over the recurrence.
+  const projections = useMemo(
+    () => projectedOccurrences((tasks ?? []).filter((t) => (t.dueDate || t.scheduledDate) !== date), date, date),
+    [tasks, date],
+  );
+
   // Lay overlapping blocks side by side.
   const laid = useMemo(() => {
-    const blocks = timed.map((t) => {
-      const b = resolveTaskBlock(t)!;
-      const live = drag && drag.id === t._id ? { startMin: drag.start, endMin: drag.end } : b;
-      return { t, start: live.startMin, end: live.endMin, lane: 0, lanes: 1 };
-    }).sort((a, b) => a.start - b.start || b.end - a.end);
+    const blocks = [
+      ...timed.map((t) => {
+        const b = resolveTaskBlock(t)!;
+        const live = drag && drag.id === t._id ? { startMin: drag.start, endMin: drag.end } : b;
+        return { key: t._id as string, t, projected: false, start: live.startMin, end: live.endMin, lane: 0, lanes: 1 };
+      }),
+      // Projections join the same lane packing, which is the whole point: a
+      // new block should be pushed aside by the recurrence, not drawn over it.
+      ...projections.flatMap((o) => {
+        const b = resolveTaskBlock({ scheduledStartTime: o.start, scheduledEndTime: o.end });
+        return b ? [{ key: o.key, t: o.task, projected: true, start: b.startMin, end: b.endMin, lane: 0, lanes: 1 }] : [];
+      }),
+    ].sort((a, b) => a.start - b.start || b.end - a.end);
     let cluster: typeof blocks = [];
     let clusterEnd = -1;
     const flush = () => {
@@ -88,7 +104,7 @@ export function TimeboxPanel() {
     }
     if (cluster.length) flush();
     return blocks;
-  }, [timed, drag]);
+  }, [timed, projections, drag]);
 
   // Scroll to a sensible hour once.
   const landed = useRef(false);
@@ -267,7 +283,7 @@ export function TimeboxPanel() {
               <div className="pointer-events-none absolute inset-x-0 rounded-xl border-2 border-dashed border-brand/60 bg-brand/5" style={{ top: minutesToY(dropPreview), height: minutesToY(settings.general.defaultDurationMin) }} />
             )}
 
-            {laid.map(({ t, start, end, lane, lanes }) => {
+            {laid.map(({ key, t, projected, start, end, lane, lanes }) => {
               const done = t.status === "done";
               const google = isGoogleCalEvent(t);
               const dragging = drag?.id === t._id;
@@ -276,9 +292,29 @@ export function TimeboxPanel() {
               // Sit between the hour lines: 2px in from each line.
               const h = Math.max(24, minutesToY(end - start) - 4);
               const compact = h < 40;
+              if (projected) {
+                return (
+                  <div
+                    key={key}
+                    title="Repeats here"
+                    className={`absolute z-0 select-none overflow-hidden rounded-[13px] border border-dashed border-line-strong px-3 opacity-60 ${compact ? "flex items-center gap-2" : "py-2"}`}
+                    style={{ top: minutesToY(start) + 2, height: h, width, left }}
+                  >
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="size-4 shrink-0 rounded-full" style={{ border: `2px solid ${PRIORITY_COLORS[t.priority] || PRIORITY_COLORS.p4}` }} />
+                      <span className="truncate text-[13px] leading-4 text-text-secondary">{t.title}</span>
+                    </div>
+                    {!compact && (
+                      <div className="pl-6 text-[11px] leading-4 text-text-faint">
+                        {fmt(start)} to {fmt(Math.min(end, END_OF_DAY_MIN))}
+                      </div>
+                    )}
+                  </div>
+                );
+              }
               return (
                 <div
-                  key={t._id}
+                  key={key}
                   onPointerDown={beginDrag(t, "move")}
                   className={`absolute select-none overflow-hidden rounded-[13px] px-3 text-left transition-[box-shadow,transform] ${
                     google

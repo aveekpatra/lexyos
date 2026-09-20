@@ -303,6 +303,31 @@ export function nextOccurrence(rec: Recurrence, from: string, anchor: string = f
   return next;
 }
 
+/**
+ * Every occurrence the rule produces between `from` and `to` inclusive, walking
+ * forward from the task's own date. A recurring task is one row sitting on one
+ * date, so planning a week ahead needs the dates it WILL occupy, not just the
+ * one it occupies now. `limit` bounds a daily rule over a long window.
+ */
+export function occurrencesBetween(
+  rec: Recurrence,
+  anchor: string,
+  from: string,
+  to: string,
+  limit = 200,
+): Occurrence[] {
+  const out: Occurrence[] = [];
+  if (!isValidDate(anchor) || !isValidDate(from) || !isValidDate(to)) return out;
+  let cursor = anchor;
+  for (let i = 0; i < limit; i++) {
+    const next = nextOccurrence(rec, cursor, anchor);
+    if (!next || diffDays(next.date, to) > 0) break;
+    if (diffDays(next.date, from) >= 0) out.push(next);
+    cursor = next.date;
+  }
+  return out;
+}
+
 // ─── human labels ───
 
 const DAY_LABEL: Record<Weekday, string> = {

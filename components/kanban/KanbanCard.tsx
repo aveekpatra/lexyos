@@ -29,9 +29,15 @@ interface KanbanCardProps {
   task: Doc<"tasks">;
   isOverdue?: boolean;
   context?: "kanban" | "sidebar" | "project"; // sidebar = card in a list column, project = inside project board (no project chip)
+  /**
+   * A future occurrence of a repeating task, shown so a day that is already
+   * spoken for does not look free. It is not a row: it cannot be completed,
+   * dragged or edited, and its date and time come from the rule, not the task.
+   */
+  projection?: { date: string; start?: string; end?: string };
 }
 
-const KanbanCard = React.memo(function KanbanCard({ task, isOverdue, context = "kanban" }: KanbanCardProps) {
+const KanbanCard = React.memo(function KanbanCard({ task, isOverdue, context = "kanban", projection }: KanbanCardProps) {
   const isSidebar = context === "sidebar";
   const router = useRouter();
   const toggleCompleteMut = useMutation(api.tasks.toggleComplete);
@@ -116,6 +122,48 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue, context = "
     !isSidebar || // date chip always shows in kanban
     project
   );
+
+  // A projected occurrence previews a date the rule will claim. It is
+  // deliberately inert: everything editable belongs to the one live task, so
+  // this only shows the day it lands on, when, and why. Click opens the task.
+  if (projection) {
+    return (
+      <div
+        onClick={openDetail}
+        title={recurrence ? `Repeats here: ${shortRecurrenceLabel(recurrence)}` : "Upcoming occurrence"}
+        className="flex w-full cursor-pointer flex-col gap-1.5 rounded-[13px] border border-dashed border-line-strong px-3.5 py-2.5 opacity-60 transition-opacity hover:opacity-100"
+      >
+        <div className="flex min-w-0 items-start gap-2.5">
+          <span
+            className="mt-0.5 size-[16px] shrink-0 rounded-full"
+            style={{ border: `2px solid ${color}` }}
+          />
+          <span
+            className="min-w-0 flex-1 text-[13px] font-normal leading-[1.35] text-text-secondary"
+            style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}
+          >
+            {task.title}
+          </span>
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5 pl-[26px]">
+          {projection.start && (
+            <TaskChip active>
+              {fmtTime(projection.start)}
+              {projection.end && ` to ${fmtTime(projection.end)}`}
+            </TaskChip>
+          )}
+          {recurrence && (
+            <TaskChip active>
+              <span className="flex items-center gap-1 text-text-secondary">
+                <IoRepeat size={11} />
+                {shortRecurrenceLabel(recurrence)}
+              </span>
+            </TaskChip>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <TaskContextMenu task={task}>
