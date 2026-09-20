@@ -11,7 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Segmented } from "@/components/ui/segmented";
 import { SidebarGlyph } from "@/components/ui/sidebar-glyph";
 import { Menu, MenuTrigger, MenuPopup, MenuSeparator, MenuCheckboxItem, MenuGroup, MenuGroupLabel, MenuRadioGroup, MenuRadioItem } from "@/components/ui/menu";
-import { glassAction, glassIconButton, BOARD_COLUMN_WIDTH } from "@/lib/ui/chrome";
+import { glassAction, glassIconButton, BOARD_COLUMN_WIDTH, pillEndCap } from "@/lib/ui/chrome";
 import {
   format, isToday, isTomorrow, isYesterday, startOfWeek, endOfWeek, addWeeks, addDays,
   endOfMonth, parseISO, isBefore, startOfDay, isSameDay, differenceInCalendarDays,
@@ -27,7 +27,7 @@ import {
   IoChevronBack,
   IoChevronForward,
   IoAlertCircle,
-  IoAddCircle,
+  IoAdd,
   IoEllipsisHorizontal,
 } from "react-icons/io5";
 import { Folder } from "@/components/ui/folder";
@@ -502,7 +502,7 @@ function BoardColumn({ column, isAdding, onStartAdd, onStopAdd, apply, showDone,
       </div>
 
       <div className="mx-3 mb-2.5 flex h-9 items-center gap-2 overflow-hidden rounded-full bg-surface-0 px-1.5 transition-shadow focus-within:ring-1 focus-within:ring-inset focus-within:ring-line-strong dark:bg-white/[0.05] dark:focus-within:ring-white/[0.14]">
-        <IoAddCircle className="size-6 shrink-0 text-text-faint" aria-hidden />
+        <span className={pillEndCap} aria-hidden><IoAdd className="size-3.5" /></span>
         <input
           ref={inputRef} value={newTitle} onChange={(e) => setNewTitle(e.target.value)}
           placeholder="Add task"
@@ -516,7 +516,7 @@ function BoardColumn({ column, isAdding, onStartAdd, onStopAdd, apply, showDone,
           className="w-0 min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-text-faint"
         />
         {column.shortcut && (
-          <kbd className="inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-black/[0.05] text-[10px] font-medium text-text-faint dark:bg-white/[0.08]">
+          <kbd className={pillEndCap}>
             {column.shortcut}
           </kbd>
         )}

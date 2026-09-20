@@ -81,4 +81,11 @@ export const menuSectionLabel =
    Every board (Inbox overview, day, week, month, project) uses one rule:
    columns grow to fill the row when they fit; below the minimum the row
    scrolls sideways. The minimum matches the Inbox overview's comfortable width. */
+/* ── Add pill end caps ──
+   The plus and the shortcut key sit at either end of the same capsule, so they
+   share one circle: same box, same fill, same ink. Anything else reads as an
+   icon that happens to be near a badge. */
+export const pillEndCap =
+  "inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-black/[0.05] text-[10px] font-medium text-text-faint dark:bg-white/[0.08]";
+
 export const BOARD_COLUMN_WIDTH = "min-w-[360px] flex-1 basis-0";
