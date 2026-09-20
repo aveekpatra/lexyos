@@ -81,4 +81,4 @@ export const menuSectionLabel =
    Every board (Inbox overview, day, week, month, project) uses one rule:
    columns grow to fill the row when they fit; below the minimum the row
    scrolls sideways. The minimum matches the Inbox overview's comfortable width. */
-export const BOARD_COLUMN_WIDTH = "min-w-[300px] flex-1 basis-0";
+export const BOARD_COLUMN_WIDTH = "min-w-[360px] flex-1 basis-0";

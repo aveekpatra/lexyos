@@ -78,7 +78,6 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue, context = "
   const focusSession = useFocusSession();
   const focusingThis = focusSession?.taskId === task._id;
   const color = PRIORITY_COLORS[task.priority] || PRIORITY_COLORS.p4;
-  const isNotablePriority = task.priority === "p1" || task.priority === "p2";
   const clock = settings.calendar.timeFormat;
   const fmtTime = (t: string) => formatClock(t, clock);
   let dateColor = "#a1a1aa";
@@ -178,13 +177,13 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue, context = "
         {/* Row 2: Meta chips */}
         {hasChips && (
           <div className="flex flex-wrap items-center gap-1.5 pl-[26px]" draggable={false} onClick={(e) => e.stopPropagation()} onContextMenu={(e) => e.stopPropagation()}>
-            {/* Priority chip. Urgent and High earn a permanent place; the
-                quieter two stay out of the way until the card is hovered. */}
+            {/* Priority chip, always shown: a task's priority is not worth
+                hiding behind a hover, and a missing chip reads as no priority. */}
             <PriorityPickerPopover
               value={task.priority}
               onChange={(p) => syncUpdateTask({ id: task._id, priority: p })}
             >
-              <TaskChip active className={isNotablePriority ? "" : "opacity-0 group-hover:opacity-100"}>
+              <TaskChip active>
                 <span className="flex items-center gap-1.5">
                   <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: color }} />
                   <span className="text-text-secondary">{PRIORITY_LABELS[task.priority]}</span>
