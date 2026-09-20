@@ -404,6 +404,7 @@ async function completeTask(ctx: MutationCtx, task: Doc<"tasks">, userDate?: str
   void _id; void _creationTime;
   const snapshotId = await ctx.db.insert("tasks", {
     ...fields,
+    seriesId: task._id,
     status: "done",
     completedAt: Date.now(),
     recurrence: undefined,
@@ -455,6 +456,40 @@ export const toggleComplete = mutation({
     }
 
     if (task.status === "done") {
+      // Un-completing a repeating task's snapshot means "I did not actually do
+      // that one". The snapshot carries no rule, so reviving it in place would
+      // leave a second live row beside the series that never repeats again.
+      // Retract the record instead, and move the series back onto that date
+      // when it is the most recent completion.
+      if (task.seriesId) {
+        const live = await ctx.db.get("tasks", task.seriesId);
+        const snapDate = task.dueDate || task.scheduledDate;
+        if (live && live.userId === identity.subject && snapDate) {
+          const newer = await ctx.db
+            .query("tasks")
+            .withIndex("by_seriesId", (q) => q.eq("seriesId", task.seriesId!))
+            .collect();
+          const isLatest = !newer.some((s) => s._id !== task._id && (s.dueDate || s.scheduledDate || "") > snapDate);
+          if (isLatest) {
+            await ctx.db.patch("tasks", live._id, {
+              dueDate: snapDate,
+              scheduledDate: task.scheduledDate || snapDate,
+              dueTime: task.dueTime,
+              scheduledStartTime: task.scheduledStartTime,
+              scheduledEndTime: task.scheduledEndTime,
+              status: live.status === "done" ? "todo" : live.status,
+              completedAt: undefined,
+            });
+          }
+          await ctx.db.delete("tasks", task._id);
+          return {
+            googleEventId: live.googleEventId,
+            googleCalendarId: live.googleCalendarId,
+            rolled: isLatest,
+            ...(isLatest ? { next: { date: snapDate, start: task.scheduledStartTime || task.dueTime, end: task.scheduledEndTime } } : {}),
+          };
+        }
+      }
       await ctx.db.patch("tasks", args.id, {
         status: "todo",
         completedAt: undefined,

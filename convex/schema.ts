@@ -34,6 +34,12 @@ export default defineSchema({
     parentTaskId: v.optional(v.id("tasks")),
     /** Project board column. Falls back to the column matching `status`. */
     columnId: v.optional(v.string()),
+    /**
+     * On a done snapshot of a repeating task, the live row it was cut from.
+     * Without it the history of a habit is a title-match guess, so adherence
+     * cannot be computed and an un-complete cannot find its series.
+     */
+    seriesId: v.optional(v.id("tasks")),
     googleEventId: v.optional(v.string()),       // linked Google Calendar event ID
     /** Set when googleEventId is a series master: Google owns the rule, we only roll locally. */
     googleRecurringEventId: v.optional(v.string()),
@@ -57,7 +63,8 @@ export default defineSchema({
     .index("by_userId_and_scheduledDate", ["userId", "scheduledDate"])
     .index("by_userId_and_dueDate", ["userId", "dueDate"])
     .index("by_parentTaskId", ["parentTaskId"])
-    .index("by_userId_and_googleEventId", ["userId", "googleEventId"]),
+    .index("by_userId_and_googleEventId", ["userId", "googleEventId"])
+    .index("by_seriesId", ["seriesId"]),
 
   projects: defineTable({
     name: v.string(),

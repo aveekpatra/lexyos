@@ -176,15 +176,24 @@ export interface CompletionResult {
  * - Otherwise: toggle the [Done] prefix like before.
  *
  * Pass the task state from BEFORE the mutation and `wasDone` for that state.
+ *
+ * The event to move is the one the RESULT names, not the one the passed task
+ * carries: retracting a completion hands back the live row's link, while the
+ * snapshot it was called on has none.
  */
 export async function syncCompletionResultToGoogle(
   task: Doc<"tasks">,
   result: CompletionResult,
   wasDone: boolean,
 ): Promise<void> {
-  if (!shouldSyncToGoogle(task)) return;
+  const target = {
+    ...task,
+    googleEventId: result.googleEventId,
+    googleCalendarId: result.googleCalendarId,
+  } as Doc<"tasks">;
+  if (!shouldSyncToGoogle(target)) return;
   if (!result.rolled || !result.next) {
-    await syncTaskCompletionToGoogle(task, !wasDone);
+    await syncTaskCompletionToGoogle(target, !wasDone);
     return;
   }
   const { next } = result;
@@ -199,7 +208,7 @@ export async function syncCompletionResultToGoogle(
   } else {
     changes.clearDueTime = true;
   }
-  await syncTaskUpdateToGoogle(task, changes);
+  await syncTaskUpdateToGoogle(target, changes);
 }
 
 /**
