@@ -29,6 +29,10 @@ import {
   IoAdd,
 } from "react-icons/io5";
 import { ProjectGlyph } from "@/components/ui/project-glyph";
+import { ProjectIconGrid } from "@/components/projects/ProjectIconGrid";
+import { PROJECT_COLORS } from "@/components/projects/CreateProjectDialog";
+import { projectIcon } from "@/lib/ui/project-icons";
+import { Popover, PopoverTrigger, PopoverPopup } from "@/components/ui/popover";
 
 /*
  * A project is a place, not a filter. Clicking one in the sidebar lands here:
@@ -333,7 +337,7 @@ function StatusColumn({ column, index, columns, onSaveColumns, tasks, projectId,
 function ProjectOverview({ project, tasks, onUpdate }: {
   project: Doc<"projects">;
   tasks: Doc<"tasks">[];
-  onUpdate: (patch: Partial<Pick<Doc<"projects">, "name" | "description" | "notes" | "status" | "priority" | "startDate" | "dueDate" | "color">>) => void;
+  onUpdate: (patch: Partial<Pick<Doc<"projects">, "name" | "description" | "notes" | "status" | "priority" | "startDate" | "dueDate" | "color" | "icon">>) => void;
 }) {
   const [nameDraft, setNameDraft] = useState<{ id: string; v: string } | null>(null);
   const [descDraft, setDescDraft] = useState<{ id: string; v: string } | null>(null);
@@ -378,6 +382,36 @@ function ProjectOverview({ project, tasks, onUpdate }: {
           <section>
             <RailHeading>Properties</RailHeading>
             <div className="flex flex-col gap-1">
+              <PropertyRow label="Appearance">
+                <Popover>
+                  <PopoverTrigger render={<button className={pill} />}>
+                    <ProjectGlyph icon={project.icon} className="size-4" style={{ color: project.color }} />
+                    {projectIcon(project.icon).label}
+                  </PopoverTrigger>
+                  <PopoverPopup align="start" className="w-[292px]" sideOffset={6}>
+                    <div className="mb-2 flex flex-wrap gap-2 px-1">
+                      {PROJECT_COLORS.map((c) => (
+                        <button
+                          key={c}
+                          type="button"
+                          onClick={() => onUpdate({ color: c })}
+                          aria-label={`Colour ${c}`}
+                          aria-pressed={project.color === c}
+                          className="flex size-7 items-center justify-center rounded-full transition-transform hover:scale-110 active:scale-95"
+                          style={{ backgroundColor: c, boxShadow: project.color === c ? `0 0 0 2px var(--surface-0), 0 0 0 4px ${c}` : undefined }}
+                        >
+                          {project.color === c && <IoCheckmarkCircle className="size-3.5 text-white" />}
+                        </button>
+                      ))}
+                    </div>
+                    <ProjectIconGrid
+                      value={project.icon}
+                      color={project.color}
+                      onSelect={(name) => onUpdate({ icon: name })}
+                    />
+                  </PopoverPopup>
+                </Popover>
+              </PropertyRow>
               <PropertyRow label="Status">
                 <Menu>
                   <MenuTrigger render={<button className={pill} />}>
