@@ -30,7 +30,7 @@ import {
   IoAdd,
   IoEllipsisHorizontal,
 } from "react-icons/io5";
-import { Folder } from "@/components/ui/folder";
+import { ProjectGlyph } from "@/components/ui/project-glyph";
 
 /*
  * Inbox: every task, grouped by time. Two ways to look at it:
@@ -327,7 +327,7 @@ export default function KanbanBoard() {
               title="Clear project filter"
               className="group inline-flex items-center gap-1.5 rounded-full bg-black/[0.04] px-2.5 py-1 text-[14px] font-semibold tracking-tight text-text-strong transition-colors hover:bg-black/[0.07] dark:bg-white/[0.06] dark:hover:bg-white/[0.1]"
             >
-              <Folder open className="size-4" style={{ color: activeProject?.color ?? "#71717a" }} />
+              <ProjectGlyph icon={activeProject?.icon} open className="size-4" style={{ color: activeProject?.color ?? "#71717a" }} />
               <span className="max-w-[220px] truncate">{filterProject === "" ? "No project" : activeProject?.name ?? "Project"}</span>
               <IoClose className="size-3.5 text-text-faint transition-colors group-hover:text-text-secondary" />
             </button>

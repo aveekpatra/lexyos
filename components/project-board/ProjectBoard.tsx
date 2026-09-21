@@ -28,7 +28,7 @@ import {
   IoEllipsisHorizontal,
   IoAdd,
 } from "react-icons/io5";
-import { Folder } from "@/components/ui/folder";
+import { ProjectGlyph } from "@/components/ui/project-glyph";
 
 /*
  * A project is a place, not a filter. Clicking one in the sidebar lands here:
@@ -116,7 +116,7 @@ export default function ProjectBoard({ projectId }: { projectId: Id<"projects"> 
       <div className="flex shrink-0 items-center justify-between gap-3 px-5 py-2">
         <div className="flex min-w-0 items-center gap-3.5">
           <h1 className="flex min-w-0 items-center gap-2 text-[15px] font-semibold tracking-tight text-text-strong">
-            <Folder open className="size-[18px]" style={{ color: project.color }} />
+            <ProjectGlyph icon={project.icon} open className="size-[18px]" style={{ color: project.color }} />
             <span className="truncate">{project.name}</span>
             <span className="text-[13px] font-medium text-text-faint">{openCount}</span>
             {project.status === "archived" && <span className={`${pill} !h-6 !text-[11px]`}>Archived</span>}

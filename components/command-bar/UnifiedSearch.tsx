@@ -8,7 +8,7 @@ import type { Doc } from "@/convex/_generated/dataModel";
 import type { IconType } from "react-icons";
 import { Dialog, DialogPopup } from "@/components/ui/dialog";
 import { SlidingHighlight } from "@/components/ui/sliding-highlight";
-import { Folder } from "@/components/ui/folder";
+import { ProjectGlyph } from "@/components/ui/project-glyph";
 import { useTheme } from "@/components/ThemeProvider";
 import { useTimeboxOpen } from "@/lib/timebox-store";
 import { useUiPref } from "@/lib/ui-prefs";
@@ -126,7 +126,7 @@ export function UnifiedSearch({ open, onOpenChange, onAskAI, onNewProject, onOpe
     for (const p of (projects ?? []).filter((p) => !q || p.name.toLowerCase().includes(q) || (p.description ?? "").toLowerCase().includes(q))) {
       out.push({
         id: `project-${p._id}`, group: "Projects",
-        glyph: <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-black/[0.04] dark:bg-white/[0.06]"><Folder className="size-[18px]" style={{ color: p.color }} /></span>,
+        glyph: <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-black/[0.04] dark:bg-white/[0.06]"><ProjectGlyph icon={p.icon} className="size-[18px]" style={{ color: p.color }} /></span>,
         title: p.name,
         subtitle: p.description || undefined,
         trailing: p.status === "archived" ? <span className="inline-flex items-center gap-1 text-[11px] text-text-faint"><IoArchive className="size-3" />Archived</span> : undefined,

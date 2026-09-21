@@ -328,6 +328,21 @@ export function occurrencesBetween(
   return out;
 }
 
+/**
+ * Average days between occurrences. This is the unit adherence and drift are
+ * measured in, so that a monthly task five days late and a daily task five
+ * days late do not read as the same problem.
+ */
+export function cadenceDays(rec: Recurrence): number {
+  const interval = Math.max(1, rec.interval ?? 1);
+  switch (rec.freq) {
+    case "daily": return interval;
+    case "weekly": return (7 * interval) / Math.max(1, rec.slots.length);
+    case "monthly": return 30.44 * interval;
+    case "yearly": return 365.25 * interval;
+  }
+}
+
 // ─── human labels ───
 
 const DAY_LABEL: Record<Weekday, string> = {

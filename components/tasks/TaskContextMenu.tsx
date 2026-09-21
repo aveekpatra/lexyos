@@ -30,7 +30,7 @@ import {
   IoTrash,
   IoTimer,
 } from "react-icons/io5";
-import { Folder } from "@/components/ui/folder";
+import { ProjectGlyph } from "@/components/ui/project-glyph";
 
 const itemClass = "";
 const subPopupClass = "w-[220px]";
@@ -182,7 +182,7 @@ export function TaskContextMenu({ task, children, className, style }: {
                   className={`${itemClass} ${task.projectId === p._id ? "!text-brand-strong" : ""}`}
                 >
                   <span className="flex items-center gap-2.5">
-                    <Folder className="size-4" style={{ color: p.color }} />
+                    <ProjectGlyph icon={p.icon} className="size-4" style={{ color: p.color }} />
                     {p.name}
                   </span>
                   {task.projectId === p._id && <IoCheckmarkCircle className="ml-auto size-3.5 !text-brand-strong" />}

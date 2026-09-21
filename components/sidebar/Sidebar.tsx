@@ -10,7 +10,7 @@ import type { IconType } from "react-icons";
 import { useGoogleConnection } from "@/components/google/ConnectGoogleDialog";
 import { Kbd } from "@/components/ui/kbd";
 import { SidebarGlyph } from "@/components/ui/sidebar-glyph";
-import { Folder } from "@/components/ui/folder";
+import { ProjectGlyph } from "@/components/ui/project-glyph";
 import { MiniCalendar } from "@/components/sidebar/MiniCalendar";
 import { getOverdueTasks } from "@/lib/task-utils";
 import { Tooltip, TooltipTrigger, TooltipPopup } from "@/components/ui/tooltip";
@@ -332,7 +332,7 @@ function ProjectRow({ project, active, collapsed, onOpen, onRequestDelete, muted
     else setDraft(project.name);
   };
 
-  const dot = <Folder open={active} className="size-[18px]" style={{ color: project.color, opacity: muted ? 0.5 : 1 }} />;
+  const dot = <ProjectGlyph icon={project.icon} open={active} className="size-[18px]" style={{ color: project.color, opacity: muted ? 0.5 : 1 }} />;
 
   if (collapsed) {
     return (

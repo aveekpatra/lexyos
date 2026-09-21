@@ -13,7 +13,7 @@ import {
   IoCalendar,
   IoTrash,
 } from "react-icons/io5";
-import { Folder } from "@/components/ui/folder";
+import { ProjectGlyph } from "@/components/ui/project-glyph";
 import { PRIORITY_COLORS, PRIORITY_LABELS } from "@/lib/constants";
 
 /**
@@ -343,7 +343,7 @@ export const ProjectPickerPopover = memo(function ProjectPickerPopover({
                   className={`${itemClass} ${value === project._id ? "!text-brand-strong" : ""}`}
                 >
                   <span className="flex items-center gap-2.5">
-                    <Folder className="size-4" style={{ color: project.color || "#6366f1" }} />
+                    <ProjectGlyph icon={project.icon} className="size-4" style={{ color: project.color || "#6366f1" }} />
                     {project.name}
                   </span>
                 </button>

@@ -43,7 +43,7 @@ import {
   IoTrash,
   IoTimer,
 } from "react-icons/io5";
-import { Folder } from "@/components/ui/folder";
+import { ProjectGlyph } from "@/components/ui/project-glyph";
 
 /*
  * Task page, Linear issue layout on the Liquid Glass two-layer model:
@@ -189,7 +189,7 @@ export default function TaskDetail({ taskId }: { taskId: Id<"tasks"> }) {
                 onClick={() => router.push(`/project/${project._id}`)}
                 className="inline-flex min-w-0 items-center gap-1.5 rounded-full px-2 py-1 font-medium text-text-muted transition-colors hover:bg-black/[0.04] hover:text-foreground dark:hover:bg-white/[0.06]"
               >
-                <Folder className="size-3.5" style={{ color: project.color }} />
+                <ProjectGlyph icon={project.icon} className="size-3.5" style={{ color: project.color }} />
                 <span className="truncate">{project.name}</span>
               </button>
             </>
