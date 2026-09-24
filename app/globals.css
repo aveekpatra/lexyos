@@ -243,6 +243,24 @@
   }
   .island { box-shadow: var(--island-shadow); }
 
+  /* ── Dragged row ──
+     A row being dragged travels inside a scroller, and a scroller clips
+     whatever spills past its edge, so a wide soft shadow arrives sheared off
+     against the rail. Lift is read from density instead: a hairline ring and
+     a short, darker stack that stays within a few pixels of the row. */
+  .drag-lift {
+    box-shadow:
+      inset 0 0 0 1px rgba(0, 0, 0, 0.09),
+      0 1px 1px rgba(0, 0, 0, 0.12),
+      0 2px 3px rgba(0, 0, 0, 0.16);
+  }
+  .dark .drag-lift {
+    box-shadow:
+      inset 0 0 0 1px rgba(255, 255, 255, 0.12),
+      0 1px 1px rgba(0, 0, 0, 0.5),
+      0 2px 3px rgba(0, 0, 0, 0.55);
+  }
+
   /* ── Dialog surface (Linear chrome) ──
      Large radius, hairline border, layered low-opacity shadow instead of one
      heavy drop. Shared by every dialog so modals read as one system. */

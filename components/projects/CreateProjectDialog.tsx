@@ -14,10 +14,17 @@ import { ProjectIconGrid } from "@/components/projects/ProjectIconGrid";
 import { DEFAULT_PROJECT_ICON } from "@/lib/ui/project-icons";
 import { IoClose, IoFolder, IoCheckmarkCircle, IoChevronDown } from "react-icons/io5";
 
+/**
+ * Twenty project colours, walked round the spectrum and ending in the greys.
+ * All one step of the same ramp, so they hold the same weight beside each
+ * other and stay legible as a small dot on white and on near-black alike.
+ * Index 6 is the default for a new project.
+ */
 export const PROJECT_COLORS = [
-  "#ef4444", "#f97316", "#f59e0b", "#22c55e",
-  "#06b6d4", "#3b82f6", "#6366f1", "#8b5cf6",
-  "#ec4899", "#71717a",
+  "#ef4444", "#f43f5e", "#ec4899", "#d946ef", "#a855f7",
+  "#8b5cf6", "#6366f1", "#3b82f6", "#0ea5e9", "#06b6d4",
+  "#14b8a6", "#10b981", "#22c55e", "#84cc16", "#eab308",
+  "#f59e0b", "#f97316", "#78716c", "#64748b", "#71717a",
 ];
 
 /*
@@ -131,7 +138,7 @@ export function CreateProjectDialog({
                   </PopoverTrigger>
                   <PopoverPopup align="start" sideOffset={8} className="w-[340px] !p-2">
                     {/* A colour keeps the picker open; picking an icon closes it. */}
-                    <div className="mb-2 flex flex-wrap gap-1.5 px-1 pt-1">
+                    <div className="mb-2 grid grid-cols-10 gap-1.5 px-1 pt-1">
                       {PROJECT_COLORS.map((c) => {
                         const on = color === c;
                         return (
@@ -141,10 +148,10 @@ export function CreateProjectDialog({
                             onClick={() => setColor(c)}
                             aria-label={`Colour ${c}`}
                             aria-pressed={on}
-                            className="flex size-7 items-center justify-center rounded-full transition-transform hover:scale-110 active:scale-95"
+                            className="flex size-6 items-center justify-center rounded-full transition-transform hover:scale-110 active:scale-95"
                             style={{ backgroundColor: c, boxShadow: on ? `0 0 0 2px var(--surface-1), 0 0 0 4px ${c}` : undefined }}
                           >
-                            {on && <IoCheckmarkCircle className="size-3.5 text-white" />}
+                            {on && <IoCheckmarkCircle className="size-3 text-white" />}
                           </button>
                         );
                       })}

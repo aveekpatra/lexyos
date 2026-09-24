@@ -245,7 +245,10 @@ export function Sidebar({ onOpenSearch, onOpenHelp, onOpenGoogle, onOpenSettings
           </Tooltip>
         </div>
 
-        <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto pb-2 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+        {/* px-1 -mx-1: a scroller clips at its padding edge, so the padding is
+              what gives a dragged row's shadow somewhere to land. The negative
+              margin keeps the rows themselves where they were. */}
+          <div className="-mx-1 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-1 pb-2 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
           {manualOrder ? (
             <Reorder.Group
               as="div"
@@ -260,8 +263,9 @@ export function Sidebar({ onOpenSearch, onOpenHelp, onOpenGoogle, onOpenSettings
                   key={p._id}
                   value={p._id}
                   // The lifted row sits on a card above the rail while it moves.
-                  className={`relative rounded-full ${draggingId === p._id ? "z-10 bg-surface-1 shadow-[0_6px_18px_rgba(0,0,0,0.12)]" : ""}`}
-                  whileDrag={{ scale: 1.02 }}
+                  // No scale: growing the row pushes it past the scroller's
+                  // edge, where it gets clipped on both sides.
+                  className={`relative rounded-full ${draggingId === p._id ? "drag-lift z-10 bg-surface-1" : ""}`}
                   onDragStart={() => { draggedRecently.current = true; setDraggingId(p._id); }}
                   onDragEnd={commitDrag}
                   onClickCapture={(e) => {
