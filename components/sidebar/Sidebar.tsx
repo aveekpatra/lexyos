@@ -97,6 +97,7 @@ export function Sidebar({ onOpenSearch, onOpenHelp, onOpenGoogle, onOpenSettings
   const [newProjectOpen, setNewProjectOpen] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
   const [toDelete, setToDelete] = useState<Doc<"projects"> | null>(null);
+  const [toEdit, setToEdit] = useState<Doc<"projects"> | null>(null);
   const [collapsed, setCollapsed] = useUiPref("sidebarCollapsed");
   const toggleCollapsed = useCallback(() => setCollapsed(!collapsed), [collapsed, setCollapsed]);
   const { width, resizing, onPointerDown } = useResizableWidth("sidebar", { initial: 260, min: 248, max: 400, side: "right" });
@@ -225,6 +226,7 @@ export function Sidebar({ onOpenSearch, onOpenHelp, onOpenGoogle, onOpenSettings
               active={pathname === `/project/${p._id}`}
               onOpen={() => router.push(`/project/${p._id}`)}
               onRequestDelete={() => setToDelete(p)}
+              onRequestEdit={() => setToEdit(p)}
             />
           ))}
           {!collapsed && projects.length === 0 && (
@@ -252,6 +254,7 @@ export function Sidebar({ onOpenSearch, onOpenHelp, onOpenGoogle, onOpenSettings
                   active={pathname === `/project/${p._id}`}
                   onOpen={() => router.push(`/project/${p._id}`)}
                   onRequestDelete={() => setToDelete(p)}
+                  onRequestEdit={() => setToEdit(p)}
                   muted
                 />
               ))}
@@ -278,6 +281,11 @@ export function Sidebar({ onOpenSearch, onOpenHelp, onOpenGoogle, onOpenSettings
       </div>
 
       <CreateProjectDialog open={newProjectOpen} onOpenChange={setNewProjectOpen} />
+      <CreateProjectDialog
+        project={toEdit}
+        open={!!toEdit}
+        onOpenChange={(o) => { if (!o) setToEdit(null); }}
+      />
       <DeleteProjectDialog
         project={toDelete}
         open={!!toDelete}
@@ -314,9 +322,9 @@ function NavRow({ icon: Icon, label, active, collapsed, onClick, badge, badgeTon
   );
 }
 
-function ProjectRow({ project, active, collapsed, onOpen, onRequestDelete, muted }: {
+function ProjectRow({ project, active, collapsed, onOpen, onRequestDelete, onRequestEdit, muted }: {
   project: Doc<"projects">; active: boolean; collapsed: boolean;
-  onOpen: () => void; onRequestDelete: () => void; muted?: boolean;
+  onOpen: () => void; onRequestDelete: () => void; onRequestEdit: () => void; muted?: boolean;
 }) {
   const update = useMutation(api.projects.update);
   const [renaming, setRenaming] = useState(false);
@@ -346,7 +354,7 @@ function ProjectRow({ project, active, collapsed, onOpen, onRequestDelete, muted
           </Tooltip>
         </ContextMenuTrigger>
         <ContextMenuPopup className="w-[200px]">
-          <ProjectMenuItems project={project} showOpen onRequestDelete={onRequestDelete} />
+          <ProjectMenuItems project={project} showOpen onRequestDelete={onRequestDelete} onRequestEdit={onRequestEdit} />
         </ContextMenuPopup>
       </ContextMenu>
     );
@@ -389,7 +397,7 @@ function ProjectRow({ project, active, collapsed, onOpen, onRequestDelete, muted
                   <IoEllipsisHorizontal className="size-4" />
                 </MenuTrigger>
                 <MenuPopup align="start" className="w-[200px]">
-                  <ProjectMenuItems project={project} onRename={() => setRenaming(true)} onRequestDelete={onRequestDelete} />
+                  <ProjectMenuItems project={project} onRename={() => setRenaming(true)} onRequestDelete={onRequestDelete} onRequestEdit={onRequestEdit} />
                 </MenuPopup>
               </Menu>
             </>
@@ -397,7 +405,7 @@ function ProjectRow({ project, active, collapsed, onOpen, onRequestDelete, muted
         </div>
       </ContextMenuTrigger>
       <ContextMenuPopup className="w-[200px]">
-        <ProjectMenuItems project={project} showOpen onRename={() => setRenaming(true)} onRequestDelete={onRequestDelete} />
+        <ProjectMenuItems project={project} showOpen onRename={() => setRenaming(true)} onRequestDelete={onRequestDelete} onRequestEdit={onRequestEdit} />
       </ContextMenuPopup>
     </ContextMenu>
   );

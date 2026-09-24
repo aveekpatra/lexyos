@@ -5,19 +5,17 @@ import { useMutation } from "convex/react";
 import { useRouter } from "next/navigation";
 import { api } from "@/convex/_generated/api";
 import type { Doc } from "@/convex/_generated/dataModel";
-import { MenuItem, MenuSeparator, MenuSub, MenuSubTrigger, MenuSubPopup } from "@/components/ui/menu";
+import { MenuItem, MenuSeparator } from "@/components/ui/menu";
 import {
   Dialog, DialogPopup, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog";
 import { softPill } from "@/lib/ui/chrome";
-import { PROJECT_COLORS } from "@/components/projects/CreateProjectDialog";
 import {
   IoArchive,
-  IoCheckmarkCircle,
-  IoColorPalette,
   IoCopy,
   IoCreate,
   IoOpen,
+  IoPencil,
   IoTrash,
 } from "react-icons/io5";
 
@@ -28,11 +26,14 @@ import {
 export function ProjectMenuItems({
   project,
   onRename,
+  onRequestEdit,
   onRequestDelete,
   showOpen = false,
 }: {
   project: Doc<"projects">;
   onRename?: () => void;
+  /** Opens the same dialog that created the project, with its values in it. */
+  onRequestEdit?: () => void;
   onRequestDelete: () => void;
   showOpen?: boolean;
 }) {
@@ -55,28 +56,12 @@ export function ProjectMenuItems({
           Rename
         </MenuItem>
       )}
-      <MenuSub>
-        <MenuSubTrigger>
-          <IoColorPalette />
-          Colour
-        </MenuSubTrigger>
-        <MenuSubPopup className="w-[196px]">
-          <div className="grid grid-cols-5 gap-1.5 p-2">
-            {PROJECT_COLORS.map((c) => (
-              <button
-                key={c}
-                aria-label={`Colour ${c}`}
-                aria-pressed={project.color === c}
-                onClick={() => update({ id: project._id, color: c })}
-                className="flex size-7 items-center justify-center rounded-full transition-transform hover:scale-110"
-                style={{ backgroundColor: c }}
-              >
-                {project.color === c && <IoCheckmarkCircle className="size-3.5 text-white" />}
-              </button>
-            ))}
-          </div>
-        </MenuSubPopup>
-      </MenuSub>
+      {onRequestEdit && (
+        <MenuItem onClick={onRequestEdit}>
+          <IoPencil />
+          Edit project
+        </MenuItem>
+      )}
       <MenuItem onClick={() => duplicate({ id: project._id })}>
         <IoCopy />
         Duplicate

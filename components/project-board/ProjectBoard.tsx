@@ -29,10 +29,8 @@ import {
   IoAdd,
 } from "react-icons/io5";
 import { ProjectGlyph } from "@/components/ui/project-glyph";
-import { ProjectIconGrid } from "@/components/projects/ProjectIconGrid";
-import { PROJECT_COLORS } from "@/components/projects/CreateProjectDialog";
+import { CreateProjectDialog } from "@/components/projects/CreateProjectDialog";
 import { projectIcon } from "@/lib/ui/project-icons";
-import { Popover, PopoverTrigger, PopoverPopup } from "@/components/ui/popover";
 
 /*
  * A project is a place, not a filter. Clicking one in the sidebar lands here:
@@ -78,6 +76,7 @@ export default function ProjectBoard({ projectId }: { projectId: Id<"projects"> 
   }, [tab, boardSettings.shortcuts.quickAdd, columns]);
   const [sortBy, setSortBy] = useState<SortBy>("priority");
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
   const updateProject = useMutation(api.projects.update);
 
   const sort = useCallback((list: Doc<"tasks">[]) => {
@@ -155,7 +154,7 @@ export default function ProjectBoard({ projectId }: { projectId: Id<"projects"> 
               <IoEllipsisHorizontal className="size-3.5" />
             </MenuTrigger>
             <MenuPopup align="end" className="w-[200px]">
-              <ProjectMenuItems project={project} onRequestDelete={() => setDeleteOpen(true)} />
+              <ProjectMenuItems project={project} onRequestDelete={() => setDeleteOpen(true)} onRequestEdit={() => setEditOpen(true)} />
             </MenuPopup>
           </Menu>
         </div>
@@ -180,9 +179,10 @@ export default function ProjectBoard({ projectId }: { projectId: Id<"projects"> 
           <AddColumn columns={columns} onSave={saveColumns} />
         </div>
       ) : (
-        <ProjectOverview project={project} tasks={tasks} onUpdate={(patch) => updateProject({ id: project._id, ...patch })} />
+        <ProjectOverview project={project} tasks={tasks} onUpdate={(patch) => updateProject({ id: project._id, ...patch })} onRequestEdit={() => setEditOpen(true)} />
       )}
 
+      <CreateProjectDialog project={project} open={editOpen} onOpenChange={setEditOpen} />
       <DeleteProjectDialog
         project={project}
         open={deleteOpen}
@@ -334,10 +334,12 @@ function StatusColumn({ column, index, columns, onSaveColumns, tasks, projectId,
 
 /* ─── Overview: what the project is about, for you and the agent ─── */
 
-function ProjectOverview({ project, tasks, onUpdate }: {
+function ProjectOverview({ project, tasks, onUpdate, onRequestEdit }: {
   project: Doc<"projects">;
   tasks: Doc<"tasks">[];
   onUpdate: (patch: Partial<Pick<Doc<"projects">, "name" | "description" | "notes" | "status" | "priority" | "startDate" | "dueDate" | "color" | "icon">>) => void;
+  /** Opens the create/edit dialog on this project. */
+  onRequestEdit: () => void;
 }) {
   const [nameDraft, setNameDraft] = useState<{ id: string; v: string } | null>(null);
   const [descDraft, setDescDraft] = useState<{ id: string; v: string } | null>(null);
@@ -383,34 +385,10 @@ function ProjectOverview({ project, tasks, onUpdate }: {
             <RailHeading>Properties</RailHeading>
             <div className="flex flex-col gap-1">
               <PropertyRow label="Appearance">
-                <Popover>
-                  <PopoverTrigger render={<button className={pill} />}>
-                    <ProjectGlyph icon={project.icon} className="size-4" style={{ color: project.color }} />
-                    {projectIcon(project.icon).label}
-                  </PopoverTrigger>
-                  <PopoverPopup align="start" className="w-[292px]" sideOffset={6}>
-                    <div className="mb-2 flex flex-wrap gap-2 px-1">
-                      {PROJECT_COLORS.map((c) => (
-                        <button
-                          key={c}
-                          type="button"
-                          onClick={() => onUpdate({ color: c })}
-                          aria-label={`Colour ${c}`}
-                          aria-pressed={project.color === c}
-                          className="flex size-7 items-center justify-center rounded-full transition-transform hover:scale-110 active:scale-95"
-                          style={{ backgroundColor: c, boxShadow: project.color === c ? `0 0 0 2px var(--surface-0), 0 0 0 4px ${c}` : undefined }}
-                        >
-                          {project.color === c && <IoCheckmarkCircle className="size-3.5 text-white" />}
-                        </button>
-                      ))}
-                    </div>
-                    <ProjectIconGrid
-                      value={project.icon}
-                      color={project.color}
-                      onSelect={(name) => onUpdate({ icon: name })}
-                    />
-                  </PopoverPopup>
-                </Popover>
+                <button className={pill} onClick={onRequestEdit}>
+                  <ProjectGlyph icon={project.icon} className="size-4" style={{ color: project.color }} />
+                  {projectIcon(project.icon).label}
+                </button>
               </PropertyRow>
               <PropertyRow label="Status">
                 <Menu>

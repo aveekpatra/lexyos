@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useMutation } from "convex/react";
 import { useRouter } from "next/navigation";
 import { api } from "@/convex/_generated/api";
+import type { Doc } from "@/convex/_generated/dataModel";
 import { Dialog, DialogPopup, DialogTitle } from "@/components/ui/dialog";
 import { ProjectGlyph } from "@/components/ui/project-glyph";
 import { glassIconButton, softPill, bluePill } from "@/lib/ui/chrome";
@@ -21,26 +22,61 @@ export const PROJECT_COLORS = [
  * One question, one screen (Aturno's case creation): a hero glyph that takes
  * the colour you pick, a name, an optional one-liner, and a live preview of
  * the sidebar row so the choice means something before you commit.
+ *
+ * Editing an existing project is the same screen with its values in it. One
+ * component rather than two, so the two cannot drift apart.
  */
-export function CreateProjectDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
+export function CreateProjectDialog({
+  open,
+  onOpenChange,
+  project = null,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  /** Present to edit that project in place; absent to create a new one. */
+  project?: Doc<"projects"> | null;
+}) {
   const createProject = useMutation(api.projects.create);
+  const updateProject = useMutation(api.projects.update);
   const router = useRouter();
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [color, setColor] = useState(PROJECT_COLORS[6]);
-  const [icon, setIcon] = useState(DEFAULT_PROJECT_ICON);
+  const editing = !!project;
+
+  // Re-seed whenever a different project is opened, using React's
+  // adjust-state-during-render pattern rather than an effect.
+  const seed = () => ({
+    name: project?.name ?? "",
+    description: project?.description ?? "",
+    color: project?.color ?? PROJECT_COLORS[6],
+    icon: project?.icon ?? DEFAULT_PROJECT_ICON,
+  });
+  const [draft, setDraft] = useState(seed);
+  const [seededFor, setSeededFor] = useState(project?._id ?? null);
+  if ((project?._id ?? null) !== seededFor) {
+    setSeededFor(project?._id ?? null);
+    setDraft(seed());
+  }
+  const { name, description, color, icon } = draft;
+  const setName = (v: string) => setDraft((d) => ({ ...d, name: v }));
+  const setDescription = (v: string) => setDraft((d) => ({ ...d, description: v }));
+  const setColor = (v: string) => setDraft((d) => ({ ...d, color: v }));
+  const setIcon = (v: string) => setDraft((d) => ({ ...d, icon: v }));
   const [saving, setSaving] = useState(false);
 
-  const reset = () => {
-    setName(""); setDescription(""); setColor(PROJECT_COLORS[6]);
-    setIcon(DEFAULT_PROJECT_ICON);
-  };
+  const reset = () => setDraft(seed());
 
   async function handleCreate() {
     const n = name.trim();
     if (!n || saving) return;
     setSaving(true);
     try {
+      if (project) {
+        await updateProject({
+          id: project._id, name: n, color, icon,
+          description: description.trim() || undefined,
+        });
+        onOpenChange(false);
+        return;
+      }
       const id = await createProject({ name: n, color, icon, description: description.trim() || undefined });
       reset();
       onOpenChange(false);
@@ -70,9 +106,13 @@ export function CreateProjectDialog({ open, onOpenChange }: { open: boolean; onO
               >
                 <ProjectGlyph icon={icon} open className="size-7" />
               </div>
-              <DialogTitle className="text-[20px] font-semibold leading-snug tracking-[-0.01em] text-text-strong">New project</DialogTitle>
+              <DialogTitle className="text-[20px] font-semibold leading-snug tracking-[-0.01em] text-text-strong">
+                {editing ? "Edit project" : "New project"}
+              </DialogTitle>
               <p className="mt-1 max-w-[300px] text-[13px] leading-relaxed text-text-muted">
-                A place for one thing. Its tasks still show in Inbox, tagged with the folder.
+                {editing
+                  ? "Its name, look and one-liner. Tasks, board and context are untouched."
+                  : "A place for one thing. Its tasks still show in Inbox, tagged with the folder."}
               </p>
             </div>
 
@@ -125,7 +165,7 @@ export function CreateProjectDialog({ open, onOpenChange }: { open: boolean; onO
               <div>
                 <span className="mb-1.5 flex items-baseline gap-1.5 px-1 text-[12px] font-medium text-text-secondary">
                   Preview
-                  <span className="text-text-faint">how it will look in the sidebar</span>
+                  <span className="text-text-faint">how it {editing ? "looks" : "will look"} in the sidebar</span>
                 </span>
                 <div className="flex h-9 items-center gap-2.5 rounded-full bg-black/[0.05] px-3.5 text-[14px] font-medium text-text-strong dark:bg-white/[0.08]">
                   <ProjectGlyph icon={icon} open className="size-[18px]" style={{ color }} />
@@ -138,8 +178,10 @@ export function CreateProjectDialog({ open, onOpenChange }: { open: boolean; onO
           <div className="flex items-center justify-end gap-2 px-5 pb-5">
             <button onClick={() => onOpenChange(false)} className={softPill}>Cancel</button>
             <button onClick={handleCreate} disabled={!name.trim() || saving} className={`${bluePill} disabled:opacity-40`}>
-              <IoFolder className="size-3.5" />
-              {saving ? "Creating" : "Create project"}
+              {editing
+                ? <ProjectGlyph icon={icon} className="size-3.5" />
+                : <IoFolder className="size-3.5" />}
+              {saving ? (editing ? "Saving" : "Creating") : editing ? "Save changes" : "Create project"}
             </button>
           </div>
         </div>
