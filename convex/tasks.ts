@@ -343,10 +343,12 @@ export const update = mutation({
     if (clearLabels) patch.labels = undefined;
     if (clearLocation) patch.location = undefined;
 
-    // Whenever the date or the rule moves, reconcile them: a task must never
-    // sit on a day its own repeat rule cannot produce. Deliberately scoped to
-    // edits that touch one of the two, so renaming a task never reschedules it.
-    if (!clearRecurrence && (patch.recurrence !== undefined || patch.dueDate !== undefined)) {
+    // Setting a rule reconciles the date to it: "every Sunday" stored on a
+    // Monday is a contradiction nobody asked for. Moving the DATE is left
+    // alone, because that is someone deliberately putting the task on a day,
+    // and overruling them makes it vanish from the column they dropped it on.
+    // The rule reasserts itself at the next completion, via nextOccurrence.
+    if (!clearRecurrence && patch.recurrence !== undefined) {
       const due = (patch.dueDate as string | undefined) ?? task.dueDate;
       const rec = normalizeRecurrence((patch.recurrence ?? task.recurrence) as StoredRecurrence | undefined, due);
       if (rec && due) {
