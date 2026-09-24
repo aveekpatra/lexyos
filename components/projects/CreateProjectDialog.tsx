@@ -6,11 +6,13 @@ import { useRouter } from "next/navigation";
 import { api } from "@/convex/_generated/api";
 import type { Doc } from "@/convex/_generated/dataModel";
 import { Dialog, DialogPopup, DialogTitle } from "@/components/ui/dialog";
+import { Popover, PopoverTrigger, PopoverPopup } from "@/components/ui/popover";
+import { cn } from "@/lib/utils";
 import { ProjectGlyph } from "@/components/ui/project-glyph";
 import { glassIconButton, softPill, bluePill } from "@/lib/ui/chrome";
 import { ProjectIconGrid } from "@/components/projects/ProjectIconGrid";
 import { DEFAULT_PROJECT_ICON } from "@/lib/ui/project-icons";
-import { IoClose, IoFolder, IoCheckmarkCircle } from "react-icons/io5";
+import { IoClose, IoFolder, IoCheckmarkCircle, IoChevronDown } from "react-icons/io5";
 
 export const PROJECT_COLORS = [
   "#ef4444", "#f97316", "#f59e0b", "#22c55e",
@@ -19,9 +21,10 @@ export const PROJECT_COLORS = [
 ];
 
 /*
- * One question, one screen (Aturno's case creation): a hero glyph that takes
- * the colour you pick, a name, an optional one-liner, and a live preview of
- * the sidebar row so the choice means something before you commit.
+ * One question, one screen (Aturno's case creation). The name is typed into
+ * the sidebar row itself: the row's glyph opens one picker for its colour and
+ * icon (chosen together, since the icon is tinted with the colour), so what
+ * you edit is exactly what the sidebar will show.
  *
  * Editing an existing project is the same screen with its values in it. One
  * component rather than two, so the two cannot drift apart.
@@ -61,6 +64,7 @@ export function CreateProjectDialog({
   const setColor = (v: string) => setDraft((d) => ({ ...d, color: v }));
   const setIcon = (v: string) => setDraft((d) => ({ ...d, icon: v }));
   const [saving, setSaving] = useState(false);
+  const [iconsOpen, setIconsOpen] = useState(false);
 
   const reset = () => setDraft(seed());
 
@@ -98,18 +102,11 @@ export function CreateProjectDialog({
           </div>
 
           <div className="px-6 pb-6">
-            {/* Hero: the glyph previews the colour */}
-            <div className="mb-6 flex flex-col items-center text-center">
-              <div
-                className="mb-4 flex size-14 items-center justify-center rounded-full transition-colors duration-200"
-                style={{ backgroundColor: `${color}1f`, color }}
-              >
-                <ProjectGlyph icon={icon} open className="size-7" />
-              </div>
+            <div className="mb-5 text-center">
               <DialogTitle className="text-[20px] font-semibold leading-snug tracking-[-0.01em] text-text-strong">
                 {editing ? "Edit project" : "New project"}
               </DialogTitle>
-              <p className="mt-1 max-w-[300px] text-[13px] leading-relaxed text-text-muted">
+              <p className="mx-auto mt-1 max-w-[300px] text-[13px] leading-relaxed text-text-muted">
                 {editing
                   ? "Its name, look and one-liner. Tasks, board and context are untouched."
                   : "A place for one thing. Its tasks still show in Inbox, tagged with the folder."}
@@ -117,16 +114,59 @@ export function CreateProjectDialog({
             </div>
 
             <div className="space-y-4">
-              <Field label="Name">
+              {/* The sidebar row, editable: the glyph picks the icon, the rest is the name. */}
+              <div className="flex h-11 items-center gap-1 rounded-full border border-transparent bg-black/[0.04] pl-1.5 pr-4 transition-colors focus-within:border-brand-border dark:bg-white/[0.06]">
+                <Popover open={iconsOpen} onOpenChange={setIconsOpen}>
+                  <PopoverTrigger
+                    render={
+                      <button
+                        type="button"
+                        aria-label="Choose colour and icon"
+                        className="flex h-8 shrink-0 items-center gap-1 rounded-full pl-2 pr-1.5 transition-colors hover:bg-black/[0.05] data-popup-open:bg-black/[0.06] dark:hover:bg-white/[0.08]"
+                      />
+                    }
+                  >
+                    <ProjectGlyph icon={icon} open className="size-[20px]" style={{ color }} />
+                    <IoChevronDown className="size-3 text-text-faint" aria-hidden />
+                  </PopoverTrigger>
+                  <PopoverPopup align="start" sideOffset={8} className="w-[340px] !p-2">
+                    {/* A colour keeps the picker open; picking an icon closes it. */}
+                    <div className="mb-2 flex flex-wrap gap-1.5 px-1 pt-1">
+                      {PROJECT_COLORS.map((c) => {
+                        const on = color === c;
+                        return (
+                          <button
+                            key={c}
+                            type="button"
+                            onClick={() => setColor(c)}
+                            aria-label={`Colour ${c}`}
+                            aria-pressed={on}
+                            className="flex size-7 items-center justify-center rounded-full transition-transform hover:scale-110 active:scale-95"
+                            style={{ backgroundColor: c, boxShadow: on ? `0 0 0 2px var(--surface-1), 0 0 0 4px ${c}` : undefined }}
+                          >
+                            {on && <IoCheckmarkCircle className="size-3.5 text-white" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <ProjectIconGrid
+                      value={icon}
+                      color={color}
+                      onSelect={(next) => { setIcon(next); setIconsOpen(false); }}
+                    />
+                  </PopoverPopup>
+                </Popover>
                 <input
                   autoFocus
+                  aria-label="Name"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleCreate(); } }}
-                  placeholder="University admission"
-                  className="h-10 w-full rounded-full border border-transparent bg-black/[0.04] px-4 text-[14px] text-text-strong outline-none transition-colors placeholder:text-text-faint focus:border-brand-border dark:bg-white/[0.06]"
+                  placeholder="Project name"
+                  className="h-full min-w-0 flex-1 bg-transparent pl-1.5 text-[14px] font-medium text-text-strong outline-none placeholder:font-normal placeholder:text-text-faint"
                 />
-              </Field>
+              </div>
+
               <Field label="What is it for" optional>
                 <textarea
                   value={description}
@@ -136,51 +176,15 @@ export function CreateProjectDialog({
                   className="w-full resize-none rounded-[16px] border border-transparent bg-black/[0.04] px-3.5 py-2.5 text-[13px] leading-relaxed text-text-strong outline-none transition-colors placeholder:text-text-faint focus:border-brand-border dark:bg-white/[0.06]"
                 />
               </Field>
-              <Field label="Colour">
-                <div className="flex flex-wrap gap-2">
-                  {PROJECT_COLORS.map((c) => {
-                    const on = color === c;
-                    return (
-                      <button
-                        key={c}
-                        type="button"
-                        onClick={() => setColor(c)}
-                        aria-label={`Colour ${c}`}
-                        aria-pressed={on}
-                        className="flex size-8 items-center justify-center rounded-full transition-transform hover:scale-110 active:scale-95"
-                        style={{ backgroundColor: c, boxShadow: on ? `0 0 0 2px var(--surface-0), 0 0 0 4px ${c}` : undefined }}
-                      >
-                        {on && <IoCheckmarkCircle className="size-4 text-white" />}
-                      </button>
-                    );
-                  })}
-                </div>
-              </Field>
-
-              <Field label="Icon">
-                <ProjectIconGrid value={icon} color={color} onSelect={setIcon} />
-              </Field>
-
-              {/* Live preview of the sidebar row */}
-              <div>
-                <span className="mb-1.5 flex items-baseline gap-1.5 px-1 text-[12px] font-medium text-text-secondary">
-                  Preview
-                  <span className="text-text-faint">how it {editing ? "looks" : "will look"} in the sidebar</span>
-                </span>
-                <div className="flex h-9 items-center gap-2.5 rounded-full bg-black/[0.05] px-3.5 text-[14px] font-medium text-text-strong dark:bg-white/[0.08]">
-                  <ProjectGlyph icon={icon} open className="size-[18px]" style={{ color }} />
-                  <span className={`min-w-0 flex-1 truncate ${name.trim() ? "" : "text-text-faint"}`}>{name.trim() || "Project name"}</span>
-                </div>
-              </div>
             </div>
           </div>
 
-          <div className="flex items-center justify-end gap-2 px-5 pb-5">
-            <button onClick={() => onOpenChange(false)} className={softPill}>Cancel</button>
-            <button onClick={handleCreate} disabled={!name.trim() || saving} className={`${bluePill} disabled:opacity-40`}>
+          <div className="flex items-center justify-end gap-2 px-6 pb-6">
+            <button onClick={() => onOpenChange(false)} className={cn(softPill, "h-10 px-5 text-[14px]")}>Cancel</button>
+            <button onClick={handleCreate} disabled={!name.trim() || saving} className={cn(bluePill, "h-10 gap-2 px-5 text-[14px] disabled:opacity-40")}>
               {editing
-                ? <ProjectGlyph icon={icon} className="size-3.5" />
-                : <IoFolder className="size-3.5" />}
+                ? <ProjectGlyph icon={icon} className="size-4" />
+                : <IoFolder className="size-4" />}
               {saving ? (editing ? "Saving" : "Creating") : editing ? "Save changes" : "Create project"}
             </button>
           </div>

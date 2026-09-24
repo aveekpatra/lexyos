@@ -4,7 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
-import type { Doc } from "@/convex/_generated/dataModel";
+import type { Doc, Id } from "@/convex/_generated/dataModel";
+import { Reorder } from "motion/react";
 import { UserButton } from "@clerk/nextjs";
 import type { IconType } from "react-icons";
 import { useGoogleConnection } from "@/components/google/ConnectGoogleDialog";
@@ -94,6 +95,33 @@ export function Sidebar({ onOpenSearch, onOpenHelp, onOpenGoogle, onOpenSettings
     () => [...(allProjects ?? [])].filter((p) => p.status === "archived").sort((a, b) => a.sortOrder - b.sortOrder),
     [allProjects],
   );
+  // Manual order is dragged in place. The optimistic update writes the new
+  // sortOrder into the cached list, so the row stays where it was dropped
+  // while the mutation is in flight.
+  const reorderProjects = useMutation(api.projects.reorder).withOptimisticUpdate((store, { orderedIds }) => {
+    const list = store.getQuery(api.projects.list, {});
+    if (!list) return;
+    const rank = new Map(orderedIds.map((id, index) => [id, index]));
+    store.setQuery(api.projects.list, {}, list.map((p) => (rank.has(p._id) ? { ...p, sortOrder: rank.get(p._id)! } : p)));
+  });
+  const [dragOrder, setDragOrder] = useState<Id<"projects">[] | null>(null);
+  const [draggingId, setDraggingId] = useState<Id<"projects"> | null>(null);
+  const draggedRecently = useRef(false);
+  const manualOrder = projectSort === "manual";
+  const shownProjects = useMemo(() => {
+    if (!dragOrder) return projects;
+    const byId = new Map(projects.map((p) => [p._id, p]));
+    return dragOrder.flatMap((id) => byId.get(id) ?? []);
+  }, [dragOrder, projects]);
+  const commitDrag = () => {
+    if (dragOrder && dragOrder.some((id, index) => id !== projects[index]?._id)) {
+      reorderProjects({ orderedIds: dragOrder });
+    }
+    setDragOrder(null);
+    setDraggingId(null);
+    // The pointer-up that ends a drag also clicks the row; skip that click.
+    window.setTimeout(() => { draggedRecently.current = false; }, 0);
+  };
   const [newProjectOpen, setNewProjectOpen] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
   const [toDelete, setToDelete] = useState<Doc<"projects"> | null>(null);
@@ -218,17 +246,52 @@ export function Sidebar({ onOpenSearch, onOpenHelp, onOpenGoogle, onOpenSettings
         </div>
 
         <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto pb-2 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-          {projects.map((p) => (
-            <ProjectRow
-              key={p._id}
-              project={p}
-              collapsed={collapsed}
-              active={pathname === `/project/${p._id}`}
-              onOpen={() => router.push(`/project/${p._id}`)}
-              onRequestDelete={() => setToDelete(p)}
-              onRequestEdit={() => setToEdit(p)}
-            />
-          ))}
+          {manualOrder ? (
+            <Reorder.Group
+              as="div"
+              axis="y"
+              values={shownProjects.map((p) => p._id)}
+              onReorder={setDragOrder}
+              className="flex flex-col gap-0.5"
+            >
+              {shownProjects.map((p) => (
+                <Reorder.Item
+                  as="div"
+                  key={p._id}
+                  value={p._id}
+                  // The lifted row sits on a card above the rail while it moves.
+                  className={`relative rounded-full ${draggingId === p._id ? "z-10 bg-surface-1 shadow-[0_6px_18px_rgba(0,0,0,0.12)]" : ""}`}
+                  whileDrag={{ scale: 1.02 }}
+                  onDragStart={() => { draggedRecently.current = true; setDraggingId(p._id); }}
+                  onDragEnd={commitDrag}
+                  onClickCapture={(e) => {
+                    if (draggedRecently.current) { e.preventDefault(); e.stopPropagation(); }
+                  }}
+                >
+                  <ProjectRow
+                    project={p}
+                    collapsed={collapsed}
+                    active={pathname === `/project/${p._id}`}
+                    onOpen={() => router.push(`/project/${p._id}`)}
+                    onRequestDelete={() => setToDelete(p)}
+                    onRequestEdit={() => setToEdit(p)}
+                  />
+                </Reorder.Item>
+              ))}
+            </Reorder.Group>
+          ) : (
+            projects.map((p) => (
+              <ProjectRow
+                key={p._id}
+                project={p}
+                collapsed={collapsed}
+                active={pathname === `/project/${p._id}`}
+                onOpen={() => router.push(`/project/${p._id}`)}
+                onRequestDelete={() => setToDelete(p)}
+                onRequestEdit={() => setToEdit(p)}
+              />
+            ))
+          )}
           {!collapsed && projects.length === 0 && (
             <button onClick={() => setNewProjectOpen(true)} className={`${ROW} ${ROW_IDLE} gap-2.5 px-3.5 text-text-faint`}>
               <IoAdd className="size-[18px]" />
