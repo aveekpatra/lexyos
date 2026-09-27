@@ -177,7 +177,7 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue, context = "
         } ${
           isOverdue
             ? "bg-rose-50 shadow-3d-sm hover:shadow-3d dark:bg-rose-950/25 dark:hover:bg-rose-950/35"
-            : "bg-surface-0 shadow-3d-sm hover:shadow-3d dark:bg-white/[0.06] dark:hover:bg-white/[0.09]"
+            : "bg-tile shadow-3d-sm hover:shadow-3d dark:hover:bg-tile-hover"
         }`}
       >
         {/* Row 1: Priority circle + Title */}

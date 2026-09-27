@@ -265,7 +265,7 @@ function StatusColumn({ column, index, columns, onSaveColumns, tasks, projectId,
   return (
     <div
       data-column-id={columnId}
-      className={`group/col relative flex flex-col overflow-hidden rounded-[18px] bg-black/[0.035] dark:bg-white/[0.04] ${BOARD_COLUMN_WIDTH}`}
+      className={`group/col relative flex flex-col overflow-hidden rounded-[18px] bg-column ${BOARD_COLUMN_WIDTH}`}
       onDragEnter={(e) => { e.preventDefault(); counter.current++; setIsOver(true); }}
       onDragLeave={() => { counter.current--; if (counter.current <= 0) { counter.current = 0; setIsOver(false); } }}
       onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}

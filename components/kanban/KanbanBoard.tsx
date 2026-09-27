@@ -482,7 +482,7 @@ function BoardColumn({ column, isAdding, onStartAdd, onStopAdd, apply, showDone,
   return (
     <div
       data-column-id={column.id}
-      className={`relative flex flex-col overflow-hidden rounded-[18px] bg-black/[0.035] dark:bg-white/[0.04] ${BOARD_COLUMN_WIDTH} ${isPast ? "opacity-70" : ""}`}
+      className={`relative flex flex-col overflow-hidden rounded-[18px] bg-column ${BOARD_COLUMN_WIDTH} ${isPast ? "opacity-70" : ""}`}
       onDragEnter={(e) => { e.preventDefault(); dragCounter.current++; setIsOver(true); }}
       onDragLeave={() => { dragCounter.current--; if (dragCounter.current <= 0) { dragCounter.current = 0; setIsOver(false); } }}
       onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
