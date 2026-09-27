@@ -129,14 +129,14 @@
   --code-foreground: var(--foreground);
   --code-highlight: --alpha(var(--color-white) / 4%);
 
-  /* Dark theme: Tokyo Night Storm. Board layers are solid shades, not white
-     overlays: stacked alpha white turns navy milky. */
-  --surface-0: #1f2335;                  /* body (storm bg_dark) */
+  /* Dark theme: the agent window's graphite. Black rails, a softly lit
+     canvas (.app-canvas), gradient columns (.board-column), dark cards. */
+  --surface-0: #141517;                  /* body, the canvas's base */
   --surface-1: oklch(0.205 0 0);         /* card / panel */
-  --surface-2: #1b1e2d;                  /* rails, a step below the body */
-  --column: #24283b;                     /* storm bg */
-  --tile: #292e42;                       /* storm bg_highlight */
-  --tile-hover: #2f3550;
+  --surface-2: #0a0a0b;                  /* rails: solid black */
+  --column: rgba(255, 255, 255, 0.03);   /* flat fallback; .board-column paints the gradient */
+  --tile: #1a1b1e;                       /* cards sit darker than their column */
+  --tile-hover: #202125;
   --line: oklch(1 0 0 / 10%);
   --line-strong: oklch(1 0 0 / 15%);
   --hover: oklch(1 0 0 / 5%);
@@ -148,7 +148,7 @@
   --brand-strong: #2563eb;               /* blue-600 */
   --brand-bg: rgba(59, 130, 246, 0.14);
   --brand-border: rgba(59, 130, 246, 0.35);
-  --layout-shell: #1b1e2d;
+  --layout-shell: #0a0a0b;
   --island-shadow: inset 0 0 0 1px rgba(255,255,255,0.05), 0 2px 4px -1px rgba(0,0,0,0.4);
 }
 
@@ -269,6 +269,25 @@
       inset 0 0 0 1px rgba(255, 255, 255, 0.12),
       0 1px 1px rgba(0, 0, 0, 0.5),
       0 2px 3px rgba(0, 0, 0, 0.55);
+  }
+
+  /* ── Canvas and board columns ──
+     Light mode stays flat. In dark mode the canvas carries two faint colour
+     washes over graphite, and each column is lit from the top so it reads as
+     a pane of glass over that canvas rather than a grey slab. */
+  .app-canvas { background-color: var(--surface-0); }
+  .dark .app-canvas {
+    background-image:
+      radial-gradient(1100px 620px at 12% -12%, rgba(59, 130, 246, 0.13), transparent 62%),
+      radial-gradient(900px 560px at 105% 8%, rgba(139, 92, 246, 0.10), transparent 60%),
+      radial-gradient(800px 500px at 60% 115%, rgba(20, 184, 166, 0.06), transparent 60%),
+      linear-gradient(180deg, #17181b 0%, #111214 100%);
+  }
+  .board-column { background-color: var(--column); }
+  .dark .board-column {
+    background-color: transparent;
+    background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.065) 0%, rgba(255, 255, 255, 0.025) 45%, rgba(255, 255, 255, 0.012) 100%);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), inset 0 0 0 1px rgba(255, 255, 255, 0.04);
   }
 
   /* ── Dialog surface (Linear chrome) ──

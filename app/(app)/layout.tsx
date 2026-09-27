@@ -68,7 +68,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
       />
 
       {/* Flat shell (Aturno): grey rail on the left, white content, no islands. */}
-      <main className="flex min-w-0 flex-1 flex-col overflow-hidden bg-surface-0">
+      <main className="app-canvas flex min-w-0 flex-1 flex-col overflow-hidden">
         {children}
       </main>
 
