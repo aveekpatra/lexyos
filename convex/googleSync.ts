@@ -110,11 +110,11 @@ export const unlinkEvent = internalMutation({
 /** Named `run`: an export called `process` would shadow the global and hide process.env. */
 export const run = internalAction({
   args: { userId: v.string() },
-  handler: async (ctx, { userId }) => {
+  handler: async (ctx, { userId }): Promise<void> => {
     for (let batch = 0; batch < MAX_BATCHES; batch++) {
-      const pending = await ctx.runQuery(internal.googleSync.pendingFor, { userId });
+      const pending: Doc<"pendingSyncQueue">[] = await ctx.runQuery(internal.googleSync.pendingFor, { userId });
       if (pending.length === 0) return;
-      const owned = await ctx.runMutation(internal.googleSync.claim, { ids: pending.map((p) => p._id) });
+      const owned: Id<"pendingSyncQueue">[] = await ctx.runMutation(internal.googleSync.claim, { ids: pending.map((p) => p._id) });
       if (owned.length === 0) return;
 
       const token = await googleToken(userId);
@@ -138,7 +138,7 @@ export const run = internalAction({
   },
 });
 
-async function handle(ctx: ActionCtx, token: string, item: Doc<"pendingSyncQueue">) {
+async function handle(ctx: ActionCtx, token: string, item: Doc<"pendingSyncQueue">): Promise<void> {
   const payload = (item.payload ?? {}) as { timeZone?: string; googleEventId?: string; googleCalendarId?: string };
   const tz = payload.timeZone || "UTC";
 
@@ -149,7 +149,7 @@ async function handle(ctx: ActionCtx, token: string, item: Doc<"pendingSyncQueue
     return;
   }
 
-  const t = await ctx.runQuery(internal.googleSync.task, { id: item.taskId });
+  const t: Doc<"tasks"> | null = await ctx.runQuery(internal.googleSync.task, { id: item.taskId });
   if (!t || t.googleRecurringEventId) return;
 
   if (!t.googleEventId) {
