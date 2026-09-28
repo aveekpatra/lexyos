@@ -74,6 +74,8 @@ export interface Settings {
     days: Shortcut;
     today: Shortcut;
     quickAdd: Shortcut;
+    /** Close the hovered card, or the open task, as missed. */
+    markMissed: Shortcut;
   };
 }
 
@@ -103,7 +105,7 @@ export const DEFAULT_SETTINGS: Settings = {
   pomodoro: { workMin: 25, shortBreakMin: 5, longBreakMin: 15, roundsBeforeLongBreak: 4, autoStartBreaks: true, autoStartNext: false, sound: true },
   ai: { approval: "ask", showReasoning: false, schedulingPreferences: "" },
   ui: { sidebarCollapsed: false, kanbanView: "overview", kanbanShowDone: false, kanbanSort: "priority", timeboxOpen: true, projectSort: "manual", focusSession: null },
-  shortcuts: { palette: "mod+/", help: "?", overview: "shift+o", days: "shift+d", today: "shift+t", quickAdd: "1" },
+  shortcuts: { palette: "mod+/", help: "?", overview: "shift+o", days: "shift+d", today: "shift+t", quickAdd: "1", markMissed: "shift+m" },
 };
 
 type DeepPartial<T> = { [K in keyof T]?: T[K] extends object ? DeepPartial<T[K]> : T[K] };

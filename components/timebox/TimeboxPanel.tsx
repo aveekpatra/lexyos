@@ -13,6 +13,7 @@ import { ResizeHandle } from "@/components/ui/resize-handle";
 import { useTimeboxDate, useTimeboxOpen } from "@/lib/timebox-store";
 import { syncTaskUpdateToGoogle, syncCompletionResultToGoogle } from "@/lib/google-sync";
 import { isMissed, MissedMark } from "@/components/tasks/outcome";
+import { setHoveredTask, releaseHoveredTask } from "@/lib/task-target";
 import { isGoogleCalEvent, projectedOccurrences } from "@/lib/task-utils";
 import { PRIORITY_COLORS } from "@/lib/constants";
 import { useSettings, formatClock } from "@/lib/settings";
@@ -319,6 +320,8 @@ export function TimeboxPanel() {
                 <div
                   key={key}
                   onPointerDown={beginDrag(t, "move")}
+                  onMouseEnter={() => setHoveredTask(t)}
+                  onMouseLeave={() => releaseHoveredTask(t._id)}
                   className={`absolute select-none overflow-hidden rounded-[13px] px-3 text-left transition-[box-shadow,transform] ${
                     google
                       ? "border border-dashed border-line-strong bg-transparent"

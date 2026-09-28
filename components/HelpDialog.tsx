@@ -64,6 +64,9 @@ export function HelpDialog({ open, onOpenChange }: { open: boolean; onOpenChange
                   <Row label="Scroll to today" keys={shortcutKeys(sc.today)} />
                   <Row label="Add a task to a column" keys={shortcutKeys(sc.quickAdd)} hint="2, 3 for the next ones" />
                 </Group>
+                <Group title="Tasks">
+                  <Row label="Mark missed" keys={shortcutKeys(sc.markMissed)} hint="Hovered card, or the open task" />
+                </Group>
                 <Group title="Add task field">
                   <Row label="Create and stay" keys={["Enter"]} />
                   <Row label="Create and open the task" keys={["Tab"]} />
@@ -78,6 +81,7 @@ export function HelpDialog({ open, onOpenChange }: { open: boolean; onOpenChange
                   <Tip>Drop a card on an hour in the Timebox to give it a time. Drag the block to move it, pull its bottom edge to change the length.</Tip>
                   <Tip>Right-click a card for priority, date, project, repeat, done, and delete without opening it.</Tip>
                   <Tip>Click the circle on a card to complete it. A repeating task rolls to its next date and keeps a done copy.</Tip>
+                  <Tip>Didn&apos;t happen? Mark it missed from the right-click menu, with Option-click on its circle, or by hovering it and pressing {shortcutKeys(sc.markMissed).join("")}. It stays on its day and leaves Overdue.</Tip>
                 </Group>
                 <Group title="Projects">
                   <Tip>Click a project in the sidebar to open its board, grouped by status. Overview holds its description and a context document.</Tip>

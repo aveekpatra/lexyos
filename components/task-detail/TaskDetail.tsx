@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
@@ -46,6 +46,7 @@ import {
 } from "react-icons/io5";
 import { ProjectGlyph } from "@/components/ui/project-glyph";
 import { isMissed, useMarkMissed, MissedMark } from "@/components/tasks/outcome";
+import { setOpenTask } from "@/lib/task-target";
 
 /*
  * Task page, Linear issue layout on the Liquid Glass two-layer model:
@@ -75,6 +76,9 @@ export default function TaskDetail({ taskId }: { taskId: Id<"tasks"> }) {
   const removeTask = useMutation(api.tasks.remove);
   const markMissed = useMarkMissed();
   const reviseMissed = useMutation(api.tasks.markMissed);
+  // The open task is what task shortcuts act on when no card is hovered.
+  useEffect(() => { setOpenTask(task ?? null); }, [task]);
+  useEffect(() => () => setOpenTask(null), []);
 
   const [newSubtask, setNewSubtask] = useState("");
   const [numberCopied, setNumberCopied] = useState(false);

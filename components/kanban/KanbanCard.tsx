@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
@@ -18,6 +18,7 @@ import { normalizeRecurrence, shortRecurrenceLabel } from "@/convex/lib/recurren
 import { RecurrencePopover } from "@/components/tasks/RecurrencePopover";
 import { PRIORITY_COLORS, PRIORITY_LABELS } from "@/lib/constants";
 import { setDraggingTaskId } from "@/lib/drag-store";
+import { setHoveredTask, releaseHoveredTask, refreshHoveredTask } from "@/lib/task-target";
 import { startFocus, useFocusSession } from "@/lib/focus-store";
 import { useSettings, formatClock } from "@/lib/settings";
 import {
@@ -46,6 +47,9 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue, context = "
   const toggleCompleteMut = useMutation(api.tasks.toggleComplete);
   const updateTask = useMutation(api.tasks.update);
   const markMissed = useMarkMissed();
+  // Claim keyboard shortcuts while under the pointer (lib/task-target.ts).
+  useEffect(() => { refreshHoveredTask(task); }, [task]);
+  useEffect(() => () => releaseHoveredTask(task._id), [task._id]);
 
   // Toggle complete + sync to Google Calendar
   const toggleComplete = useCallback(async (args: { id: typeof task._id }) => {
@@ -176,6 +180,8 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue, context = "
         draggable
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
+        onMouseEnter={() => setHoveredTask(task)}
+        onMouseLeave={() => releaseHoveredTask(task._id)}
         onClick={openDetail}
         className={`group flex w-full cursor-grab flex-col gap-1.5 rounded-[13px] px-3.5 py-2.5 transition-colors active:cursor-grabbing active:translate-y-px ${
           isDragging ? "opacity-40" : missed ? "opacity-60" : ""

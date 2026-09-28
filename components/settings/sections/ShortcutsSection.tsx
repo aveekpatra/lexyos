@@ -10,6 +10,7 @@ const ITEMS: { key: keyof Settings["shortcuts"]; label: string; hint: string }[]
   { key: "days", label: "Days", hint: "Inbox: one column per day" },
   { key: "today", label: "Scroll to today", hint: "Inbox, Days view" },
   { key: "quickAdd", label: "Add to first column", hint: "Then 2, 3, and so on for the next columns" },
+  { key: "markMissed", label: "Mark missed", hint: "The card under the pointer, or the open task" },
 ];
 
 export function ShortcutsSection() {

@@ -10,6 +10,8 @@ import { SettingsDialog } from "@/components/settings/SettingsDialog";
 import { SettingsSyncer } from "@/components/settings/SettingsSyncer";
 import { FocusTimer } from "@/components/focus/FocusTimer";
 import { useSettings, matchesShortcut } from "@/lib/settings";
+import { useMarkMissed } from "@/components/tasks/outcome";
+import { targetTask } from "@/lib/task-target";
 import FloatingPill from "@/components/command-bar/FloatingPill";
 import { ConnectGoogleDialog, useGoogleConnection } from "@/components/google/ConnectGoogleDialog";
 
@@ -26,6 +28,22 @@ export default function AppLayout({ children }: { children: ReactNode }) {
 
   const { settings } = useSettings();
   useHelpShortcut(useCallback(() => setHelpOpen(true), []), settings.shortcuts.help);
+
+  // Mark missed: the card under the pointer, or the open task.
+  const markMissed = useMarkMissed();
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement;
+      if (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable) return;
+      if (!matchesShortcut(e, settings.shortcuts.markMissed)) return;
+      const task = targetTask();
+      if (!task || task.status === "done") return;
+      e.preventDefault();
+      void markMissed(task);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [settings.shortcuts.markMissed, markMissed]);
 
   // Ctrl/Cmd+/ opens the unified search, the single entry point.
   useEffect(() => {
