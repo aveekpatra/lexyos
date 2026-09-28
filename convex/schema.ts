@@ -55,9 +55,12 @@ export default defineSchema({
     lastSyncedAt: v.optional(v.number()),
     sortOrder: v.number(),
     completedAt: v.optional(v.number()),
+    /** Stable per-account number, shown as #142. See convex/lib/taskNumbers.ts. */
+    number: v.optional(v.number()),
     userId: v.string(),
   })
     .index("by_userId", ["userId"])
+    .index("by_userId_and_number", ["userId", "number"])
     .index("by_userId_and_status", ["userId", "status"])
     .index("by_userId_and_projectId", ["userId", "projectId"])
     .index("by_userId_and_scheduledDate", ["userId", "scheduledDate"])
@@ -147,6 +150,12 @@ export default defineSchema({
   })
     .index("by_userId_and_status", ["userId", "status"])
     .index("by_taskId", ["taskId"]),
+
+  // Next free task number per user (convex/lib/taskNumbers.ts).
+  taskCounters: defineTable({
+    userId: v.string(),
+    next: v.number(),
+  }).index("by_userId", ["userId"]),
 
   // One Google account per user. Tokens are encrypted by the Next server
   // before they get here (see lib/google-oauth.ts); Convex only stores ciphertext.

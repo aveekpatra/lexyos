@@ -108,13 +108,23 @@ export function createTools(auth: ToolAuth): Record<string, any> {
     };
   }
 
+  /** A task reference as the model sends it: a Convex id, or a number like "#142" or "142". */
+  async function taskId(ref: unknown): Promise<Id<"tasks">> {
+    const m = /^#?(\d+)$/.exec(String(ref ?? "").trim());
+    if (!m) return ref as Id<"tasks">;
+    const task = await convex.query(api.tasks.getByNumber, { number: Number(m[1]) });
+    if (!task) throw new Error(`No task #${m[1]}`);
+    return task._id;
+  }
+  const num = (n: number | undefined) => (n === undefined ? undefined : `#${n}`);
+
   return {
     // ═══════════════════════════════════════════
     // TASK TOOLS
     // ═══════════════════════════════════════════
 
     list_tasks: ({
-      description: `List tasks with optional filters. Returns task id, title, status, priority, dueDate, dueTime, scheduledStartTime, scheduledEndTime, projectId, source. Use this to answer questions about the user's tasks, what's planned, what's overdue, etc.`,
+      description: `List tasks with optional filters. Returns task id, number (#142, stable, what the user sees), title, status, priority, dueDate, dueTime, scheduledStartTime, scheduledEndTime, projectId, source. Use this to answer questions about the user's tasks, what's planned, what's overdue, etc.`,
       inputSchema: z.object({
         status: z.enum(["todo", "planned", "in_progress", "review", "done"]).optional()
           .describe("Filter by status"),
@@ -131,6 +141,7 @@ export function createTools(auth: ToolAuth): Record<string, any> {
         });
         return tasks.map((t) => ({
           id: t._id,
+          number: num(t.number),
           title: t.title,
           status: t.status,
           priority: t.priority,
@@ -152,14 +163,15 @@ export function createTools(auth: ToolAuth): Record<string, any> {
     get_task: ({
       description: `One task in full: every property, its description (the task's own context), and its subtasks. Use it to read state after a write, and before editing a task you did not just fetch.`,
       inputSchema: z.object({
-        id: z.string().describe("Task ID to retrieve"),
+        id: z.string().describe("Task ID to retrieve (a task id, or its number such as #142)"),
       }),
       execute: safe(async (args: any) => {
-        const task = await convex.query(api.tasks.getById, { id: args.id as Id<"tasks"> });
+        const task = await convex.query(api.tasks.getById, { id: await taskId(args.id) });
         if (!task) return { error: "Task not found" };
         const subtasks = await convex.query(api.tasks.getSubtasks, { parentTaskId: task._id });
         return {
           id: task._id,
+          number: num(task.number),
           title: task.title,
           status: task.status,
           priority: task.priority,
@@ -174,7 +186,7 @@ export function createTools(auth: ToolAuth): Record<string, any> {
           source: task.source,
           description: task.description,
           googleEventId: task.googleEventId,
-          subtasks: subtasks.map((s) => ({ id: s._id, title: s.title, status: s.status, priority: s.priority, dueDate: s.dueDate, dueTime: s.dueTime, description: s.description })),
+          subtasks: subtasks.map((s) => ({ id: s._id, number: num(s.number), title: s.title, status: s.status, priority: s.priority, dueDate: s.dueDate, dueTime: s.dueTime, description: s.description })),
           repeats: (() => {
             const r = normalizeRecurrence(task.recurrence, task.dueDate);
             return r ? describeRecurrence(r, task.dueDate) : undefined;
@@ -220,7 +232,7 @@ export function createTools(auth: ToolAuth): Record<string, any> {
           status: args.status as "todo" | "planned" | "in_progress" | "review" | undefined,
           projectId: args.projectId as Id<"projects"> | undefined,
           columnId: args.columnId,
-          parentTaskId: args.parentTaskId as Id<"tasks"> | undefined,
+          parentTaskId: args.parentTaskId ? await taskId(args.parentTaskId) : undefined,
           labels: args.labels,
           scheduledDate: args.scheduledDate,
           scheduledStartTime: args.scheduledStartTime,
@@ -241,8 +253,9 @@ export function createTools(auth: ToolAuth): Record<string, any> {
           console.warn("[AI] Failed to enqueue sync:", err);
         }
 
+        const created = await convex.query(api.tasks.getById, { id: id as Id<"tasks"> });
         return {
-          id, title: args.title, dueDate, created: true,
+          id, number: num(created?.number), title: args.title, dueDate, created: true,
           repeats: args.recurrence ? describeRecurrence(args.recurrence, dueDate) : undefined,
           ...(dueDate !== requestedDate
             ? { movedFrom: requestedDate, note: `dueDate moved from ${requestedDate} to ${dueDate}, the first day the repeat rule lands on. Tell the user.` }
@@ -254,7 +267,7 @@ export function createTools(auth: ToolAuth): Record<string, any> {
     update_task: ({
       description: `Update an existing task. Only include the fields you want to change. Use this for rescheduling, changing priority, renaming, adding descriptions, moving to a project, etc.`,
       inputSchema: z.object({
-        id: z.string().describe("Task ID to update"),
+        id: z.string().describe("Task ID to update (a task id, or its number such as #142)"),
         title: z.string().optional().describe("New title"),
         description: z.string().optional().describe("New description"),
         dueDate: z.string().optional().describe("New due date (YYYY-MM-DD)"),
@@ -282,6 +295,8 @@ export function createTools(auth: ToolAuth): Record<string, any> {
         clearLocation: z.boolean().optional().describe("Remove the location"),
       }),
       execute: safe(async (args: any) => {
+        args = { ...args, id: await taskId(args.id) };
+        if (args.parentTaskId && args.parentTaskId !== "none") args.parentTaskId = await taskId(args.parentTaskId);
         const updateArgs: Record<string, unknown> = { id: args.id };
         if (args.columnId === "none") updateArgs.clearColumnId = true; else if (args.columnId) updateArgs.columnId = args.columnId;
         if (args.parentTaskId === "none") updateArgs.clearParentTaskId = true; else if (args.parentTaskId) updateArgs.parentTaskId = args.parentTaskId;
@@ -337,7 +352,7 @@ export function createTools(auth: ToolAuth): Record<string, any> {
         const after = await convex.query(api.tasks.getById, { id: args.id as Id<"tasks"> });
         const rec = after ? normalizeRecurrence(after.recurrence, after.dueDate) : undefined;
         return {
-          id: args.id, updated: true,
+          id: args.id, number: num(after?.number), updated: true,
           dueDate: after?.dueDate,
           dueTime: after?.dueTime,
           repeats: rec ? describeRecurrence(rec, after?.dueDate) : undefined,
@@ -351,9 +366,10 @@ export function createTools(auth: ToolAuth): Record<string, any> {
     complete_task: ({
       description: `Mark a task as done (or toggle it back to todo if already done). Use when the user says they finished something, completed a task, or want to mark it done. For a repeating task this does NOT mark it done: it records a done copy and moves the task to its next occurrence; the result tells you the new date.`,
       inputSchema: z.object({
-        id: z.string().describe("Task ID to complete"),
+        id: z.string().describe("Task ID to complete (a task id, or its number such as #142)"),
       }),
       execute: safe(async (args: any) => {
+        args = { ...args, id: await taskId(args.id) };
         const result = await convex.mutation(api.tasks.toggleComplete, { id: args.id as Id<"tasks">, userDate: today() });
 
         // Enqueue Google Calendar sync to update [Done] prefix
@@ -377,9 +393,10 @@ export function createTools(auth: ToolAuth): Record<string, any> {
     delete_task: ({
       description: `Permanently delete a task. IMPORTANT: This is irreversible — confirm with the user BEFORE calling this tool. Don't use this for completing tasks — use complete_task instead.`,
       inputSchema: z.object({
-        id: z.string().describe("Task ID to delete"),
+        id: z.string().describe("Task ID to delete (a task id, or its number such as #142)"),
       }),
       execute: safe(async (args: any) => {
+        args = { ...args, id: await taskId(args.id) };
         // Fetch task before deleting to get Google event ID for the sync queue
         const taskBefore = await convex.query(api.tasks.getById, { id: args.id as Id<"tasks"> });
 
@@ -405,7 +422,7 @@ export function createTools(auth: ToolAuth): Record<string, any> {
     }),
 
     search_tasks: ({
-      description: `Find tasks by text in title or description. Fast and cheap: call it before creating anything, so you reuse or update an existing task instead of duplicating it. Scope with projectId when the work belongs to a project. Returns up to 15 matches with a description snippet and subtask count.`,
+      description: `Find tasks by text in title or description, or by number ("#142"). Fast and cheap: call it before creating anything, so you reuse or update an existing task instead of duplicating it. Scope with projectId when the work belongs to a project. Returns up to 15 matches with a description snippet and subtask count.`,
       inputSchema: z.object({
         query: z.string().describe("Text to match against title and description (case-insensitive)"),
         projectId: z.string().optional().describe("Only search inside this project"),
@@ -414,12 +431,15 @@ export function createTools(auth: ToolAuth): Record<string, any> {
       execute: safe(async (args: any) => {
         const all = await convex.query(api.tasks.list, args.projectId ? { projectId: args.projectId as Id<"projects"> } : {});
         const q = String(args.query).toLowerCase();
+        const byNumber = /^#?(\d+)$/.exec(q.trim());
         const pool = all.filter((t) => args.includeDone || t.status !== "done");
-        const matches = pool.filter((t) => t.title.toLowerCase().includes(q) || (t.description ?? "").toLowerCase().includes(q));
+        const matches = byNumber
+          ? all.filter((t) => t.number === Number(byNumber[1]))
+          : pool.filter((t) => t.title.toLowerCase().includes(q) || (t.description ?? "").toLowerCase().includes(q));
         const children = new Map<string, number>();
         for (const t of all) if (t.parentTaskId) children.set(t.parentTaskId, (children.get(t.parentTaskId) ?? 0) + 1);
         return matches.slice(0, 15).map((t) => ({
-          id: t._id, title: t.title, status: t.status, priority: t.priority, dueDate: t.dueDate, dueTime: t.dueTime,
+          id: t._id, number: num(t.number), title: t.title, status: t.status, priority: t.priority, dueDate: t.dueDate, dueTime: t.dueTime,
           projectId: t.projectId, columnId: t.columnId, parentTaskId: t.parentTaskId,
           descriptionSnippet: t.description ? t.description.slice(0, 160) : undefined,
           subtasks: children.get(t._id) ?? 0,
@@ -466,7 +486,7 @@ export function createTools(auth: ToolAuth): Record<string, any> {
         const subs = new Map<string, typeof tasks>();
         for (const t of tasks) if (t.parentTaskId) { const arr = subs.get(t.parentTaskId) ?? []; arr.push(t); subs.set(t.parentTaskId, arr); }
         const shape = (t: (typeof tasks)[number]) => ({
-          id: t._id, title: t.title, status: t.status, priority: t.priority, dueDate: t.dueDate, dueTime: t.dueTime,
+          id: t._id, number: num(t.number), title: t.title, status: t.status, priority: t.priority, dueDate: t.dueDate, dueTime: t.dueTime,
           startTime: t.scheduledStartTime, endTime: t.scheduledEndTime, description: t.description,
           repeats: (() => { const r = normalizeRecurrence(t.recurrence, t.dueDate); return r ? shortRecurrenceLabel(r) : undefined; })(),
         });
@@ -624,10 +644,11 @@ export function createTools(auth: ToolAuth): Record<string, any> {
         return {
           today: todayStr,
           overdueCount: overdue.length,
-          overdueTasks: overdue.slice(0, 5).map((t) => ({ id: t._id, title: t.title, dueDate: t.dueDate, priority: t.priority })),
+          overdueTasks: overdue.slice(0, 5).map((t) => ({ id: t._id, number: num(t.number), title: t.title, dueDate: t.dueDate, priority: t.priority })),
           todayCount: todayTasks.length,
           todayTasks: todayTasks.map((t) => ({
             id: t._id,
+            number: num(t.number),
             title: t.title,
             dueTime: t.dueTime,
             startTime: t.scheduledStartTime,
@@ -636,7 +657,7 @@ export function createTools(auth: ToolAuth): Record<string, any> {
             source: t.source,
           })),
           upcomingThisWeek: upcoming.length,
-          upcomingTasks: upcoming.slice(0, 10).map((t) => ({ id: t._id, title: t.title, dueDate: t.dueDate, priority: t.priority })),
+          upcomingTasks: upcoming.slice(0, 10).map((t) => ({ id: t._id, number: num(t.number), title: t.title, dueDate: t.dueDate, priority: t.priority })),
         };
       }),
     }),
@@ -683,10 +704,10 @@ export function createTools(auth: ToolAuth): Record<string, any> {
           date: dateStr,
           totalTasks: dayTasks.length,
           scheduled: scheduled.map((t) => ({
-            id: t._id, title: t.title, start: t.scheduledStartTime, end: t.scheduledEndTime, source: t.source, status: t.status,
+            id: t._id, number: num(t.number), title: t.title, start: t.scheduledStartTime, end: t.scheduledEndTime, source: t.source, status: t.status,
           })),
           unscheduled: unscheduled.map((t) => ({
-            id: t._id, title: t.title, priority: t.priority, status: t.status,
+            id: t._id, number: num(t.number), title: t.title, priority: t.priority, status: t.status,
           })),
           freeSlots: slots,
         };

@@ -533,7 +533,7 @@ function BoardColumn({ column, isAdding, onStartAdd, onStopAdd, apply, showDone,
           </div>
         )}
         {sortedTasks.length > 0 && (
-          <div className="flex flex-col gap-1.5">{sortedTasks.map((t) => <KanbanCard key={t._id} task={t} />)}</div>
+          <div className="flex flex-col gap-1.5">{sortedTasks.map((t) => <KanbanCard key={t._id} task={t} hideDate={!!column.date} />)}</div>
         )}
         {/* Dates a repeating task will claim. Shown after the real ones: they
             are what the day already owes, not work you can act on yet. */}
@@ -550,7 +550,7 @@ function BoardColumn({ column, isAdding, onStartAdd, onStopAdd, apply, showDone,
               <span className="text-[12px] font-medium text-text-faint">Completed</span>
               <span className="text-[12px] tabular-nums text-text-faint">{doneTasks.length}</span>
             </div>
-            <div className="flex flex-col gap-1.5">{doneTasks.map((t) => <KanbanCard key={t._id} task={t} />)}</div>
+            <div className="flex flex-col gap-1.5">{doneTasks.map((t) => <KanbanCard key={t._id} task={t} hideDate={!!column.date} />)}</div>
           </div>
         )}
       </div>

@@ -14,6 +14,7 @@ import type * as calendarEvents from "../calendarEvents.js";
 import type * as lib_actor from "../lib/actor.js";
 import type * as lib_columns from "../lib/columns.js";
 import type * as lib_recurrence from "../lib/recurrence.js";
+import type * as lib_taskNumbers from "../lib/taskNumbers.js";
 import type * as oauth from "../oauth.js";
 import type * as projects from "../projects.js";
 import type * as syncQueue from "../syncQueue.js";
@@ -33,6 +34,7 @@ declare const fullApi: ApiFromModules<{
   "lib/actor": typeof lib_actor;
   "lib/columns": typeof lib_columns;
   "lib/recurrence": typeof lib_recurrence;
+  "lib/taskNumbers": typeof lib_taskNumbers;
   oauth: typeof oauth;
   projects: typeof projects;
   syncQueue: typeof syncQueue;

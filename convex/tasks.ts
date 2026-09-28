@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import { agentValidator, getIdentity } from "./lib/actor";
-import { query, mutation, type MutationCtx } from "./_generated/server";
+import { query, mutation, internalMutation, type MutationCtx } from "./_generated/server";
+import { claimTaskNumber, ensureTaskCounter } from "./lib/taskNumbers";
 import type { Doc, Id } from "./_generated/dataModel";
 import {
   recurrenceValidator,
@@ -127,6 +128,34 @@ export const getSubtasks = query({
   },
 });
 
+/** A task by its #number, for anything that lets people or agents type one. */
+export const getByNumber = query({
+  args: { agent: agentValidator, number: v.number() },
+  handler: async (ctx, args) => {
+    const identity = await getIdentity(ctx, args.agent);
+    if (!identity) return null;
+    return await ctx.db
+      .query("tasks")
+      .withIndex("by_userId_and_number", (q) => q.eq("userId", identity.subject).eq("number", args.number))
+      .first();
+  },
+});
+
+/**
+ * One-off: number every existing account's tasks. Safe to re-run; an account
+ * that already has a counter is skipped. Run with
+ * `npx convex run tasks:backfillTaskNumbers`.
+ */
+export const backfillTaskNumbers = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const users = new Set<string>();
+    for await (const t of ctx.db.query("tasks")) users.add(t.userId);
+    for (const userId of users) await ensureTaskCounter(ctx, userId);
+    return { users: users.size };
+  },
+});
+
 export const create = mutation({
   args: { agent: agentValidator,
     title: v.string(),
@@ -201,6 +230,7 @@ export const create = mutation({
       isAllDay: args.isAllDay,
       source: "local",
       sortOrder: args.placeAtTop ? minOrder - 1 : maxOrder + 1,
+      number: await claimTaskNumber(ctx, userId),
       userId,
     });
   },
@@ -407,6 +437,7 @@ async function completeTask(ctx: MutationCtx, task: Doc<"tasks">, userDate?: str
   const snapshotId = await ctx.db.insert("tasks", {
     ...fields,
     seriesId: task._id,
+    number: undefined, // the series keeps its number on the live row
     status: "done",
     completedAt: Date.now(),
     recurrence: undefined,
@@ -736,6 +767,7 @@ export const upsertFromGoogle = mutation({
         googleUpdatedAt: args.googleUpdatedAt,
         lastSyncedAt: Date.now(),
         sortOrder: 0,
+        number: await claimTaskNumber(ctx, userId),
         userId,
       });
     }
@@ -898,6 +930,7 @@ export const bulkUpsertFromGoogle = mutation({
           googleUpdatedAt: event.googleUpdatedAt,
           lastSyncedAt: syncStamp,
           sortOrder: 0,
+          number: await claimTaskNumber(ctx, userId),
           userId,
         });
       }

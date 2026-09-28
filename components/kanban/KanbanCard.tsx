@@ -35,9 +35,11 @@ interface KanbanCardProps {
    * dragged or edited, and its date and time come from the rule, not the task.
    */
   projection?: { date: string; start?: string; end?: string };
+  /** The column already names the day, so the date chip would only repeat it. */
+  hideDate?: boolean;
 }
 
-const KanbanCard = React.memo(function KanbanCard({ task, isOverdue, context = "kanban", projection }: KanbanCardProps) {
+const KanbanCard = React.memo(function KanbanCard({ task, isOverdue, context = "kanban", projection, hideDate }: KanbanCardProps) {
   const isSidebar = context === "sidebar";
   const router = useRouter();
   const toggleCompleteMut = useMutation(api.tasks.toggleComplete);
@@ -119,7 +121,7 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue, context = "
     (isSidebar && duration) ||
     hasDueTime ||
     effectiveTime ||
-    !isSidebar || // date chip always shows in kanban
+    !isSidebar || // priority chip always shows in kanban
     project
   );
 
@@ -294,8 +296,8 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue, context = "
                 </TaskChip>
               </TimePickerPopover>
             )}
-            {/* Date chip — only in kanban view */}
-            {!isSidebar && (
+            {/* Date chip: kanban only, and not where the column is the day */}
+            {!isSidebar && !hideDate && (
               <DatePickerPopover
                 value={task.dueDate}
                 onChange={(date) => syncUpdateTask({ id: task._id, ...(date ? { dueDate: date } : { clearDueDate: true, userDate: format(new Date(), "yyyy-MM-dd") }) })}

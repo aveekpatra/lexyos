@@ -73,6 +73,7 @@ export default function TaskDetail({ taskId }: { taskId: Id<"tasks"> }) {
   const removeTask = useMutation(api.tasks.remove);
 
   const [newSubtask, setNewSubtask] = useState("");
+  const [numberCopied, setNumberCopied] = useState(false);
   const { settings } = useSettings();
   // Title draft keyed by task id, so switching tasks falls back to the query value.
   const [titleDraft, setTitleDraft] = useState<{ id: string; title: string } | null>(null);
@@ -196,6 +197,20 @@ export default function TaskDetail({ taskId }: { taskId: Id<"tasks"> }) {
           )}
           <span className="text-text-faint">/</span>
           <span className="shrink-0 px-2 font-medium text-text-faint">{isDone ? "Done" : status.label}</span>
+          {/* Stable task number: click to copy it for a message or an agent */}
+          {task.number !== undefined && (
+            <button
+              onClick={() => {
+                void navigator.clipboard.writeText(`#${task.number}`);
+                setNumberCopied(true);
+                setTimeout(() => setNumberCopied(false), 1200);
+              }}
+              title="Copy task number"
+              className="shrink-0 rounded-full px-2 py-1 font-medium tabular-nums text-text-faint transition-colors hover:bg-black/[0.04] hover:text-foreground dark:hover:bg-white/[0.06]"
+            >
+              {numberCopied ? "Copied" : `#${task.number}`}
+            </button>
+          )}
         </nav>
 
         {!isDone && (

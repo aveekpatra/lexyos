@@ -93,12 +93,17 @@ export function UnifiedSearch({ open, onOpenChange, onAskAI, onNewProject, onOpe
     }
     out.push({ id: "new-project", group: "Actions", glyph: <Glyph icon={IoFolder} tone="brand" />, title: "New project", keywords: "new project create folder", run: go(onNewProject) });
 
-    // Tasks: title and description, open ones first
+    // Tasks: "#142" or "142" finds that task first (subtasks too), then title
+    // and description matches, open ones first
     if (q) {
-      const hits = (tasks ?? [])
-        .filter((t) => !t.parentTaskId && (t.title.toLowerCase().includes(q) || (t.description ?? "").toLowerCase().includes(q)))
-        .sort((a, b) => Number(a.status === "done") - Number(b.status === "done") || (a.dueDate || "9999").localeCompare(b.dueDate || "9999"))
-        .slice(0, 8);
+      const numberQuery = /^#?(\d+)$/.exec(q);
+      const exact = numberQuery ? (tasks ?? []).filter((t) => t.number === Number(numberQuery[1])) : [];
+      const hits = [
+        ...exact,
+        ...(tasks ?? [])
+          .filter((t) => !exact.includes(t) && !t.parentTaskId && (t.title.toLowerCase().includes(q) || (t.description ?? "").toLowerCase().includes(q)))
+          .sort((a, b) => Number(a.status === "done") - Number(b.status === "done") || (a.dueDate || "9999").localeCompare(b.dueDate || "9999")),
+      ].slice(0, 8);
       for (const t of hits) {
         const p = t.projectId ? projectById.get(t.projectId) : undefined;
         const done = t.status === "done";
@@ -115,7 +120,12 @@ export function UnifiedSearch({ open, onOpenChange, onAskAI, onNewProject, onOpe
           ),
           title: <span className={done ? "line-through text-text-muted" : ""}>{t.title}</span>,
           subtitle: p ? p.name : undefined,
-          trailing: t.dueDate && isValid(parseISO(t.dueDate)) ? <span className="text-[11.5px] tabular-nums text-text-faint">{format(parseISO(t.dueDate), "MMM d")}</span> : undefined,
+          trailing: (
+            <span className="flex items-center gap-2 text-[11.5px] tabular-nums text-text-faint">
+              {t.number !== undefined && <span>#{t.number}</span>}
+              {t.dueDate && isValid(parseISO(t.dueDate)) && <span>{format(parseISO(t.dueDate), "MMM d")}</span>}
+            </span>
+          ),
           keywords: "",
           run: go(() => router.push(`/task/${t._id}`)),
         });
