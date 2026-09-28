@@ -224,9 +224,10 @@ export function TimeboxPanel() {
         </div>
       </div>
 
-      {/* All day: chips in the add-pill material */}
+      {/* All day: chips in the add-pill material. A fixed radius, so one row
+          reads as a pill and several rows as a rounded rectangle, not an oval. */}
       <div
-        className="mx-3 mb-2.5 flex min-h-9 items-center gap-2 rounded-full bg-surface-0 pl-3.5 pr-1.5 py-1 dark:bg-white/[0.05]"
+        className="mx-3 mb-2.5 flex min-h-9 items-start gap-2 rounded-[18px] bg-surface-0 pl-3.5 pr-1.5 py-1 dark:bg-white/[0.05]"
         onDragOver={(e) => { e.preventDefault(); }}
         onDrop={async (e) => {
           e.preventDefault();
@@ -237,7 +238,7 @@ export function TimeboxPanel() {
           if ((t.dueDate || t.scheduledDate) !== date) await updateTask({ id: t._id, dueDate: date });
         }}
       >
-        <span className="shrink-0 text-[12px] text-text-faint">All day</span>
+        <span className="mt-0.5 shrink-0 text-[12px] leading-6 text-text-faint">All day</span>
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1 py-0.5">
           {allDay.map((t) => (
             <button
@@ -252,7 +253,7 @@ export function TimeboxPanel() {
             </button>
           ))}
         </div>
-        <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-black/[0.05] text-[10px] font-medium tabular-nums text-text-faint dark:bg-white/[0.08]">
+        <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full bg-black/[0.05] text-[10px] font-medium tabular-nums text-text-faint dark:bg-white/[0.08]">
           {allDay.length}
         </span>
       </div>
