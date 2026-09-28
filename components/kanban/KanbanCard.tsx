@@ -10,6 +10,7 @@ import {
   PriorityPickerPopover, TaskChip, formatDuration, computeDuration,
 } from "@/components/tasks/TaskPropertyPopovers";
 import { TaskContextMenu } from "@/components/tasks/TaskContextMenu";
+import { isMissed, useMarkMissed, MissedMark } from "@/components/tasks/outcome";
 import { format, parseISO, isPast, isToday } from "date-fns";
 import { isGoogleCalEvent } from "@/lib/task-utils";
 import { syncTaskUpdateToGoogle, syncCompletionResultToGoogle } from "@/lib/google-sync";
@@ -44,6 +45,7 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue, context = "
   const router = useRouter();
   const toggleCompleteMut = useMutation(api.tasks.toggleComplete);
   const updateTask = useMutation(api.tasks.update);
+  const markMissed = useMarkMissed();
 
   // Toggle complete + sync to Google Calendar
   const toggleComplete = useCallback(async (args: { id: typeof task._id }) => {
@@ -78,6 +80,7 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue, context = "
   }, [router, task._id]);
 
   const isDone = task.status === "done";
+  const missed = isMissed(task);
   const isCalendarSource = isGoogleCalEvent(task);
   const calColor = (task as Record<string, unknown>).calendarColor as string | undefined;
   const dateStr = task.dueDate || task.scheduledDate;
@@ -175,7 +178,7 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue, context = "
         onDragEnd={handleDragEnd}
         onClick={openDetail}
         className={`group flex w-full cursor-grab flex-col gap-1.5 rounded-[13px] px-3.5 py-2.5 transition-colors active:cursor-grabbing active:translate-y-px ${
-          isDragging ? "opacity-40" : ""
+          isDragging ? "opacity-40" : missed ? "opacity-60" : ""
         } ${
           isOverdue
             ? "bg-rose-50 shadow-3d-sm hover:shadow-3d dark:bg-rose-950/25 dark:hover:bg-rose-950/35"
@@ -187,16 +190,23 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue, context = "
           {/* One circle for every task, always the priority colour: same
               geometry, same meaning, whether or not it came from a calendar.
               Which calendar it came from is a chip below, not this circle. */}
+          {/* Option-click closes it as missed instead of done. */}
           <button
-            onClick={(e) => { e.stopPropagation(); toggleComplete({ id: task._id }); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (e.altKey && !isDone) void markMissed(task);
+              else toggleComplete({ id: task._id });
+            }}
             onContextMenu={(e) => e.stopPropagation()}
+            title={missed ? "Missed: click to reopen" : isDone ? "Mark undone" : "Mark done (Option-click: missed)"}
             className="mt-0.5 flex size-[16px] shrink-0 items-center justify-center rounded-full transition-colors"
-            style={{
+            style={missed ? undefined : {
               border: `2px solid ${isDone ? "#93c5fd" : color}`,
               backgroundColor: isDone ? "#71717a" : "transparent",
             }}
           >
-            {isDone && (
+            {missed && <MissedMark />}
+            {isDone && !missed && (
               <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
                 <path d="M1.5 4L3.2 5.7L6.5 2.3" stroke="#ffffff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
@@ -205,7 +215,7 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue, context = "
 
           {/* Title — max 2 lines, click to open detail */}
           <span
-            className={`min-w-0 flex-1 cursor-pointer text-[13px] font-normal leading-[1.35] ${isDone ? "text-text-faint line-through decoration-text-faint" : "text-foreground"}`}
+            className={`min-w-0 flex-1 cursor-pointer text-[13px] font-normal leading-[1.35] ${missed ? "text-text-muted" : isDone ? "text-text-faint line-through decoration-text-faint" : "text-foreground"}`}
             style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}
           >
             {task.title}
@@ -227,6 +237,14 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue, context = "
         {/* Row 2: Meta chips */}
         {hasChips && (
           <div className="flex flex-wrap items-center gap-1.5 pl-[26px]" draggable={false} onClick={(e) => e.stopPropagation()} onContextMenu={(e) => e.stopPropagation()}>
+            {/* Missed, with the reason when one was given */}
+            {missed && (
+              <TaskChip active>
+                <span className="max-w-[200px] truncate text-text-secondary" title={task.missedReason}>
+                  {task.missedReason ? `Missed: ${task.missedReason}` : "Missed"}
+                </span>
+              </TaskChip>
+            )}
             {/* Priority chip, always shown: a task's priority is not worth
                 hiding behind a hover, and a missing chip reads as no priority. */}
             <PriorityPickerPopover
@@ -334,6 +352,10 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue, context = "
                   <span className="max-w-[160px] truncate text-text-secondary">{project.name}</span>
                 </TaskChip>
               </ProjectPickerPopover>
+            )}
+            {/* Stable task number, pushed to the end of the last row */}
+            {task.number !== undefined && (
+              <span className="ml-auto pl-1 text-[11px] font-medium tabular-nums text-text-faint">#{task.number}</span>
             )}
           </div>
         )}

@@ -117,6 +117,9 @@ export function createTools(auth: ToolAuth): Record<string, any> {
     return task._id;
   }
   const num = (n: number | undefined) => (n === undefined ? undefined : `#${n}`);
+  /** Closed without happening: status stays "done", so say so explicitly. */
+  const missedInfo = (t: { outcome?: "missed"; missedReason?: string }) =>
+    t.outcome === "missed" ? { missed: true, missedReason: t.missedReason } : {};
 
   return {
     // ═══════════════════════════════════════════
@@ -152,6 +155,7 @@ export function createTools(auth: ToolAuth): Record<string, any> {
           projectId: t.projectId,
           source: t.source,
           description: t.description,
+          ...missedInfo(t),
           repeats: (() => {
             const r = normalizeRecurrence(t.recurrence, t.dueDate);
             return r ? shortRecurrenceLabel(r) : undefined;
@@ -186,6 +190,7 @@ export function createTools(auth: ToolAuth): Record<string, any> {
           source: task.source,
           description: task.description,
           googleEventId: task.googleEventId,
+          ...missedInfo(task),
           subtasks: subtasks.map((s) => ({ id: s._id, number: num(s.number), title: s.title, status: s.status, priority: s.priority, dueDate: s.dueDate, dueTime: s.dueTime, description: s.description })),
           repeats: (() => {
             const r = normalizeRecurrence(task.recurrence, task.dueDate);
@@ -390,6 +395,28 @@ export function createTools(auth: ToolAuth): Record<string, any> {
       }),
     }),
 
+    mark_missed: ({
+      description: `Close a task as missed: it did not happen and should not be carried to another day. It leaves Overdue and stays on its date as a record, with an optional short reason (what got in the way) that you and the user can read later. For a repeating task it records the missed occurrence and moves the task to its next one, like complete_task. Use it when the user says they did not or could not do something and does not want it rescheduled. Calling it on an already-missed task revises the reason. To undo, call complete_task on it (that reopens it).`,
+      inputSchema: z.object({
+        id: z.string().describe("Task ID to mark missed (a task id, or its number such as #142)"),
+        reason: z.string().optional().describe("Why it did not happen, in the user's words. Short."),
+      }),
+      execute: safe(async (args: any) => {
+        const id = await taskId(args.id);
+        const before = await convex.query(api.tasks.getById, { id });
+        const result = await convex.mutation(api.tasks.markMissed, { id, reason: args.reason, userDate: today() });
+        try {
+          await convex.mutation(api.syncQueue.enqueue, { taskId: id, action: "update", payload: { statusToggle: true } });
+        } catch (err) {
+          console.warn("[AI] Failed to enqueue sync:", err);
+        }
+        if (result.rolled && result.next) {
+          return { id, number: num(before?.number), missed: true, repeats: true, nextDate: result.next.date, nextStart: result.next.start, nextEnd: result.next.end };
+        }
+        return { id, number: num(before?.number), missed: true, reason: args.reason };
+      }),
+    }),
+
     delete_task: ({
       description: `Permanently delete a task. IMPORTANT: This is irreversible — confirm with the user BEFORE calling this tool. Don't use this for completing tasks — use complete_task instead.`,
       inputSchema: z.object({
@@ -442,6 +469,7 @@ export function createTools(auth: ToolAuth): Record<string, any> {
           id: t._id, number: num(t.number), title: t.title, status: t.status, priority: t.priority, dueDate: t.dueDate, dueTime: t.dueTime,
           projectId: t.projectId, columnId: t.columnId, parentTaskId: t.parentTaskId,
           descriptionSnippet: t.description ? t.description.slice(0, 160) : undefined,
+          ...missedInfo(t),
           subtasks: children.get(t._id) ?? 0,
         }));
       }),
@@ -465,7 +493,7 @@ export function createTools(auth: ToolAuth): Record<string, any> {
             id: p._id, name: p.name, description: p.description, color: p.color, priority: p.priority, status: p.status,
             startDate: p.startDate, dueDate: p.dueDate,
             columns: projectColumns(p).map((c) => ({ id: c.id, name: c.name, status: c.status })),
-            open: mine.filter((t) => t.status !== "done").length, done: mine.filter((t) => t.status === "done").length,
+            open: mine.filter((t) => t.status !== "done").length, done: mine.filter((t) => t.status === "done" && t.outcome !== "missed").length, missed: mine.filter((t) => t.outcome === "missed").length,
             hasContext: !!p.notes,
           };
         });
@@ -488,6 +516,7 @@ export function createTools(auth: ToolAuth): Record<string, any> {
         const shape = (t: (typeof tasks)[number]) => ({
           id: t._id, number: num(t.number), title: t.title, status: t.status, priority: t.priority, dueDate: t.dueDate, dueTime: t.dueTime,
           startTime: t.scheduledStartTime, endTime: t.scheduledEndTime, description: t.description,
+          ...missedInfo(t),
           repeats: (() => { const r = normalizeRecurrence(t.recurrence, t.dueDate); return r ? shortRecurrenceLabel(r) : undefined; })(),
         });
         const board = columns.map((c) => ({
@@ -503,7 +532,7 @@ export function createTools(auth: ToolAuth): Record<string, any> {
           context: p.notes ?? "",
           columns: columns.map((c) => ({ id: c.id, name: c.name, status: c.status })),
           board,
-          counts: { open: tasks.filter((t) => !t.parentTaskId && t.status !== "done").length, done: tasks.filter((t) => !t.parentTaskId && t.status === "done").length },
+          counts: { open: tasks.filter((t) => !t.parentTaskId && t.status !== "done").length, done: tasks.filter((t) => !t.parentTaskId && t.status === "done" && t.outcome !== "missed").length, missed: tasks.filter((t) => !t.parentTaskId && t.outcome === "missed").length },
         };
       }),
     }),
@@ -658,6 +687,14 @@ export function createTools(auth: ToolAuth): Record<string, any> {
           })),
           upcomingThisWeek: upcoming.length,
           upcomingTasks: upcoming.slice(0, 10).map((t) => ({ id: t._id, number: num(t.number), title: t.title, dueDate: t.dueDate, priority: t.priority })),
+          // What did not happen lately, and why, so plans can account for it.
+          missedLastWeek: (() => {
+            const from = new Date(); from.setDate(from.getDate() - 7);
+            const fromStr = from.toISOString().slice(0, 10);
+            return allTasks
+              .filter((t) => t.outcome === "missed" && (t.dueDate || "") >= fromStr && (t.dueDate || "") <= todayStr)
+              .map((t) => ({ id: t._id, number: num(t.number), title: t.title, date: t.dueDate, reason: t.missedReason, series: t.seriesId }));
+          })(),
         };
       }),
     }),

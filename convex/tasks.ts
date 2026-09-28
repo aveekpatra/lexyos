@@ -351,6 +351,8 @@ export const update = mutation({
       patch.completedAt = Date.now();
     } else if (patch.status && patch.status !== "done" && task.status === "done") {
       patch.completedAt = undefined;
+      patch.outcome = undefined; // reopened: no longer missed either
+      patch.missedReason = undefined;
     }
 
     // Clearing date resets to today — tasks must always have a date to stay visible.
@@ -413,7 +415,16 @@ export type CompleteResult = {
  * The next occurrence is computed strictly after max(task date, today) so a
  * task completed late does not land in the past.
  */
-async function completeTask(ctx: MutationCtx, task: Doc<"tasks">, userDate?: string): Promise<CompleteResult> {
+async function completeTask(
+  ctx: MutationCtx,
+  task: Doc<"tasks">,
+  userDate?: string,
+  missed?: { reason?: string },
+): Promise<CompleteResult> {
+  // Done, or closed as missed. Either way the occurrence is over.
+  const outcome = missed
+    ? { outcome: "missed" as const, missedReason: missed.reason?.trim() || undefined }
+    : { outcome: undefined, missedReason: undefined };
   const base = { googleEventId: task.googleEventId, googleCalendarId: task.googleCalendarId };
   const today = userDate || new Date().toISOString().slice(0, 10);
   const anchor = task.dueDate || task.scheduledDate || today;
@@ -426,6 +437,7 @@ async function completeTask(ctx: MutationCtx, task: Doc<"tasks">, userDate?: str
     await ctx.db.patch("tasks", task._id, {
       status: "done",
       completedAt: Date.now(),
+      ...outcome,
       ...(rec && !next ? { recurrence: undefined } : {}),
     });
     return { ...base, rolled: false };
@@ -440,6 +452,7 @@ async function completeTask(ctx: MutationCtx, task: Doc<"tasks">, userDate?: str
     number: undefined, // the series keeps its number on the live row
     status: "done",
     completedAt: Date.now(),
+    ...outcome,
     recurrence: undefined,
     googleEventId: undefined,
     googleCalendarId: undefined,
@@ -455,6 +468,8 @@ async function completeTask(ctx: MutationCtx, task: Doc<"tasks">, userDate?: str
     recurrence: rec, // persist the normalised form so legacy strings retire
     status: task.status === "done" ? "todo" : task.status,
     completedAt: undefined,
+    outcome: undefined,
+    missedReason: undefined,
   };
   let start = next.start;
   let end = next.end;
@@ -512,6 +527,8 @@ export const toggleComplete = mutation({
               scheduledEndTime: task.scheduledEndTime,
               status: live.status === "done" ? "todo" : live.status,
               completedAt: undefined,
+              outcome: undefined,
+              missedReason: undefined,
             });
           }
           await ctx.db.delete("tasks", task._id);
@@ -526,6 +543,8 @@ export const toggleComplete = mutation({
       await ctx.db.patch("tasks", args.id, {
         status: "todo",
         completedAt: undefined,
+        outcome: undefined,
+        missedReason: undefined,
       });
       return { googleEventId: task.googleEventId, googleCalendarId: task.googleCalendarId, rolled: false };
     }
@@ -533,6 +552,34 @@ export const toggleComplete = mutation({
     const result = await completeTask(ctx, task, args.userDate);
     await maybeCompleteParent(ctx, task, identity.subject);
     return result;
+  },
+});
+
+/**
+ * Close a task as missed: it did not happen, and should not be carried to
+ * another day. It stays on its date as a record (and as context for the
+ * agent). A repeating task records the missed occurrence and moves on to its
+ * next one, exactly as completing it would. Un-mark with toggleComplete.
+ */
+export const markMissed = mutation({
+  args: { agent: agentValidator,
+    id: v.id("tasks"),
+    reason: v.optional(v.string()),
+    userDate: v.optional(v.string()),
+  },
+  handler: async (ctx, args): Promise<CompleteResult> => {
+    const identity = await getIdentity(ctx, args.agent);
+    if (!identity) throw new Error("Not authenticated");
+    const task = await ctx.db.get("tasks", args.id);
+    if (!task || task.userId !== identity.subject) throw new Error("Task not found");
+    if (task.status === "done") {
+      // Already closed: only a missed one can have its reason revised.
+      if (task.outcome !== "missed") throw new Error("Task is already done; reopen it first");
+      await ctx.db.patch("tasks", task._id, { missedReason: args.reason?.trim() || undefined });
+      return { googleEventId: task.googleEventId, googleCalendarId: task.googleCalendarId, rolled: false };
+    }
+    // Marking a sub-issue missed never completes its parent on its own.
+    return await completeTask(ctx, task, args.userDate, { reason: args.reason });
   },
 });
 
@@ -595,6 +642,7 @@ export const bulkUpdateStatus = mutation({
         await ctx.db.patch("tasks", id, {
           status: args.status,
           completedAt: args.status === "done" ? Date.now() : undefined,
+          ...(args.status !== "done" ? { outcome: undefined, missedReason: undefined } : {}),
         });
         results.push({ id, googleEventId: task.googleEventId, googleCalendarId: task.googleCalendarId, rolled: false });
       }

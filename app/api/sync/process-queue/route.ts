@@ -74,7 +74,7 @@ export async function POST() {
 
             const result = await pushTaskToGoogleCalendar({
               id: task._id,
-              title: task.status === "done" ? `[Done] ${task.title}` : task.title,
+              title: task.status === "done" ? `${task.outcome === "missed" ? "[Missed]" : "[Done]"} ${task.title}` : task.title,
               description: task.description,
               dueDate: task.dueDate || task.scheduledDate || new Date().toISOString().slice(0, 10),
               dueTime,
@@ -115,8 +115,8 @@ export async function POST() {
 
             // Build Google Calendar update from current task state
             if (payload.title || task.title) {
-              const titlePrefix = task.status === "done" ? "[Done] " : "";
-              const rawTitle = task.title.replace(/^\[Done\]\s*/, "");
+              const titlePrefix = task.status === "done" ? (task.outcome === "missed" ? "[Missed] " : "[Done] ") : "";
+              const rawTitle = task.title.replace(/^\[(Done|Missed)\]\s*/, "");
               gUpdates.summary = titlePrefix + rawTitle;
             }
             if (task.description !== undefined) {

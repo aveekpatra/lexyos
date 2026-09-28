@@ -22,6 +22,7 @@ import { useSettings } from "@/lib/settings";
 import { useRouter } from "next/navigation";
 import { PRIORITY_COLORS, PRIORITY_LABELS } from "@/lib/constants";
 import {
+  IoBan,
   IoCalendar,
   IoCheckmarkCircle,
   IoCreate,
@@ -31,6 +32,7 @@ import {
   IoTimer,
 } from "react-icons/io5";
 import { ProjectGlyph } from "@/components/ui/project-glyph";
+import { isMissed, useMarkMissed } from "@/components/tasks/outcome";
 
 const itemClass = "";
 const subPopupClass = "w-[220px]";
@@ -44,6 +46,7 @@ export function TaskContextMenu({ task, children, className, style }: {
   const updateTask = useMutation(api.tasks.update);
   const toggleCompleteMut = useMutation(api.tasks.toggleComplete);
   const removeTaskMut = useMutation(api.tasks.remove);
+  const markMissed = useMarkMissed();
   const projects = useQuery(api.projects.list, { status: "active" });
   const router = useRouter();
   const { settings } = useSettings();
@@ -70,6 +73,7 @@ export function TaskContextMenu({ task, children, className, style }: {
   }, [removeTaskMut, task]);
 
   const isDone = task.status === "done";
+  const missed = isMissed(task);
   const color = PRIORITY_COLORS[task.priority] || "#a1a1aa";
   const now = new Date();
   const anchorDate = task.dueDate || task.scheduledDate || format(now, "yyyy-MM-dd");
@@ -239,13 +243,21 @@ export function TaskContextMenu({ task, children, className, style }: {
 
           <MenuSeparator />
 
-          {/* Mark done */}
+          {/* Mark done, or close it as missed: it did not happen and should not move on */}
           <MenuItem onClick={toggleComplete} className={itemClass}>
             <span className="flex items-center gap-2.5">
               <IoCheckmarkCircle size={14} className="text-text-muted" />
-              {isDone ? "Mark undone" : "Mark done"}
+              {missed ? "Reopen" : isDone ? "Mark undone" : "Mark done"}
             </span>
           </MenuItem>
+          {!isDone && (
+            <MenuItem onClick={() => void markMissed(task)} className={itemClass}>
+              <span className="flex items-center gap-2.5">
+                <IoBan size={14} className="text-text-muted" />
+                {recurrence ? "Mark this one missed" : "Mark missed"}
+              </span>
+            </MenuItem>
+          )}
 
           {/* Delete */}
           <MenuItem onClick={removeTask} className={`${itemClass} text-[#ef4444]`}>

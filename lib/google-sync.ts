@@ -149,14 +149,14 @@ export async function syncTaskUpdateToGoogle(
 export async function syncTaskCompletionToGoogle(
   task: Doc<"tasks">,
   isNowDone: boolean,
+  missed = false,
 ): Promise<void> {
   if (!shouldSyncToGoogle(task)) return;
 
   const { updateGoogleEvent } = await import("@/app/actions/calendarSync");
   const calId = task.googleCalendarId || "primary";
-  const newTitle = isNowDone
-    ? `[Done] ${task.title}`
-    : task.title.replace(/^\[Done\]\s*/, "");
+  const bare = task.title.replace(/^\[(Done|Missed)\]\s*/, "");
+  const newTitle = isNowDone ? `${missed ? "[Missed]" : "[Done]"} ${bare}` : bare;
 
   await updateGoogleEvent(calId, task.googleEventId!, { summary: newTitle });
 }
@@ -173,7 +173,7 @@ export interface CompletionResult {
  * Sync the outcome of completing a task.
  * - Repeating task (`rolled`): the live task moved to `next`, so move its Google
  *   event there and make sure the title has no [Done] prefix.
- * - Otherwise: toggle the [Done] prefix like before.
+ * - Otherwise: toggle the [Done] (or [Missed]) prefix like before.
  *
  * Pass the task state from BEFORE the mutation and `wasDone` for that state.
  *
@@ -185,6 +185,7 @@ export async function syncCompletionResultToGoogle(
   task: Doc<"tasks">,
   result: CompletionResult,
   wasDone: boolean,
+  missed = false,
 ): Promise<void> {
   const target = {
     ...task,
@@ -193,12 +194,12 @@ export async function syncCompletionResultToGoogle(
   } as Doc<"tasks">;
   if (!shouldSyncToGoogle(target)) return;
   if (!result.rolled || !result.next) {
-    await syncTaskCompletionToGoogle(target, !wasDone);
+    await syncTaskCompletionToGoogle(target, !wasDone, missed);
     return;
   }
   const { next } = result;
   const changes: Record<string, unknown> = {
-    title: task.title.replace(/^\[Done\]\s*/, ""),
+    title: task.title.replace(/^\[(Done|Missed)\]\s*/, ""),
     dueDate: next.date,
   };
   if (next.start) {

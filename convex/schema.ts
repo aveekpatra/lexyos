@@ -55,6 +55,14 @@ export default defineSchema({
     lastSyncedAt: v.optional(v.number()),
     sortOrder: v.number(),
     completedAt: v.optional(v.number()),
+    /**
+     * How a closed task ended. Absent means done; "missed" means it was closed
+     * without happening (status is still "done", so everything that hides or
+     * skips finished work treats it the same). The reason is optional context
+     * for the user and the agent.
+     */
+    outcome: v.optional(v.literal("missed")),
+    missedReason: v.optional(v.string()),
     /** Stable per-account number, shown as #142. See convex/lib/taskNumbers.ts. */
     number: v.optional(v.number()),
     userId: v.string(),

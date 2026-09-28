@@ -35,6 +35,7 @@ import { startFocus } from "@/lib/focus-store";
 import {
   IoAdd,
   IoArrowBack,
+  IoBan,
   IoCalendar,
   IoCheckmarkCircle,
   IoEllipsisHorizontal,
@@ -44,6 +45,7 @@ import {
   IoTimer,
 } from "react-icons/io5";
 import { ProjectGlyph } from "@/components/ui/project-glyph";
+import { isMissed, useMarkMissed, MissedMark } from "@/components/tasks/outcome";
 
 /*
  * Task page, Linear issue layout on the Liquid Glass two-layer model:
@@ -71,6 +73,8 @@ export default function TaskDetail({ taskId }: { taskId: Id<"tasks"> }) {
   const createTask = useMutation(api.tasks.create);
   const toggleComplete = useMutation(api.tasks.toggleComplete);
   const removeTask = useMutation(api.tasks.remove);
+  const markMissed = useMarkMissed();
+  const reviseMissed = useMutation(api.tasks.markMissed);
 
   const [newSubtask, setNewSubtask] = useState("");
   const [numberCopied, setNumberCopied] = useState(false);
@@ -144,6 +148,7 @@ export default function TaskDetail({ taskId }: { taskId: Id<"tasks"> }) {
   const recurrence = normalizeRecurrence(task?.recurrence, anchorDate);
   const durationMin = computeDuration(task?.scheduledStartTime, task?.scheduledEndTime);
   const isDone = task?.status === "done";
+  const missed = !!task && isMissed(task);
   const startTime = task?.scheduledStartTime || task?.dueTime;
   const doneSubs = subtasks?.filter((s) => s.status === "done").length ?? 0;
 
@@ -196,7 +201,7 @@ export default function TaskDetail({ taskId }: { taskId: Id<"tasks"> }) {
             </>
           )}
           <span className="text-text-faint">/</span>
-          <span className="shrink-0 px-2 font-medium text-text-faint">{isDone ? "Done" : status.label}</span>
+          <span className="shrink-0 px-2 font-medium text-text-faint">{missed ? "Missed" : isDone ? "Done" : status.label}</span>
           {/* Stable task number: click to copy it for a message or an agent */}
           {task.number !== undefined && (
             <button
@@ -222,10 +227,17 @@ export default function TaskDetail({ taskId }: { taskId: Id<"tasks"> }) {
             Focus
           </button>
         )}
-        <button onClick={handleToggleComplete} className={isDone ? bluePill : glassAction}>
-          <IoCheckmarkCircle className="size-3.5" />
-          {isDone ? "Done" : recurrence ? "Complete occurrence" : "Mark done"}
-        </button>
+        {missed ? (
+          <button onClick={handleToggleComplete} title="Reopen" className={glassAction}>
+            <MissedMark size={14} />
+            Missed
+          </button>
+        ) : (
+          <button onClick={handleToggleComplete} className={isDone ? bluePill : glassAction}>
+            <IoCheckmarkCircle className="size-3.5" />
+            {isDone ? "Done" : recurrence ? "Complete occurrence" : "Mark done"}
+          </button>
+        )}
 
         <Menu>
           <MenuTrigger render={<button aria-label="Task options" className={glassIconButton} />}>
@@ -241,6 +253,12 @@ export default function TaskDetail({ taskId }: { taskId: Id<"tasks"> }) {
             <MenuItem onClick={() => navigator.clipboard.writeText(window.location.href)}>
               Copy link
             </MenuItem>
+            {!isDone && (
+              <MenuItem onClick={() => void markMissed(task)}>
+                <IoBan className="size-4" />
+                {recurrence ? "Mark this one missed" : "Mark missed"}
+              </MenuItem>
+            )}
             <MenuSeparator />
             <MenuItem onClick={handleDelete} className="text-[#ef4444]">
               <IoTrash className="size-4" />
@@ -260,8 +278,27 @@ export default function TaskDetail({ taskId }: { taskId: Id<"tasks"> }) {
               onChange={(v) => setTitleDraft({ id: task._id, title: v })}
               onCommit={commitTitle}
               placeholder="Task title"
-              className={`text-[26px] font-semibold leading-[1.3] tracking-[-0.015em] ${isDone ? "text-text-muted line-through decoration-text-faint" : "text-text-strong"}`}
+              className={`text-[26px] font-semibold leading-[1.3] tracking-[-0.015em] ${missed ? "text-text-muted" : isDone ? "text-text-muted line-through decoration-text-faint" : "text-text-strong"}`}
             />
+
+            {/* Missed: why it did not happen, kept as context for later */}
+            {missed && (
+              <div className="mt-3 flex h-9 items-center gap-2.5 rounded-full bg-black/[0.04] px-3 text-[13px] dark:bg-white/[0.06]">
+                <MissedMark size={14} />
+                <span className="shrink-0 font-medium text-text-secondary">Missed</span>
+                <input
+                  key={`${task._id}:${task.missedReason ?? ""}`}
+                  defaultValue={task.missedReason ?? ""}
+                  onBlur={(e) => {
+                    const reason = e.currentTarget.value.trim();
+                    if (reason !== (task.missedReason ?? "")) void reviseMissed({ id: task._id, reason });
+                  }}
+                  onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+                  placeholder="Why? (optional)"
+                  className="min-w-0 flex-1 bg-transparent text-text-secondary outline-none placeholder:text-text-faint"
+                />
+              </div>
+            )}
 
             <div className="mt-5 px-2">
               <MarkdownEditor
@@ -442,7 +479,7 @@ export default function TaskDetail({ taskId }: { taskId: Id<"tasks"> }) {
               </span>
               {task.completedAt && (
                 <span title={format(new Date(task.completedAt), "PPpp")}>
-                  Completed {formatDistanceToNow(task.completedAt, { addSuffix: true })}
+                  {missed ? "Missed" : "Completed"} {formatDistanceToNow(task.completedAt, { addSuffix: true })}
                 </span>
               )}
               {task.lastSyncedAt && (

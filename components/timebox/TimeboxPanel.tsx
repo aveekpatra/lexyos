@@ -12,6 +12,7 @@ import { useResizableWidth } from "@/hooks/use-resizable-width";
 import { ResizeHandle } from "@/components/ui/resize-handle";
 import { useTimeboxDate, useTimeboxOpen } from "@/lib/timebox-store";
 import { syncTaskUpdateToGoogle, syncCompletionResultToGoogle } from "@/lib/google-sync";
+import { isMissed, MissedMark } from "@/components/tasks/outcome";
 import { isGoogleCalEvent, projectedOccurrences } from "@/lib/task-utils";
 import { PRIORITY_COLORS } from "@/lib/constants";
 import { useSettings, formatClock } from "@/lib/settings";
@@ -286,6 +287,7 @@ export function TimeboxPanel() {
 
             {laid.map(({ key, t, projected, start, end, lane, lanes }) => {
               const done = t.status === "done";
+              const missed = isMissed(t);
               const google = isGoogleCalEvent(t);
               const dragging = drag?.id === t._id;
               const width = `calc((100% - ${(lanes - 1) * 4}px) / ${lanes})`;
@@ -328,15 +330,16 @@ export function TimeboxPanel() {
                     <button
                       onPointerDown={(e) => e.stopPropagation()}
                       onClick={(e) => { e.stopPropagation(); void complete(t); }}
-                      aria-label={done ? "Mark as not done" : "Mark as done"}
+                      aria-label={missed ? "Reopen" : done ? "Mark as not done" : "Mark as done"}
                       className="flex size-4 shrink-0 items-center justify-center rounded-full transition-colors"
-                      style={{ border: `2px solid ${done ? "#93c5fd" : PRIORITY_COLORS[t.priority] || PRIORITY_COLORS.p4}`, backgroundColor: done ? "#71717a" : "transparent" }}
+                      style={missed ? undefined : { border: `2px solid ${done ? "#93c5fd" : PRIORITY_COLORS[t.priority] || PRIORITY_COLORS.p4}`, backgroundColor: done ? "#71717a" : "transparent" }}
                     >
-                      {done && (
+                      {missed && <MissedMark />}
+                      {done && !missed && (
                         <svg width="8" height="8" viewBox="0 0 8 8" fill="none"><path d="M1.5 4L3.2 5.7L6.5 2.3" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
                       )}
                     </button>
-                    <span className={`truncate text-[13px] leading-4 ${done ? "line-through text-text-faint" : "text-text-strong"}`}>{t.title}</span>
+                    <span className={`truncate text-[13px] leading-4 ${missed ? "text-text-muted" : done ? "line-through text-text-faint" : "text-text-strong"}`}>{t.title}</span>
                   </div>
                   {!compact && (
                     <div className="pl-6 text-[11px] leading-4 text-text-muted">

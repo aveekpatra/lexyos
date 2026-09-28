@@ -19,8 +19,8 @@ export function projectSignals(tasks: Doc<"tasks">[], now = new Date()): Signal[
   const weekEnd = endOfWeek(now, { weekStartsOn: 1 });
   const inWeek = (d: Date | null) => !!d && isWithinInterval(d, { start: weekStart, end: weekEnd });
 
-  const doneLast7 = top.filter((t) => t.status === "done" && t.completedAt && now.getTime() - t.completedAt <= 7 * 86400000).length;
-  const donePrev7 = top.filter((t) => t.status === "done" && t.completedAt && now.getTime() - t.completedAt > 7 * 86400000 && now.getTime() - t.completedAt <= 14 * 86400000).length;
+  const doneLast7 = top.filter((t) => t.status === "done" && t.outcome !== "missed" && t.completedAt && now.getTime() - t.completedAt <= 7 * 86400000).length;
+  const donePrev7 = top.filter((t) => t.status === "done" && t.outcome !== "missed" && t.completedAt && now.getTime() - t.completedAt > 7 * 86400000 && now.getTime() - t.completedAt <= 14 * 86400000).length;
 
   let bookedMin = 0;
   for (const t of open) {

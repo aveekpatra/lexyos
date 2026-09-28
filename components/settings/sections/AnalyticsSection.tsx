@@ -15,7 +15,7 @@ export function AnalyticsSection() {
   const stats = useMemo(() => {
     const all = (tasks ?? []).filter((t) => !t.parentTaskId);
     const days = Array.from({ length: 14 }, (_, i) => startOfDay(subDays(new Date(), 13 - i)));
-    const perDay = days.map((d) => all.filter((t) => t.completedAt && isSameDay(new Date(t.completedAt), d)).length);
+    const perDay = days.map((d) => all.filter((t) => t.completedAt && t.outcome !== "missed" && isSameDay(new Date(t.completedAt), d)).length);
     const week = perDay.slice(7).reduce((a, b) => a + b, 0);
     const prev = perDay.slice(0, 7).reduce((a, b) => a + b, 0);
     const open = all.filter((t) => t.status !== "done").length;
