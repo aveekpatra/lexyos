@@ -18,19 +18,28 @@ export function FocusTimer() {
   const [now, setNow] = useState(() => Date.now());
   const firedFor = useRef<number | null>(null);
 
-  // Account sync. Local changes go up; a session from another device comes down
-  // only when there is nothing running here.
+  // Account sync, shared with the Mac app. Local changes go up. A remote value
+  // that is neither ours nor our last write came from another device, so it
+  // wins; before this, a tab left open overwrote every change made elsewhere.
   const remote = loaded ? settings.ui.focusSession : undefined;
-  const remoteKey = JSON.stringify(remote ?? null);
-  const localKey = JSON.stringify(session);
+  const remoteKey = canonical(remote ?? null);
+  const localKey = canonical(session);
   const adopted = useRef(false);
+  const lastPushed = useRef<string | null>(null);
   useEffect(() => {
     if (remote === undefined) return;
     if (!adopted.current) {
       adopted.current = true;
-      if (!session && remote) { adoptFocus(remote); return; }
+      if (!session && remote) { lastPushed.current = remoteKey; adoptFocus(remote); return; }
     }
-    if (remoteKey !== localKey) void update("ui", { focusSession: session });
+    if (remoteKey === localKey) { lastPushed.current = localKey; return; }
+    if (lastPushed.current !== null && remoteKey !== lastPushed.current) {
+      lastPushed.current = remoteKey;
+      adoptFocus(remote ?? null);
+      return;
+    }
+    lastPushed.current = localKey;
+    void update("ui", { focusSession: session });
   }, [remote, remoteKey, localKey, session, update]);
 
   useEffect(() => {
@@ -91,6 +100,15 @@ export function FocusTimer() {
 const circle = "flex size-8 items-center justify-center rounded-full text-text-secondary transition-colors hover:bg-black/[0.06] hover:text-text-strong dark:hover:bg-white/[0.1]";
 /** Aturno close: a filled grey disc inside a fainter ring, both concentric. */
 const closeCircle = "ml-0.5 flex size-8 items-center justify-center rounded-full bg-black/[0.07] text-text-secondary ring-[3px] ring-black/[0.04] transition-colors hover:bg-black/[0.12] hover:text-text-strong dark:bg-white/[0.1] dark:ring-white/[0.05] dark:hover:bg-white/[0.16]";
+
+/** Key order differs between writers (the Mac app sorts); compare by content. */
+function canonical(value: unknown): string {
+  return JSON.stringify(value, (_k, v) =>
+    v && typeof v === "object" && !Array.isArray(v)
+      ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, (v as Record<string, unknown>)[k]]))
+      : v,
+  );
+}
 
 function beep() {
   try {
