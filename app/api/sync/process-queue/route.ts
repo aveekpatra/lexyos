@@ -81,7 +81,7 @@ export async function POST() {
               durationMinutes,
               // Server runs in UTC; use the task's own zone when it has one so
               // the event lands at the right wall-clock time.
-              timeZone: task.timeZone || undefined,
+              timeZone: ((item.payload as { timeZone?: string } | undefined)?.timeZone) || task.timeZone || undefined,
             });
 
             if (result?.googleEventId) {
@@ -110,7 +110,7 @@ export async function POST() {
             const payload = (item.payload || {}) as Record<string, unknown>;
             // The server runs in UTC, so its own zone would shift the event.
             // Use the task's zone, as the push path already does.
-            const tz = task.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone;
+            const tz = (payload.timeZone as string | undefined) || task.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone;
             const gUpdates: Record<string, unknown> = {};
 
             // Build Google Calendar update from current task state

@@ -2,6 +2,7 @@ import { v } from "convex/values";
 import { agentValidator, getIdentity } from "./lib/actor";
 import { query, mutation, internalMutation, type MutationCtx } from "./_generated/server";
 import { claimTaskNumber, ensureTaskCounter } from "./lib/taskNumbers";
+import { queueGoogleSync, syncTimeZoneValidator } from "./lib/googleSync";
 import type { Doc, Id } from "./_generated/dataModel";
 import {
   recurrenceValidator,
@@ -210,6 +211,8 @@ export const create = mutation({
     userDate: v.optional(v.string()),
     /** Settings: add new tasks to the top of the list. */
     placeAtTop: v.optional(v.boolean()),
+    /** Opt in to server-side Google Calendar sync (convex/lib/googleSync.ts). */
+    syncTimeZone: syncTimeZoneValidator,
   },
   handler: async (ctx, args) => {
     const identity = await getIdentity(ctx, args.agent);
@@ -234,7 +237,7 @@ export const create = mutation({
     const rawDue = args.dueDate || today;
     const dueDate = args.recurrence ? alignDateToRecurrence(args.recurrence, rawDue) : rawDue;
 
-    return await ctx.db.insert("tasks", {
+    const id = await ctx.db.insert("tasks", {
       title: args.title,
       description: args.description,
       status: args.status ?? "todo",
@@ -258,6 +261,11 @@ export const create = mutation({
       number: await claimTaskNumber(ctx, userId),
       userId,
     });
+    // Sub-issues and already-linked rows stay off the calendar, as on the web.
+    if (args.syncTimeZone && !args.parentTaskId && !args.googleEventId) {
+      await queueGoogleSync(ctx, userId, id, "push", args.syncTimeZone);
+    }
+    return id;
   },
 });
 
@@ -303,6 +311,8 @@ export const update = mutation({
     // Client-provided local date (format: "YYYY-MM-DD") to avoid UTC drift on the server.
     // Used by clearDueDate/clearScheduledDate handlers to reset to "today" in the user's timezone.
     userDate: v.optional(v.string()),
+    /** Opt in to server-side Google Calendar sync (convex/lib/googleSync.ts). */
+    syncTimeZone: syncTimeZoneValidator,
   },
   handler: async (ctx, args) => {
     const identity = await getIdentity(ctx, args.agent);
@@ -316,7 +326,7 @@ export const update = mutation({
     // `agent` is who is calling, not a task field: it must never reach the patch.
     const { agent, id, clearDueDate, clearDueTime, clearScheduledDate, clearScheduledStartTime,
       clearScheduledEndTime, clearProjectId, clearRecurrence, clearDescription, clearLabels, clearLocation,
-      clearColumnId, clearParentTaskId, userDate, ...updates } = args;
+      clearColumnId, clearParentTaskId, userDate, syncTimeZone, ...updates } = args;
     void agent;
 
     if (args.recurrence) validateRecurrence(args.recurrence);
@@ -418,6 +428,10 @@ export const update = mutation({
     }
 
     await ctx.db.patch("tasks", id, patch);
+    // Linking an event is itself a sync step; everything else reconciles the event.
+    if (syncTimeZone && typeof args.googleEventId !== "string" && !task.parentTaskId) {
+      await queueGoogleSync(ctx, identity.subject, id, "update", syncTimeZone);
+    }
   },
 });
 
@@ -518,8 +532,36 @@ export const toggleComplete = mutation({
     id: v.id("tasks"),
     // Client local date ("YYYY-MM-DD") so recurring tasks roll relative to the user's today.
     userDate: v.optional(v.string()),
+    /** Opt in to server-side Google Calendar sync (convex/lib/googleSync.ts). */
+    syncTimeZone: syncTimeZoneValidator,
   },
   handler: async (ctx, args): Promise<CompleteResult> => {
+    const result = await toggleCompleteImpl(ctx, args);
+    const identity = await getIdentity(ctx, args.agent);
+    if (identity) await syncCompletion(ctx, args.syncTimeZone, identity.subject, result);
+    return result;
+  },
+});
+
+/**
+ * After a completion the event belongs to the live row (the task, or the
+ * series an undone repeat belongs to). Snapshots never carry an event, so the
+ * one row still linked to it is the one to reconcile.
+ */
+async function syncCompletion(ctx: MutationCtx, tz: string | undefined, userId: string, result: CompleteResult) {
+  if (!tz || !result.googleEventId) return;
+  const live = await ctx.db
+    .query("tasks")
+    .withIndex("by_userId_and_googleEventId", (q) => q.eq("userId", userId).eq("googleEventId", result.googleEventId))
+    .first();
+  if (live) await queueGoogleSync(ctx, userId, live._id, "update", tz);
+}
+
+async function toggleCompleteImpl(
+  ctx: MutationCtx,
+  args: { agent?: { secret: string; userId: string }; id: Id<"tasks">; userDate?: string },
+): Promise<CompleteResult> {
+  {
     const identity = await getIdentity(ctx, args.agent);
     if (!identity) throw new Error("Not authenticated");
 
@@ -577,8 +619,8 @@ export const toggleComplete = mutation({
     const result = await completeTask(ctx, task, args.userDate);
     await maybeCompleteParent(ctx, task, identity.subject);
     return result;
-  },
-});
+  }
+}
 
 /**
  * Close a task as missed: it did not happen, and should not be carried to
@@ -591,10 +633,25 @@ export const markMissed = mutation({
     id: v.id("tasks"),
     reason: v.optional(v.string()),
     userDate: v.optional(v.string()),
+    /** Opt in to server-side Google Calendar sync (convex/lib/googleSync.ts). */
+    syncTimeZone: syncTimeZoneValidator,
   },
   handler: async (ctx, args): Promise<CompleteResult> => {
     const identity = await getIdentity(ctx, args.agent);
     if (!identity) throw new Error("Not authenticated");
+    const result = await markMissedImpl(ctx, args, identity.subject);
+    await syncCompletion(ctx, args.syncTimeZone, identity.subject, result);
+    return result;
+  },
+});
+
+async function markMissedImpl(
+  ctx: MutationCtx,
+  args: { id: Id<"tasks">; reason?: string; userDate?: string },
+  userId: string,
+): Promise<CompleteResult> {
+  {
+    const identity = { subject: userId };
     const task = await ctx.db.get("tasks", args.id);
     if (!task || task.userId !== identity.subject) throw new Error("Task not found");
     if (task.status === "done") {
@@ -605,8 +662,8 @@ export const markMissed = mutation({
     }
     // Marking a sub-issue missed never completes its parent on its own.
     return await completeTask(ctx, task, args.userDate, { reason: args.reason });
-  },
-});
+  }
+}
 
 /** Settings: complete the parent once every sub-issue is done. */
 async function maybeCompleteParent(ctx: MutationCtx, task: Doc<"tasks">, userId: string) {
@@ -621,7 +678,10 @@ async function maybeCompleteParent(ctx: MutationCtx, task: Doc<"tasks">, userId:
 }
 
 export const remove = mutation({
-  args: { agent: agentValidator, id: v.id("tasks") },
+  args: { agent: agentValidator, id: v.id("tasks"),
+    /** Opt in to server-side Google Calendar sync (convex/lib/googleSync.ts). */
+    syncTimeZone: syncTimeZoneValidator,
+  },
   handler: async (ctx, args) => {
     const identity = await getIdentity(ctx, args.agent);
     if (!identity) throw new Error("Not authenticated");
@@ -641,6 +701,14 @@ export const remove = mutation({
     }
 
     await ctx.db.delete("tasks", args.id);
+
+    // The queue row outlives the task; it carries the event to delete.
+    if (args.syncTimeZone && task.googleEventId && !task.googleRecurringEventId) {
+      await queueGoogleSync(ctx, identity.subject, args.id, "delete", args.syncTimeZone, {
+        googleEventId: task.googleEventId,
+        googleCalendarId: task.googleCalendarId,
+      });
+    }
 
     // Return google info so the UI can handle Google Calendar deletion if needed
     return { googleEventId: task.googleEventId, googleCalendarId: task.googleCalendarId };
