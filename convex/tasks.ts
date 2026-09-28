@@ -101,6 +101,31 @@ export const list = query({
   },
 });
 
+const OPEN_STATUSES = ["todo", "planned", "in_progress", "review"] as const;
+
+/**
+ * Every task that is not done, read through the status index so done history
+ * (which only grows) is never scanned. Clients that render boards subscribe to
+ * this instead of `list`, and fetch done rows only where they show them.
+ */
+export const listOpen = query({
+  args: { agent: agentValidator },
+  handler: async (ctx, args) => {
+    const identity = await getIdentity(ctx, args.agent);
+    if (!identity) return [];
+    const userId = identity.subject;
+    const groups = await Promise.all(
+      OPEN_STATUSES.map((status) =>
+        ctx.db
+          .query("tasks")
+          .withIndex("by_userId_and_status", (q) => q.eq("userId", userId).eq("status", status))
+          .collect()
+      )
+    );
+    return groups.flat().sort((a, b) => a.sortOrder - b.sortOrder);
+  },
+});
+
 export const getById = query({
   args: { agent: agentValidator, id: v.id("tasks") },
   handler: async (ctx, args) => {
