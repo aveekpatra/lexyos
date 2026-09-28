@@ -77,6 +77,19 @@ export default defineSchema({
     .index("by_userId_and_googleEventId", ["userId", "googleEventId"])
     .index("by_seriesId", ["seriesId"]),
 
+  // A task's story: one row per change (convex/lib/taskHistory.ts).
+  taskEvents: defineTable({
+    taskId: v.id("tasks"),
+    userId: v.string(),
+    at: v.number(),
+    /** "web" | "mac" | "agent" | "google" | "system" */
+    actor: v.string(),
+    /** "created", "occurrence", or a field: day, time, priority, status, outcome, title, projectId, recurrence, parentTaskId, columnId, description */
+    field: v.string(),
+    from: v.optional(v.any()),
+    to: v.optional(v.any()),
+  }).index("by_taskId", ["taskId", "at"]),
+
   projects: defineTable({
     name: v.string(),
     description: v.optional(v.string()),

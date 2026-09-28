@@ -3,6 +3,7 @@ import { agentValidator, getIdentity } from "./lib/actor";
 import { query, mutation, internalMutation, type MutationCtx } from "./_generated/server";
 import { claimTaskNumber, ensureTaskCounter } from "./lib/taskNumbers";
 import { queueGoogleSync, syncTimeZoneValidator } from "./lib/googleSync";
+import { actorOf, clearHistory, recordChanges, recordCreated, recordOccurrence, type Actor } from "./lib/taskHistory";
 import type { Doc, Id } from "./_generated/dataModel";
 import {
   recurrenceValidator,
@@ -139,6 +140,22 @@ export const getById = query({
   },
 });
 
+/** A task's story, oldest first (convex/lib/taskHistory.ts). */
+export const history = query({
+  args: { agent: agentValidator, id: v.id("tasks") },
+  handler: async (ctx, args) => {
+    const identity = await getIdentity(ctx, args.agent);
+    if (!identity) return [];
+    const task = await ctx.db.get("tasks", args.id);
+    if (!task || task.userId !== identity.subject) return [];
+    return await ctx.db
+      .query("taskEvents")
+      .withIndex("by_taskId", (q) => q.eq("taskId", args.id))
+      .order("asc")
+      .take(500);
+  },
+});
+
 export const getSubtasks = query({
   args: { agent: agentValidator, parentTaskId: v.id("tasks") },
   handler: async (ctx, args) => {
@@ -261,6 +278,7 @@ export const create = mutation({
       number: await claimTaskNumber(ctx, userId),
       userId,
     });
+    await recordCreated(ctx, id, actorOf(args));
     // Sub-issues and already-linked rows stay off the calendar, as on the web.
     if (args.syncTimeZone && !args.parentTaskId && !args.googleEventId) {
       await queueGoogleSync(ctx, userId, id, "push", args.syncTimeZone);
@@ -428,6 +446,7 @@ export const update = mutation({
     }
 
     await ctx.db.patch("tasks", id, patch);
+    await recordChanges(ctx, task, actorOf(args));
     // Linking an event is itself a sync step; everything else reconciles the event.
     if (syncTimeZone && typeof args.googleEventId !== "string" && !task.parentTaskId) {
       await queueGoogleSync(ctx, identity.subject, id, "update", syncTimeZone);
@@ -459,6 +478,7 @@ async function completeTask(
   task: Doc<"tasks">,
   userDate?: string,
   missed?: { reason?: string },
+  actor: Actor = "web",
 ): Promise<CompleteResult> {
   // Done, or closed as missed. Either way the occurrence is over.
   const outcome = missed
@@ -479,6 +499,7 @@ async function completeTask(
       ...outcome,
       ...(rec && !next ? { recurrence: undefined } : {}),
     });
+    await recordChanges(ctx, task, actor);
     return { ...base, rolled: false };
   }
 
@@ -523,6 +544,7 @@ async function completeTask(
     end = task.scheduledEndTime;
   }
   await ctx.db.patch("tasks", task._id, patch);
+  await recordOccurrence(ctx, task, actor, !!missed);
 
   return { ...base, rolled: true, next: { date: next.date, start, end }, snapshotId };
 }
@@ -559,8 +581,9 @@ async function syncCompletion(ctx: MutationCtx, tz: string | undefined, userId: 
 
 async function toggleCompleteImpl(
   ctx: MutationCtx,
-  args: { agent?: { secret: string; userId: string }; id: Id<"tasks">; userDate?: string },
+  args: { agent?: { secret: string; userId: string }; id: Id<"tasks">; userDate?: string; syncTimeZone?: string },
 ): Promise<CompleteResult> {
+  const actor = actorOf(args);
   {
     const identity = await getIdentity(ctx, args.agent);
     if (!identity) throw new Error("Not authenticated");
@@ -586,6 +609,7 @@ async function toggleCompleteImpl(
             .collect();
           const isLatest = !newer.some((s) => s._id !== task._id && (s.dueDate || s.scheduledDate || "") > snapDate);
           if (isLatest) {
+            const liveBefore = live;
             await ctx.db.patch("tasks", live._id, {
               dueDate: snapDate,
               scheduledDate: task.scheduledDate || snapDate,
@@ -597,6 +621,7 @@ async function toggleCompleteImpl(
               outcome: undefined,
               missedReason: undefined,
             });
+            await recordChanges(ctx, liveBefore, actor);
           }
           await ctx.db.delete("tasks", task._id);
           return {
@@ -613,10 +638,11 @@ async function toggleCompleteImpl(
         outcome: undefined,
         missedReason: undefined,
       });
+      await recordChanges(ctx, task, actor);
       return { googleEventId: task.googleEventId, googleCalendarId: task.googleCalendarId, rolled: false };
     }
 
-    const result = await completeTask(ctx, task, args.userDate);
+    const result = await completeTask(ctx, task, args.userDate, undefined, actor);
     await maybeCompleteParent(ctx, task, identity.subject);
     return result;
   }
@@ -647,7 +673,7 @@ export const markMissed = mutation({
 
 async function markMissedImpl(
   ctx: MutationCtx,
-  args: { id: Id<"tasks">; reason?: string; userDate?: string },
+  args: { id: Id<"tasks">; reason?: string; userDate?: string; agent?: unknown; syncTimeZone?: string },
   userId: string,
 ): Promise<CompleteResult> {
   {
@@ -661,7 +687,7 @@ async function markMissedImpl(
       return { googleEventId: task.googleEventId, googleCalendarId: task.googleCalendarId, rolled: false };
     }
     // Marking a sub-issue missed never completes its parent on its own.
-    return await completeTask(ctx, task, args.userDate, { reason: args.reason });
+    return await completeTask(ctx, task, args.userDate, { reason: args.reason }, actorOf(args));
   }
 }
 
@@ -674,7 +700,7 @@ async function maybeCompleteParent(ctx: MutationCtx, task: Doc<"tasks">, userId:
   const parent = await ctx.db.get("tasks", task.parentTaskId);
   if (!parent || parent.status === "done") return;
   const siblings = await ctx.db.query("tasks").withIndex("by_parentTaskId", (q) => q.eq("parentTaskId", parent._id)).collect();
-  if (siblings.every((s) => s.status === "done" || s._id === task._id)) await completeTask(ctx, parent);
+  if (siblings.every((s) => s.status === "done" || s._id === task._id)) await completeTask(ctx, parent, undefined, undefined, "system");
 }
 
 export const remove = mutation({
@@ -701,6 +727,7 @@ export const remove = mutation({
     }
 
     await ctx.db.delete("tasks", args.id);
+    await clearHistory(ctx, args.id);
 
     // The queue row outlives the task; it carries the event to delete.
     if (args.syncTimeZone && task.googleEventId && !task.googleRecurringEventId) {
@@ -730,13 +757,14 @@ export const bulkUpdateStatus = mutation({
       const task = await ctx.db.get("tasks", id);
       if (!task || task.userId !== identity.subject) continue;
       if (args.status === "done" && task.status !== "done") {
-        results.push({ id, ...(await completeTask(ctx, task, args.userDate)) });
+        results.push({ id, ...(await completeTask(ctx, task, args.userDate, undefined, actorOf(args))) });
       } else {
         await ctx.db.patch("tasks", id, {
           status: args.status,
           completedAt: args.status === "done" ? Date.now() : undefined,
           ...(args.status !== "done" ? { outcome: undefined, missedReason: undefined } : {}),
         });
+        await recordChanges(ctx, task, actorOf(args));
         results.push({ id, googleEventId: task.googleEventId, googleCalendarId: task.googleCalendarId, rolled: false });
       }
     }
@@ -1046,9 +1074,10 @@ export const bulkUpsertFromGoogle = mutation({
         }
 
         await ctx.db.patch("tasks", existing._id, patch);
+        await recordChanges(ctx, existing, "google");
       } else {
         // Create new task
-        await ctx.db.insert("tasks", {
+        const newId = await ctx.db.insert("tasks", {
           title: event.title,
           description: event.description,
           status: "todo",
@@ -1074,6 +1103,7 @@ export const bulkUpsertFromGoogle = mutation({
           number: await claimTaskNumber(ctx, userId),
           userId,
         });
+        await recordCreated(ctx, newId, "google");
       }
       upserted++;
     }
@@ -1219,6 +1249,7 @@ export const rolloverOverdue = mutation({
       const d = t.dueDate || t.scheduledDate;
       if (!d || d >= args.today) continue;
       await ctx.db.patch("tasks", t._id, { dueDate: args.today, scheduledDate: args.today });
+      await recordChanges(ctx, t, "system");
       moved++;
     }
     return moved;
