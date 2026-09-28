@@ -11,9 +11,12 @@
 import type * as aiChats from "../aiChats.js";
 import type * as apiTokens from "../apiTokens.js";
 import type * as calendarEvents from "../calendarEvents.js";
+import type * as calendarPull from "../calendarPull.js";
+import type * as crons from "../crons.js";
 import type * as googleSync from "../googleSync.js";
 import type * as lib_actor from "../lib/actor.js";
 import type * as lib_columns from "../lib/columns.js";
+import type * as lib_googleCalendar from "../lib/googleCalendar.js";
 import type * as lib_googleSync from "../lib/googleSync.js";
 import type * as lib_recurrence from "../lib/recurrence.js";
 import type * as lib_taskNumbers from "../lib/taskNumbers.js";
@@ -33,9 +36,12 @@ declare const fullApi: ApiFromModules<{
   aiChats: typeof aiChats;
   apiTokens: typeof apiTokens;
   calendarEvents: typeof calendarEvents;
+  calendarPull: typeof calendarPull;
+  crons: typeof crons;
   googleSync: typeof googleSync;
   "lib/actor": typeof lib_actor;
   "lib/columns": typeof lib_columns;
+  "lib/googleCalendar": typeof lib_googleCalendar;
   "lib/googleSync": typeof lib_googleSync;
   "lib/recurrence": typeof lib_recurrence;
   "lib/taskNumbers": typeof lib_taskNumbers;

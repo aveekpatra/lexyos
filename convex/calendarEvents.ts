@@ -10,17 +10,18 @@
  */
 import { query, mutation, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
+import { agentValidator, getIdentity } from "./lib/actor";
 
 // Update sync state
 export const updateSyncState = mutation({
-  args: {
+  args: { agent: agentValidator,
     googleCalendarId: v.string(),
     calendarName: v.optional(v.string()),
     calendarColor: v.optional(v.string()),
     syncToken: v.optional(v.string()),
   },
-  handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
+  handler: async (ctx, { agent, ...args }) => {
+    const identity = await getIdentity(ctx, agent);
     if (!identity) throw new Error("Not authenticated");
     const userId = identity.subject;
 
@@ -47,9 +48,9 @@ export const updateSyncState = mutation({
 });
 
 export const getSyncState = query({
-  args: {},
-  handler: async (ctx) => {
-    const identity = await ctx.auth.getUserIdentity();
+  args: { agent: agentValidator },
+  handler: async (ctx, args) => {
+    const identity = await getIdentity(ctx, args.agent);
     if (!identity) return [];
     const userId = identity.subject;
 

@@ -18,6 +18,7 @@ import { v } from "convex/values";
 import { internalAction, internalMutation, internalQuery, type ActionCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
+import { googleAccessToken as googleToken } from "./lib/googleCalendar";
 
 const GOOGLE = "https://www.googleapis.com/calendar/v3";
 const DEFAULT_EVENT_MINUTES = 60;
@@ -229,22 +230,4 @@ async function google(token: string, method: string, path: string, body?: unknow
 
 async function failure(res: Response): Promise<string> {
   return `Google Calendar ${res.status}: ${(await res.text()).slice(0, 300)}`;
-}
-
-/** Live Google access token from Clerk, or null when there is none to use. */
-async function googleToken(userId: string): Promise<string | null> {
-  const secret = process.env.CLERK_SECRET_KEY;
-  if (!secret) {
-    console.warn("[googleSync] CLERK_SECRET_KEY is not set; leaving items queued");
-    return null;
-  }
-  const res = await fetch(`https://api.clerk.com/v1/users/${encodeURIComponent(userId)}/oauth_access_tokens/oauth_google`, {
-    headers: { Authorization: `Bearer ${secret}` },
-  });
-  if (!res.ok) {
-    console.warn(`[googleSync] Clerk token lookup ${res.status}`);
-    return null;
-  }
-  const tokens = (await res.json()) as { token?: string }[];
-  return tokens[0]?.token ?? null;
 }

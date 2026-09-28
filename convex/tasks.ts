@@ -916,7 +916,7 @@ export const upsertFromGoogle = mutation({
 });
 
 export const bulkUpsertFromGoogle = mutation({
-  args: {
+  args: { agent: agentValidator,
     events: v.array(
       v.object({
         googleEventId: v.string(),
@@ -947,7 +947,7 @@ export const bulkUpsertFromGoogle = mutation({
     fetchedAt: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
+    const identity = await getIdentity(ctx, args.agent);
     if (!identity) throw new Error("Not authenticated");
     const userId = identity.subject;
     const syncStamp = args.fetchedAt ?? Date.now();
@@ -1137,9 +1137,9 @@ export const removeDeletedGoogleEvents = mutation({
  * Google reports an event as cancelled).
  */
 export const removeGoogleEventsByIds = mutation({
-  args: { googleEventIds: v.array(v.string()) },
+  args: { agent: agentValidator, googleEventIds: v.array(v.string()) },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
+    const identity = await getIdentity(ctx, args.agent);
     if (!identity) throw new Error("Not authenticated");
     const userId = identity.subject;
     let removed = 0;
