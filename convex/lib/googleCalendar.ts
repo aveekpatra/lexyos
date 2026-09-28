@@ -321,7 +321,10 @@ export async function googleAccessToken(userId: string): Promise<string | null> 
     headers: { Authorization: `Bearer ${secret}` },
   });
   if (!res.ok) {
-    console.warn(`[google] Clerk token lookup ${res.status}`);
+    // 400/404: the user has no Google account linked. Nothing to do, and the
+    // cron asks every 5 minutes, so stay quiet. Anything else (401 bad key,
+    // 5xx) is a real problem worth a warning.
+    if (res.status !== 400 && res.status !== 404) console.warn(`[google] Clerk token lookup ${res.status}`);
     return null;
   }
   const tokens = (await res.json()) as { token?: string }[];
