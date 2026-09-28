@@ -1,51 +1,74 @@
-# Welcome to your Convex + Next.js + Clerk app
+# Lexyos
 
-This is a [Convex](https://convex.dev/) project created with [`npm create convex`](https://www.npmjs.com/package/create-convex).
+Lexyos is a keyboard-first task, project and calendar app with an AI agent. Tasks live on a Kanban board grouped by time, projects have their own boards, and tasks sync two ways with Google Calendar. The same task tools are exposed to the in-app agent and to outside AI clients through an MCP server.
 
-After the initial setup (<2 minutes) you'll have a working full-stack app using:
+Live at [lexyos.com](https://lexyos.com).
 
-- Convex as your backend (database, server logic)
-- [React](https://react.dev/) as your frontend (web page interactivity)
-- [Next.js](https://nextjs.org/) for optimized web hosting and page routing
-- [Tailwind](https://tailwindcss.com/) for building great looking accessible UI
-- [Clerk](https://clerk.com/) for authentication
+## Features
 
-## Get started
+- Timeline board grouped by time (day, week and month modes) with quick-add and drag to reschedule.
+- Project boards with custom columns, a project context document and archiving.
+- Tasks with status, priority, dates and times, duration, labels, subtasks and repeat rules (daily, weekly with per-day times, monthly, yearly, with end dates). Tasks can be completed or marked missed.
+- Two-way Google Calendar sync with a retry queue.
+- Cmd+K search, a timebox panel, and a Pomodoro focus timer.
+- Agent panel backed by OpenAI (or OpenRouter), with optional voice input and output through Cartesia.
+- MCP server at `/api/mcp`, authenticated with personal API keys or OAuth, exposing the same tools as the agent: `list_tasks`, `search_tasks`, `create_task`, `update_task`, `complete_task`, `mark_missed`, `plan_day`, `find_free_time`, `get_project`, and more.
 
-If you just cloned this codebase and didn't use `npm create convex`, run:
+## Stack
+
+- Next.js 16 (App Router), React 19, TypeScript
+- Convex (database and server functions)
+- Clerk (authentication; Google Calendar access uses the Clerk Google connection with the calendar scope)
+- Vercel AI SDK with OpenAI and OpenRouter providers
+- Tiptap (markdown editor), Tailwind CSS 4, Base UI, Motion
+- `mcp-handler` and the MCP TypeScript SDK
+
+## Getting started
+
+Requirements: Node.js, pnpm, a Convex account and a Clerk application.
+
+```bash
+pnpm install
+pnpm dev
+```
+
+`pnpm dev` first runs `convex dev --until-success`, then starts Next.js and Convex together. The first run links a Convex deployment and writes `NEXT_PUBLIC_CONVEX_URL` to `.env.local`.
+
+There is no `.env.example`. Set these variables.
+
+In `.env.local` (Next.js):
+
+- `NEXT_PUBLIC_CONVEX_URL`
+- `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`
+- `AGENT_SECRET` (shared secret between the Next.js server and Convex; also used by `lib/crypto.ts`)
+- `OPENAI_API_KEY`, or `OPENROUTER_API_KEY` as a fallback
+- Optional: `OPENAI_BASE_URL`, `OPENROUTER_MODEL`, `AGENT_REASONING_EFFORT`, `AGENT_SERVICE_TIER`
+- Optional, for voice: `NEXT_PUBLIC_CARTESIA_API_KEY`, `NEXT_PUBLIC_CARTESIA_VOICE_ID`
+
+In the Convex deployment (`npx convex env set NAME value`):
+
+- `CLERK_JWT_ISSUER_DOMAIN` (the Clerk issuer URL; see `convex/auth.config.ts`)
+- `AGENT_SECRET` (same value as above)
+
+For Google Calendar sync, enable the Google connection in Clerk and add the `https://www.googleapis.com/auth/calendar` scope.
+
+Other scripts:
+
+```bash
+pnpm build
+pnpm start
+pnpm lint
+```
+
+## Project structure
 
 ```
-npm install
-npm run dev
+app/            Routes: landing, sign-in, (app)/timeline, (app)/project, (app)/task, oauth consent
+app/api/        ai/chat (agent), mcp (MCP server), oauth, tokens, google, sync
+app/actions/    Server actions for Google Calendar
+components/     Board, project board, task detail, sidebar, command bar, settings, timebox, focus timer
+convex/         Schema and functions: tasks, projects, calendar sync queue, API tokens, OAuth, AI chats
+lib/ai/         Agent model config, tool definitions shared by the agent and MCP server, voice hook
+lib/            Recurrence, quick-add parsing, Google sync, OAuth server, stores
+docs/vision.md  Product direction (written when the app was called UniFocus)
 ```
-
-If you're reading this README on GitHub and want to use this template, run:
-
-```
-npm create convex@latest -- -t nextjs-clerk
-```
-
-Then:
-
-1. Open your app. There should be a "Claim your application" button from Clerk in the bottom right of your app.
-2. Follow the steps to claim your application and link it to this app.
-3. Follow step 3 in the [Convex Clerk onboarding guide](https://docs.convex.dev/auth/clerk#get-started) to create a Convex JWT template.
-4. Uncomment the Clerk provider in `convex/auth.config.ts`
-5. Paste the Issuer URL as `CLERK_JWT_ISSUER_DOMAIN` to your dev deployment environment variable settings on the Convex dashboard (see [docs](https://docs.convex.dev/auth/clerk#configuring-dev-and-prod-instances))
-
-If you want to sync Clerk user data via webhooks, check out this [example repo](https://github.com/thomasballinger/convex-clerk-users-table/).
-
-## Learn more
-
-To learn more about developing your project with Convex, check out:
-
-- The [Tour of Convex](https://docs.convex.dev/get-started) for a thorough introduction to Convex principles.
-- The rest of [Convex docs](https://docs.convex.dev/) to learn about all Convex features.
-- [Stack](https://stack.convex.dev/) for in-depth articles on advanced topics.
-
-## Join the community
-
-Join thousands of developers building full-stack apps with Convex:
-
-- Join the [Convex Discord community](https://convex.dev/community) to get help in real-time.
-- Follow [Convex on GitHub](https://github.com/get-convex/), star and contribute to the open-source implementation of Convex.
