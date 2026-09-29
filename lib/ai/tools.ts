@@ -121,7 +121,69 @@ export function createTools(auth: ToolAuth): Record<string, any> {
   const missedInfo = (t: { outcome?: "missed"; missedReason?: string }) =>
     t.outcome === "missed" ? { missed: true, missedReason: t.missedReason } : {};
 
+  /** A note reference: a note id, or its exact title. */
+  async function noteId(ref: unknown): Promise<Id<"notes">> {
+    const text = String(ref ?? "").trim().replace(/^\[\[|\]\]$/g, "");
+    const byTitle = await convex.query(api.notes.byTitle, { title: text });
+    return (byTitle?._id ?? text) as Id<"notes">;
+  }
+
   return {
+    // ═══════════════════════════════════════════
+    // KNOWLEDGE TOOLS (notebooks, notes, the graph)
+    // ═══════════════════════════════════════════
+
+    list_notebooks: ({
+      description: "List the user's notebooks (id, name, note count). Notebooks hold notes: long-form knowledge, plans and decisions.",
+      inputSchema: z.object({}),
+      execute: safe(async () => (await convex.query(api.notebooks.list, {})).map((b: any) => ({ id: b._id, name: b.name, notes: b.noteCount }))),
+    }),
+
+    search_notes: ({
+      description: "Search notes by words in their title or text. Use it before answering questions or planning, to find what the user already wrote down.",
+      inputSchema: z.object({ query: z.string(), limit: z.number().int().min(1).max(50).optional() }),
+      execute: safe(async (args: any) => (await convex.query(api.notes.search, { query: args.query, limit: args.limit }))
+        .map((n: any) => ({ id: n._id, title: n.title, snippet: n.snippet, updatedAt: new Date(n.updatedAt).toISOString() }))),
+    }),
+
+    get_note: ({
+      description: "Read one note in full (by id or exact title), with everything connected to it: tasks and notes it mentions and that mention it, and its recent history.",
+      inputSchema: z.object({ note: z.string().describe("Note id, or its exact title") }),
+      execute: safe(async (args: any) => {
+        const id = await noteId(args.note);
+        const n = await convex.query(api.notes.get, { id });
+        if (!n) return { error: "Note not found" };
+        const related = await convex.query(api.graph.related, { kind: "note", id: n._id });
+        const history = (await convex.query(api.notes.history, { id: n._id })).slice(-15);
+        return { id: n._id, title: n.title, body: n.body, updatedAt: new Date(n.updatedAt).toISOString(), related, history };
+      }),
+    }),
+
+    get_related: ({
+      description: "Everything connected to a task (#142) or a note (id or title): mentions both ways and task links. Call it to gather context before acting on something.",
+      inputSchema: z.object({ task: z.string().optional().describe("Task number like #142, or id"), note: z.string().optional().describe("Note id or exact title") }),
+      execute: safe(async (args: any) => {
+        if (args.task) return await convex.query(api.graph.related, { kind: "task", id: await taskId(args.task) });
+        if (args.note) return await convex.query(api.graph.related, { kind: "note", id: await noteId(args.note) });
+        return { error: "Give a task or a note" };
+      }),
+    }),
+
+    create_note: ({
+      description: "Write a new note in a notebook, in Markdown. Mention tasks as #142 and other notes as [[Note title]] to link them into the user's knowledge.",
+      inputSchema: z.object({ notebookId: z.string(), title: z.string(), body: z.string() }),
+      execute: safe(async (args: any) => ({ id: await convex.mutation(api.notes.create, { notebookId: args.notebookId as Id<"notebooks">, title: args.title, body: args.body }) })),
+    }),
+
+    update_note: ({
+      description: "Change a note's title or replace its body (Markdown). To add to a note, read it with get_note and send the whole new body.",
+      inputSchema: z.object({ note: z.string().describe("Note id or exact title"), title: z.string().optional(), body: z.string().optional() }),
+      execute: safe(async (args: any) => {
+        await convex.mutation(api.notes.update, { id: await noteId(args.note), title: args.title, body: args.body });
+        return { updated: true };
+      }),
+    }),
+
     // ═══════════════════════════════════════════
     // TASK TOOLS
     // ═══════════════════════════════════════════

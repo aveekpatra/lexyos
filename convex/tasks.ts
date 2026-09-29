@@ -4,6 +4,23 @@ import { query, mutation, internalMutation, type MutationCtx } from "./_generate
 import { claimTaskNumber, ensureTaskCounter } from "./lib/taskNumbers";
 import { queueGoogleSync, syncTimeZoneValidator } from "./lib/googleSync";
 import { actorOf, clearHistory, recordChanges, recordCreated, recordOccurrence, type Actor } from "./lib/taskHistory";
+import { dropNode, syncMentions } from "./lib/graph";
+
+/** A task's notes mention tasks (#142) and notes ([[Title]]); keep the graph and both stories in step. */
+async function syncTaskMentions(ctx: MutationCtx, taskId: Id<"tasks">, actor: Actor) {
+  const task = await ctx.db.get("tasks", taskId);
+  if (!task) return;
+  const { added, removed } = await syncMentions(ctx, task.userId, { kind: "task", id: task._id }, task.description ?? "");
+  for (const a of added) {
+    await ctx.db.insert("taskEvents", { taskId: task._id, userId: task.userId, at: Date.now(), actor, field: "mention", to: { kind: a.kind, id: a.id, label: a.label } });
+    if (a.kind === "note") {
+      await ctx.db.insert("noteEvents", { noteId: a.id as Id<"notes">, userId: task.userId, at: Date.now(), actor, field: "mentionedIn", to: { kind: "task", id: task._id, label: `#${task.number ?? ""} ${task.title}`.trim() } });
+    }
+  }
+  for (const r of removed) {
+    await ctx.db.insert("taskEvents", { taskId: task._id, userId: task.userId, at: Date.now(), actor, field: "mention", from: { kind: r.kind, id: r.id } });
+  }
+}
 import type { Doc, Id } from "./_generated/dataModel";
 import {
   recurrenceValidator,
@@ -363,6 +380,7 @@ export const create = mutation({
       userId,
     });
     await recordCreated(ctx, id, actorOf(args));
+    if (args.description) await syncTaskMentions(ctx, id, actorOf(args));
     // Sub-issues and already-linked rows stay off the calendar, as on the web.
     if (args.syncTimeZone && !args.parentTaskId && !args.googleEventId) {
       await queueGoogleSync(ctx, userId, id, "push", args.syncTimeZone);
@@ -542,6 +560,7 @@ export const update = mutation({
 
     await ctx.db.patch("tasks", id, patch);
     await recordChanges(ctx, task, actorOf(args));
+    if ("description" in patch) await syncTaskMentions(ctx, id, actorOf(args));
     // Linking an event is itself a sync step; everything else reconciles the event.
     if (syncTimeZone && typeof args.googleEventId !== "string" && !task.parentTaskId) {
       await queueGoogleSync(ctx, identity.subject, id, "update", syncTimeZone);
@@ -823,6 +842,7 @@ export const remove = mutation({
 
     await ctx.db.delete("tasks", args.id);
     await clearHistory(ctx, args.id);
+    await dropNode(ctx, { kind: "task", id: args.id });
     for (const l of [
       ...(await ctx.db.query("taskLinks").withIndex("by_fromId", (q) => q.eq("fromId", args.id)).collect()),
       ...(await ctx.db.query("taskLinks").withIndex("by_toId", (q) => q.eq("toId", args.id)).collect()),

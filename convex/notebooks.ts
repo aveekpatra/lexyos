@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { agentValidator, getIdentity } from "./lib/actor";
+import { deleteNoteWithHistory } from "./lib/notesLib";
 
 /** Notebooks, in the user's order, each with how many notes it holds. */
 export const list = query({
@@ -55,7 +56,7 @@ export const remove = mutation({
     const book = await ctx.db.get("notebooks", args.id);
     if (!book || book.userId !== identity.subject) throw new Error("Notebook not found");
     const notes = await ctx.db.query("notes").withIndex("by_notebookId", (q) => q.eq("notebookId", args.id)).collect();
-    for (const n of notes) await ctx.db.delete("notes", n._id);
+    for (const n of notes) await deleteNoteWithHistory(ctx, n._id);
     await ctx.db.delete("notebooks", args.id);
   },
 });

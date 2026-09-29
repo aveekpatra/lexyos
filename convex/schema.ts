@@ -100,6 +100,39 @@ export default defineSchema({
     .index("by_fromId", ["fromId"])
     .index("by_toId", ["toId"]),
 
+  // The knowledge graph (convex/lib/graph.ts): what mentions what.
+  graphEdges: defineTable({
+    userId: v.string(),
+    fromKind: v.string(),   // "task" | "note"
+    fromId: v.string(),
+    toKind: v.string(),
+    toId: v.string(),
+    via: v.string(),        // "mention"
+    at: v.number(),
+  })
+    .index("by_from", ["fromKind", "fromId"])
+    .index("by_to", ["toKind", "toId"]),
+
+  // A note's story, like taskEvents: created, renamed, moved, edited, mentions.
+  noteEvents: defineTable({
+    noteId: v.id("notes"),
+    userId: v.string(),
+    at: v.number(),
+    actor: v.string(),
+    field: v.string(),
+    from: v.optional(v.any()),
+    to: v.optional(v.any()),
+  }).index("by_noteId", ["noteId", "at"]),
+
+  // Saved versions of a note, one per editing session (10 minutes).
+  noteRevisions: defineTable({
+    noteId: v.id("notes"),
+    userId: v.string(),
+    at: v.number(),
+    title: v.string(),
+    body: v.string(),
+  }).index("by_noteId", ["noteId", "at"]),
+
   // Notebooks hold notes (Markdown pages), like Notion's top-level pages.
   notebooks: defineTable({
     userId: v.string(),
