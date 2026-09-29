@@ -188,6 +188,21 @@ export function createTools(auth: ToolAuth): Record<string, any> {
       execute: safe(async (args: any) => { await convex.mutation(api.notes.remove, { id: await noteId(args.note) }); return { deleted: true }; }),
     }),
 
+    connect: ({
+      description: "Connect a task and a note, two notes, or two tasks as related, without editing their text. Use this whenever the user asks to link, relate or connect things. Never use subtasks or moves to express a relation.",
+      inputSchema: z.object({
+        task: z.string().optional().describe("Task number like #142"), note: z.string().optional().describe("Note id or exact title"),
+        toTask: z.string().optional().describe("Other task, like #143"), toNote: z.string().optional().describe("Other note, id or exact title"),
+      }),
+      execute: safe(async (args: any) => {
+        const from = args.task ? { kind: "task" as const, id: await taskId(args.task) } : args.note ? { kind: "note" as const, id: await noteId(args.note) } : null;
+        const to = args.toTask ? { kind: "task" as const, id: await taskId(args.toTask) } : args.toNote ? { kind: "note" as const, id: await noteId(args.toNote) } : null;
+        if (!from || !to) return { error: "Give one of task/note and one of toTask/toNote" };
+        await convex.mutation(api.graph.connect, { fromKind: from.kind, fromId: from.id, toKind: to.kind, toId: to.id });
+        return { connected: true };
+      }),
+    }),
+
     link_tasks: ({
       description: "Link two tasks as related (shown on both). Use when work depends on or relates to other work.",
       inputSchema: z.object({ task: z.string().describe("Task number like #142, or id"), to: z.string().describe("The other task's number like #143") }),
@@ -403,7 +418,7 @@ export function createTools(auth: ToolAuth): Record<string, any> {
         recurrence: recurrenceSchema.optional().describe("Set or replace the repeat rule"),
         clearRecurrence: z.boolean().optional().describe("true to stop the task repeating"),
         columnId: z.string().optional().describe("Move to this board column (use 'none' to fall back to the status column)"),
-        parentTaskId: z.string().optional().describe("Make it a subtask of that task (use 'none' to detach)"),
+        parentTaskId: z.string().optional().describe("Make it a subtask of that task (use 'none' to detach). ONLY to split one piece of work into parts. To relate tasks use link_tasks; to relate a task and a note use connect."),
         labels: z.array(z.string()).optional().describe("Replace labels"),
         scheduledDate: z.string().optional().describe("YYYY-MM-DD"),
         location: z.string().optional().describe("Where it happens"),

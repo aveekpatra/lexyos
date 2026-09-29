@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { query } from "./_generated/server";
+import { mutation, query } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { agentValidator, getIdentity } from "./lib/actor";
 
@@ -42,5 +42,44 @@ export const related = query({
       for (const l of await ctx.db.query("taskLinks").withIndex("by_toId", (q) => q.eq("toId", id)).collect()) await push("task", l.fromId, "in", "link");
     }
     return out;
+  },
+});
+
+const kindValidator = v.union(v.literal("task"), v.literal("note"));
+
+/** Checks a node exists and belongs to the user. */
+async function owned(ctx: { db: any }, userId: string, kind: "task" | "note", id: string) {
+  const doc = await ctx.db.get(kind === "task" ? "tasks" : "notes", id);
+  return doc && doc.userId === userId ? doc : null;
+}
+
+/**
+ * Connects any two nodes directly (via "link"), without touching their text.
+ * Mentions stay the way text links things; this is for "these belong together".
+ */
+export const connect = mutation({
+  args: { agent: agentValidator, fromKind: kindValidator, fromId: v.string(), toKind: kindValidator, toId: v.string() },
+  handler: async (ctx, args) => {
+    const identity = await getIdentity(ctx, args.agent);
+    if (!identity) throw new Error("Not authenticated");
+    const userId = identity.subject;
+    if (args.fromKind === args.toKind && args.fromId === args.toId) throw new Error("Cannot connect something to itself");
+    const [a, b] = [await owned(ctx, userId, args.fromKind, args.fromId), await owned(ctx, userId, args.toKind, args.toId)];
+    if (!a || !b) throw new Error("Not found");
+    const existing = await ctx.db.query("graphEdges").withIndex("by_from", (q) => q.eq("fromKind", args.fromKind).eq("fromId", args.fromId)).collect();
+    if (existing.some((e) => e.via === "link" && e.toKind === args.toKind && e.toId === args.toId)) return;
+    await ctx.db.insert("graphEdges", { userId, fromKind: args.fromKind, fromId: args.fromId, toKind: args.toKind, toId: args.toId, via: "link", at: Date.now() });
+  },
+});
+
+export const disconnect = mutation({
+  args: { agent: agentValidator, fromKind: kindValidator, fromId: v.string(), toKind: kindValidator, toId: v.string() },
+  handler: async (ctx, args) => {
+    const identity = await getIdentity(ctx, args.agent);
+    if (!identity) throw new Error("Not authenticated");
+    for (const [fk, fi, tk, ti] of [[args.fromKind, args.fromId, args.toKind, args.toId], [args.toKind, args.toId, args.fromKind, args.fromId]] as const) {
+      const edges = await ctx.db.query("graphEdges").withIndex("by_from", (q) => q.eq("fromKind", fk).eq("fromId", fi)).collect();
+      for (const e of edges) if (e.via === "link" && e.toKind === tk && e.toId === ti && e.userId === identity.subject) await ctx.db.delete("graphEdges", e._id);
+    }
   },
 });

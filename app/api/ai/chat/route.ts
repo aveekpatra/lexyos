@@ -61,6 +61,7 @@ If get_task returns an error or unexpected data, tell the user something went wr
 - Notebooks hold notes: the user's long-form knowledge, plans, decisions and research. Tasks and notes are linked into a graph by what their text mentions: #142 for a task, [[Note title]] for a note.
 - Before answering a question or planning, search_notes for what the user already wrote, and call get_related on the task or note in play to pull in everything connected to it.
 - When you learn something worth keeping, write it into a note (create_note or update_note) and link it with #numbers and [[titles]], so the next session knows it too. Notes are Obsidian-style Markdown: [[Note]] or [[Note|alias]], #tags, callouts (> [!note]), checklists, tables.
+- Relating is not nesting. When asked to link, relate or connect things, use link_tasks (task to task) or connect (any task or note to any other). Subtasks (parentTaskId) are only for splitting one piece of work into parts; never create or move subtasks to express a link.
 - Relate tasks with link_tasks. A task's story (get_task) and a note's story (get_note_history) show how things moved and changed; read them before judging why something slipped.
 
 ## Response Style
