@@ -29,6 +29,7 @@ import {
   IoCloudOffline,
   IoEllipsisHorizontal,
   IoFileTrayFull,
+  IoBook,
   IoHelpCircle,
   IoMoon,
   IoSearch,
@@ -193,6 +194,13 @@ export function Sidebar({ onOpenSearch, onOpenHelp, onOpenGoogle, onOpenSettings
           onClick={() => router.push("/timeline?view=overdue")}
           badge={overdueCount}
           badgeTone="danger"
+        />
+        <NavRow
+          icon={IoBook}
+          label="Notes"
+          collapsed={collapsed}
+          active={pathname.startsWith("/notes")}
+          onClick={() => router.push("/notes")}
         />
       </nav>
 

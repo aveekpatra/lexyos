@@ -17,7 +17,7 @@ import { format, parseISO, isValid } from "date-fns";
 import {
   IoSearch, IoAdd, IoSparkles, IoFileTrayFull, IoAlertCircle, IoCalendar, IoGrid, IoTime,
   IoSunny, IoMoon, IoHelpCircle, IoLogoGoogle, IoSync, IoFolder, IoArchive, IoReturnDownBack,
-  IoChevronUp, IoChevronDown, IoCheckmarkCircle, IoEllipseOutline, IoSettings,
+  IoChevronUp, IoChevronDown, IoCheckmarkCircle, IoEllipseOutline, IoSettings, IoDocumentText, IoBook,
 } from "react-icons/io5";
 
 /*
@@ -30,7 +30,7 @@ import {
 
 type Row = {
   id: string;
-  group: "Actions" | "Tasks" | "Projects" | "Go to" | "Settings";
+  group: "Actions" | "Tasks" | "Notes" | "Projects" | "Go to" | "Settings";
   glyph: React.ReactNode;
   title: React.ReactNode;
   subtitle?: string;
@@ -39,7 +39,7 @@ type Row = {
   run: () => void;
 };
 
-const GROUP_ORDER: Row["group"][] = ["Actions", "Tasks", "Projects", "Go to", "Settings"];
+const GROUP_ORDER: Row["group"][] = ["Actions", "Tasks", "Notes", "Projects", "Go to", "Settings"];
 
 export function UnifiedSearch({ open, onOpenChange, onAskAI, onNewProject, onOpenHelp, onOpenGoogle, onOpenSettings }: {
   open: boolean;
@@ -63,6 +63,7 @@ export function UnifiedSearch({ open, onOpenChange, onAskAI, onNewProject, onOpe
   const [active, setActive] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
   const q = query.trim().toLowerCase();
+  const noteHits = useQuery(api.notes.search, open && query.trim() ? { query: query.trim(), limit: 6 } : "skip");
 
   const close = () => { setQuery(""); setActive(0); onOpenChange(false); };
   const go = (fn: () => void) => () => { close(); fn(); };
@@ -132,6 +133,18 @@ export function UnifiedSearch({ open, onOpenChange, onAskAI, onNewProject, onOpe
       }
     }
 
+    // Notes: title and body matches
+    for (const n of q ? noteHits ?? [] : []) {
+      out.push({
+        id: `note-${n._id}`, group: "Notes",
+        glyph: <Glyph icon={IoDocumentText} />,
+        title: n.title || "Untitled",
+        subtitle: n.snippet || undefined,
+        keywords: "",
+        run: go(() => router.push(`/notes/${n._id}`)),
+      });
+    }
+
     // Projects: all of them, archived marked
     for (const p of (projects ?? []).filter((p) => !q || p.name.toLowerCase().includes(q) || (p.description ?? "").toLowerCase().includes(q))) {
       out.push({
@@ -148,6 +161,7 @@ export function UnifiedSearch({ open, onOpenChange, onAskAI, onNewProject, onOpe
     // Views
     const nav: Row[] = [
       { id: "go-inbox", group: "Go to", glyph: <Glyph icon={IoFileTrayFull} />, title: "Inbox", keywords: "inbox home board", run: go(() => router.push("/timeline")) },
+      { id: "go-notes", group: "Go to", glyph: <Glyph icon={IoBook} />, title: "Notes", keywords: "notes notebooks docs", run: go(() => router.push("/notes")) },
       { id: "go-overdue", group: "Go to", glyph: <Glyph icon={IoAlertCircle} />, title: "Overdue", keywords: "overdue late", run: go(() => router.push("/timeline?view=overdue")) },
       { id: "go-today", group: "Go to", glyph: <Glyph icon={IoCalendar} />, title: "Today", subtitle: "Days view on today", keywords: "today days calendar", run: go(() => router.push(`/timeline?date=${format(new Date(), "yyyy-MM-dd")}`)) },
       { id: "go-overview", group: "Go to", glyph: <Glyph icon={IoGrid} />, title: "Overview", subtitle: "Today, this week, next week, month", keywords: "overview week month", run: go(() => { router.push("/timeline"); setKanbanView("overview"); }) },
@@ -165,7 +179,7 @@ export function UnifiedSearch({ open, onOpenChange, onAskAI, onNewProject, onOpe
     out.push(...nav.filter(matches), ...settings.filter(matches));
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, query, tasks, projects, theme, timeboxOpen]);
+  }, [q, query, tasks, projects, noteHits, theme, timeboxOpen]);
 
   const grouped = useMemo(() => GROUP_ORDER.map((g) => ({ g, items: rows.filter((r) => r.group === g) })).filter((x) => x.items.length), [rows]);
   const flat = useMemo(() => grouped.flatMap((x) => x.items), [grouped]);
@@ -194,7 +208,7 @@ export function UnifiedSearch({ open, onOpenChange, onAskAI, onNewProject, onOpe
               autoFocus
               value={query}
               onChange={(e) => { setQuery(e.target.value); setActive(0); }}
-              placeholder="Search tasks and projects, or type a command"
+              placeholder="Search tasks, notes and projects, or type a command"
               className="h-[52px] flex-1 bg-transparent text-[15px] text-text-strong outline-none placeholder:text-text-faint"
             />
             {q && (

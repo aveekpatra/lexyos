@@ -47,6 +47,7 @@ import {
 import { ProjectGlyph } from "@/components/ui/project-glyph";
 import { isMissed, useMarkMissed, MissedMark } from "@/components/tasks/outcome";
 import { setOpenTask } from "@/lib/task-target";
+import { TaskConnections, TaskActivity } from "@/components/task-detail/TaskStory";
 
 /*
  * Task page, Linear issue layout on the Liquid Glass two-layer model:
@@ -62,7 +63,7 @@ import { setOpenTask } from "@/lib/task-target";
  */
 
 const DESCRIPTION_PLACEHOLDER =
-  "What is this about, why it matters, links, decisions, what done looks like. Type '#' for a heading, '-' for a list, '[ ]' for a checklist.";
+  "What is this about, why it matters, decisions, what done looks like. Type @ or [[ to link a task or note, # and a number for a task; select words and press \u2318K to link them.";
 
 export default function TaskDetail({ taskId }: { taskId: Id<"tasks"> }) {
   const router = useRouter();
@@ -340,6 +341,9 @@ export default function TaskDetail({ taskId }: { taskId: Id<"tasks"> }) {
                 </div>
               </div>
             </section>
+
+            <TaskConnections task={task} />
+            <TaskActivity task={task} />
           </main>
 
           {/* Properties rail */}
