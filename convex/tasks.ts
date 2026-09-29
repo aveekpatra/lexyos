@@ -140,6 +140,90 @@ export const getById = query({
   },
 });
 
+/**
+ * Links between tasks, by task number (#142). A link reads the same from both
+ * ends; linking again is a no-op, and a task never links to itself.
+ */
+export const link = mutation({
+  args: { agent: agentValidator, id: v.id("tasks"), number: v.number(), syncTimeZone: syncTimeZoneValidator },
+  handler: async (ctx, args) => {
+    const identity = await getIdentity(ctx, args.agent);
+    if (!identity) throw new Error("Not authenticated");
+    const task = await ctx.db.get("tasks", args.id);
+    if (!task || task.userId !== identity.subject) throw new Error("Task not found");
+    const target = await ctx.db
+      .query("tasks")
+      .withIndex("by_userId_and_number", (q) => q.eq("userId", identity.subject).eq("number", args.number))
+      .first();
+    if (!target) throw new Error(`No task #${args.number}`);
+    if (target._id === task._id) throw new Error("A task cannot link to itself");
+    const existing = await linkBetween(ctx, task._id, target._id);
+    if (existing) return existing._id;
+    const id = await ctx.db.insert("taskLinks", { userId: identity.subject, fromId: task._id, toId: target._id, createdAt: Date.now() });
+    const actor = actorOf(args);
+    await ctx.db.insert("taskEvents", { taskId: task._id, userId: identity.subject, at: Date.now(), actor, field: "link", to: target.number });
+    await ctx.db.insert("taskEvents", { taskId: target._id, userId: identity.subject, at: Date.now(), actor, field: "link", to: task.number });
+    return id;
+  },
+});
+
+export const unlink = mutation({
+  args: { agent: agentValidator, id: v.id("tasks"), otherId: v.id("tasks"), syncTimeZone: syncTimeZoneValidator },
+  handler: async (ctx, args) => {
+    const identity = await getIdentity(ctx, args.agent);
+    if (!identity) throw new Error("Not authenticated");
+    const row = await linkBetween(ctx, args.id, args.otherId);
+    if (!row || row.userId !== identity.subject) return;
+    await ctx.db.delete("taskLinks", row._id);
+    const [a, b] = [await ctx.db.get("tasks", args.id), await ctx.db.get("tasks", args.otherId)];
+    const actor = actorOf(args);
+    if (a) await ctx.db.insert("taskEvents", { taskId: a._id, userId: identity.subject, at: Date.now(), actor, field: "link", from: b?.number });
+    if (b) await ctx.db.insert("taskEvents", { taskId: b._id, userId: identity.subject, at: Date.now(), actor, field: "link", from: a?.number });
+  },
+});
+
+async function linkBetween(ctx: MutationCtx, a: Id<"tasks">, b: Id<"tasks">) {
+  const forward = await ctx.db.query("taskLinks").withIndex("by_fromId", (q) => q.eq("fromId", a)).collect();
+  const hit = forward.find((l) => l.toId === b);
+  if (hit) return hit;
+  const back = await ctx.db.query("taskLinks").withIndex("by_fromId", (q) => q.eq("fromId", b)).collect();
+  return back.find((l) => l.toId === a) ?? null;
+}
+
+/** The tasks linked to this one, from either end, done ones included. */
+export const links = query({
+  args: { agent: agentValidator, id: v.id("tasks") },
+  handler: async (ctx, args) => {
+    const identity = await getIdentity(ctx, args.agent);
+    if (!identity) return [];
+    const task = await ctx.db.get("tasks", args.id);
+    if (!task || task.userId !== identity.subject) return [];
+    const rows = [
+      ...(await ctx.db.query("taskLinks").withIndex("by_fromId", (q) => q.eq("fromId", args.id)).collect()).map((l) => l.toId),
+      ...(await ctx.db.query("taskLinks").withIndex("by_toId", (q) => q.eq("toId", args.id)).collect()).map((l) => l.fromId),
+    ];
+    const out = [];
+    for (const id of rows) {
+      const t = await ctx.db.get("tasks", id);
+      if (t) out.push(t);
+    }
+    return out;
+  },
+});
+
+/** A task by number for the given user, for "#142" references. */
+export const byNumber = query({
+  args: { agent: agentValidator, number: v.number() },
+  handler: async (ctx, args) => {
+    const identity = await getIdentity(ctx, args.agent);
+    if (!identity) return null;
+    return await ctx.db
+      .query("tasks")
+      .withIndex("by_userId_and_number", (q) => q.eq("userId", identity.subject).eq("number", args.number))
+      .first();
+  },
+});
+
 /** A task's story, oldest first (convex/lib/taskHistory.ts). */
 export const history = query({
   args: { agent: agentValidator, id: v.id("tasks") },
@@ -739,6 +823,10 @@ export const remove = mutation({
 
     await ctx.db.delete("tasks", args.id);
     await clearHistory(ctx, args.id);
+    for (const l of [
+      ...(await ctx.db.query("taskLinks").withIndex("by_fromId", (q) => q.eq("fromId", args.id)).collect()),
+      ...(await ctx.db.query("taskLinks").withIndex("by_toId", (q) => q.eq("toId", args.id)).collect()),
+    ]) await ctx.db.delete("taskLinks", l._id);
 
     // The queue row outlives the task; it carries the event to delete.
     if (args.syncTimeZone && task.googleEventId && !task.googleRecurringEventId) {

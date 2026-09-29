@@ -90,6 +90,36 @@ export default defineSchema({
     to: v.optional(v.any()),
   }).index("by_taskId", ["taskId", "at"]),
 
+  // Task to task links, by relation "related" (both directions read alike).
+  taskLinks: defineTable({
+    userId: v.string(),
+    fromId: v.id("tasks"),
+    toId: v.id("tasks"),
+    createdAt: v.number(),
+  })
+    .index("by_fromId", ["fromId"])
+    .index("by_toId", ["toId"]),
+
+  // Notebooks hold notes (Markdown pages), like Notion's top-level pages.
+  notebooks: defineTable({
+    userId: v.string(),
+    name: v.string(),
+    icon: v.optional(v.string()),
+    color: v.optional(v.string()),
+    sortOrder: v.number(),
+  }).index("by_userId", ["userId"]),
+
+  notes: defineTable({
+    userId: v.string(),
+    notebookId: v.id("notebooks"),
+    title: v.string(),
+    body: v.string(),
+    sortOrder: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_notebookId", ["notebookId", "updatedAt"])
+    .index("by_userId", ["userId"]),
+
   projects: defineTable({
     name: v.string(),
     description: v.optional(v.string()),
