@@ -67,6 +67,34 @@ async function syncNoteMentions(ctx: MutationCtx, note: Doc<"notes">, body: stri
   for (const r of removed) await event(ctx, note, who, "mention", { kind: r.kind, id: r.id }, undefined);
 }
 
+/**
+ * A note got a title (created, or renamed): texts that already said
+ * [[That title]] now resolve, and texts naming the old title no longer do.
+ * Links are resolved on save, so without this a note written before the
+ * notes it links to would never connect to them.
+ */
+async function relinkTitles(ctx: MutationCtx, userId: string, titles: string[], who: string, except: Id<"notes">) {
+  const wanted = titles.map((t) => t.trim().toLowerCase()).filter(Boolean);
+  if (!wanted.length) return;
+  const names = (text: string) => [...text.matchAll(/\[\[([^\]\n]{1,160})\]\]/g)]
+    .map((m) => m[1].split("|")[0].split("#")[0].trim().toLowerCase());
+  const mentions = (text: string | undefined) => !!text && text.includes("[[") && names(text).some((n) => wanted.includes(n));
+  for (const n of await ctx.db.query("notes").withIndex("by_userId", (q) => q.eq("userId", userId)).collect()) {
+    if (n._id !== except && mentions(n.body)) await syncNoteMentions(ctx, n, n.body, who);
+  }
+  for (const t of await ctx.db.query("tasks").withIndex("by_userId", (q) => q.eq("userId", userId)).collect()) {
+    if (!mentions(t.description)) continue;
+    const { added, removed } = await syncMentions(ctx, userId, { kind: "task", id: t._id }, t.description ?? "");
+    for (const a of added) {
+      await ctx.db.insert("taskEvents", { taskId: t._id, userId, at: Date.now(), actor: who, field: "mention", to: { kind: a.kind, id: a.id, label: a.label } });
+      if (a.kind === "note") {
+        await ctx.db.insert("noteEvents", { noteId: a.id as Id<"notes">, userId, at: Date.now(), actor: who, field: "mentionedIn", to: { kind: "task", id: t._id, label: `#${t.number ?? ""} ${t.title}`.trim() } });
+      }
+    }
+    for (const r of removed) await ctx.db.insert("taskEvents", { taskId: t._id, userId, at: Date.now(), actor: who, field: "mention", from: { kind: r.kind, id: r.id } });
+  }
+}
+
 /** The notes of a notebook, most recently edited first, without their bodies. */
 export const list = query({
   args: { agent: agentValidator, notebookId: v.id("notebooks") },
@@ -173,6 +201,7 @@ export const create = mutation({
       await ctx.db.insert("noteRevisions", { noteId: id, userId: note.userId, at: Date.now(), title: note.title, body: note.body });
       await syncNoteMentions(ctx, note, note.body, who);
     }
+    if (note.title) await relinkTitles(ctx, note.userId, [note.title], who, id);
     return id;
   },
 });
@@ -211,7 +240,10 @@ export const update = mutation({
     const title = (patch.title as string | undefined) ?? note.title;
     const body = (patch.body as string | undefined) ?? note.body;
     if (title !== note.title || body !== note.body) await recordEdit(ctx, note, { title, body }, who);
-    if (args.body !== undefined && args.body !== note.body) await syncNoteMentions(ctx, { ...note, title }, body, who);
+    // Every save re-reads the links, so saving again repairs any that were
+    // written before their target existed.
+    if (args.body !== undefined) await syncNoteMentions(ctx, { ...note, title }, body, who);
+    if (title !== note.title) await relinkTitles(ctx, note.userId, [note.title, title], who, note._id);
   },
 });
 
