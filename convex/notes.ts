@@ -120,6 +120,17 @@ export const search = query({
   },
 });
 
+/** Every note title, newest first: the [[ picker in editors. */
+export const titles = query({
+  args: { agent: agentValidator },
+  handler: async (ctx, args) => {
+    const identity = await getIdentity(ctx, args.agent);
+    if (!identity) return [];
+    const notes = await ctx.db.query("notes").withIndex("by_userId", (q) => q.eq("userId", identity.subject)).collect();
+    return notes.sort((a, b) => b.updatedAt - a.updatedAt).map((n) => ({ _id: n._id, notebookId: n.notebookId, title: n.title }));
+  },
+});
+
 /** A note's story, oldest first. */
 export const history = query({
   args: { agent: agentValidator, id: v.id("notes") },
