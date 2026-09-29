@@ -53,22 +53,9 @@ export async function syncTaskUpdateToGoogle(
   // A series mirror is never written back; Google (or Todoist) owns the rule.
   if (task.googleRecurringEventId) return null;
 
-  // clearDueDate resets to today in Convex — update the Google event to today too
-  if ("clearDueDate" in changes && changes.clearDueDate && task.googleEventId) {
-    const today = (changes.userDate as string) || localDateStr(new Date());
-    const tomorrow = addDaysToDateStr(today, 1);
-    try {
-      const { updateGoogleEvent } = await import("@/app/actions/calendarSync");
-      // Reset to all-day event on today
-      await updateGoogleEvent(task.googleCalendarId || "primary", task.googleEventId, {
-        start: { date: today },
-        end: { date: tomorrow },
-      });
-    } catch (err) {
-      console.warn("Failed to update Google event on date clear:", err);
-    }
-    return null;
-  }
+  // Clearing the date removes it; there is no day to move the event to, so
+  // leave the Google event where it is.
+  if ("clearDueDate" in changes && changes.clearDueDate) return null;
 
   // If task already has a Google event, update it
   if (task.googleEventId) {

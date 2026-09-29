@@ -408,18 +408,19 @@ export const update = mutation({
       patch.missedReason = undefined;
     }
 
-    // Clearing date resets to today — tasks must always have a date to stay visible.
-    // Prefer client-supplied userDate (local timezone) over server UTC date.
+    // Clearing the date removes it, and the times that only mean something on
+    // a day. (It used to reset to today, which the agent's "remove the date"
+    // could never do.) Undated tasks live on their project board and in search.
+    void userDate;
     if (clearDueDate) {
-      const today = userDate || new Date().toISOString().slice(0, 10);
-      patch.dueDate = today;
-      patch.scheduledDate = today;
+      patch.dueDate = undefined;
+      patch.scheduledDate = undefined;
+      patch.dueTime = undefined;
+      patch.scheduledStartTime = undefined;
+      patch.scheduledEndTime = undefined;
     }
     if (clearDueTime) patch.dueTime = undefined;
-    if (clearScheduledDate) {
-      const today = userDate || new Date().toISOString().slice(0, 10);
-      patch.scheduledDate = today;
-    }
+    if (clearScheduledDate) patch.scheduledDate = undefined;
     if (clearScheduledStartTime) patch.scheduledStartTime = undefined;
     if (clearScheduledEndTime) patch.scheduledEndTime = undefined;
     if (clearProjectId) patch.projectId = undefined;
