@@ -24,7 +24,8 @@ export async function resolveMentions(ctx: MutationCtx, userId: string, text: st
     const t = await ctx.db.query("tasks").withIndex("by_userId_and_number", (q) => q.eq("userId", userId).eq("number", n)).first();
     if (t && !(self.kind === "task" && self.id === t._id)) out.set(`task:${t._id}`, { kind: "task", id: t._id, label: `#${n}` });
   }
-  const titles = [...text.matchAll(NOTE_REF)].map((m) => m[1].trim().toLowerCase()).filter(Boolean);
+  // Obsidian forms: [[Title|alias]], [[Title#Heading]], ![[Title]] all point at Title.
+  const titles = [...text.matchAll(NOTE_REF)].map((m) => m[1].split("|")[0].split("#")[0].trim().toLowerCase()).filter(Boolean);
   if (titles.length) {
     const notes = await ctx.db.query("notes").withIndex("by_userId", (q) => q.eq("userId", userId)).collect();
     for (const title of titles) {

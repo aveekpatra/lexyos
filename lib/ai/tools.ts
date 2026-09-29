@@ -169,6 +169,57 @@ export function createTools(auth: ToolAuth): Record<string, any> {
       }),
     }),
 
+    list_notes: ({
+      description: "List the notes in one notebook (id, title, snippet, last edit), newest edit first.",
+      inputSchema: z.object({ notebookId: z.string() }),
+      execute: safe(async (args: any) => (await convex.query(api.notes.list, { notebookId: args.notebookId as Id<"notebooks"> }))
+        .map((n: any) => ({ id: n._id, title: n.title, snippet: n.snippet, updatedAt: new Date(n.updatedAt).toISOString() }))),
+    }),
+
+    create_notebook: ({
+      description: "Create a notebook (a top-level collection of notes, like a Notion page or an Obsidian folder).",
+      inputSchema: z.object({ name: z.string(), icon: z.string().optional().describe("Icon name from the project icon set, e.g. IoBook"), color: z.string().optional().describe("Hex colour") }),
+      execute: safe(async (args: any) => ({ id: await convex.mutation(api.notebooks.create, { name: args.name, icon: args.icon, color: args.color }) })),
+    }),
+
+    delete_note: ({
+      description: "Delete a note, with its history and links. Irreversible: ask the user first.",
+      inputSchema: z.object({ note: z.string().describe("Note id or exact title") }),
+      execute: safe(async (args: any) => { await convex.mutation(api.notes.remove, { id: await noteId(args.note) }); return { deleted: true }; }),
+    }),
+
+    link_tasks: ({
+      description: "Link two tasks as related (shown on both). Use when work depends on or relates to other work.",
+      inputSchema: z.object({ task: z.string().describe("Task number like #142, or id"), to: z.string().describe("The other task's number like #143") }),
+      execute: safe(async (args: any) => {
+        const m = /^#?(\d+)$/.exec(String(args.to).trim());
+        if (!m) return { error: "Give the other task as a number like #143" };
+        await convex.mutation(api.tasks.link, { id: await taskId(args.task), number: Number(m[1]) });
+        return { linked: true };
+      }),
+    }),
+
+    unlink_tasks: ({
+      description: "Remove the link between two tasks.",
+      inputSchema: z.object({ task: z.string(), other: z.string() }),
+      execute: safe(async (args: any) => {
+        await convex.mutation(api.tasks.unlink, { id: await taskId(args.task), otherId: await taskId(args.other) });
+        return { unlinked: true };
+      }),
+    }),
+
+    get_note_history: ({
+      description: "A note's full story (created, renamed, moved, edited, linked) and its saved versions, to see how thinking changed over time.",
+      inputSchema: z.object({ note: z.string().describe("Note id or exact title"), withVersions: z.boolean().optional() }),
+      execute: safe(async (args: any) => {
+        const id = await noteId(args.note);
+        const story = (await convex.query(api.notes.history, { id }))
+          .map((e: any) => ({ at: new Date(e.at).toISOString(), by: e.actor, change: e.field, from: e.from, to: e.to }));
+        const versions = args.withVersions ? (await convex.query(api.notes.revisions, { id })).map((r: any) => ({ at: new Date(r.at).toISOString(), title: r.title, body: r.body })) : undefined;
+        return { story, versions };
+      }),
+    }),
+
     create_note: ({
       description: "Write a new note in a notebook, in Markdown. Mention tasks as #142 and other notes as [[Note title]] to link them into the user's knowledge.",
       inputSchema: z.object({ notebookId: z.string(), title: z.string(), body: z.string() }),
@@ -227,7 +278,7 @@ export function createTools(auth: ToolAuth): Record<string, any> {
     }),
 
     get_task: ({
-      description: `One task in full: every property, its description (the task's own context), and its subtasks. Use it to read state after a write, and before editing a task you did not just fetch.`,
+      description: `One task in full: every property, its description (the task's own context), its subtasks, everything connected to it (linked tasks, notes that mention it or that it mentions), and its recent story (moves, reschedules, completions). Use it to read state after a write, and before editing a task you did not just fetch.`,
       inputSchema: z.object({
         id: z.string().describe("Task ID to retrieve (a task id, or its number such as #142)"),
       }),
@@ -235,7 +286,12 @@ export function createTools(auth: ToolAuth): Record<string, any> {
         const task = await convex.query(api.tasks.getById, { id: await taskId(args.id) });
         if (!task) return { error: "Task not found" };
         const subtasks = await convex.query(api.tasks.getSubtasks, { parentTaskId: task._id });
+        const connections = await convex.query(api.graph.related, { kind: "task", id: task._id });
+        const story = (await convex.query(api.tasks.history, { id: task._id })).slice(-20)
+          .map((e: any) => ({ at: new Date(e.at).toISOString(), by: e.actor, change: e.field, from: e.from, to: e.to }));
         return {
+          connections,
+          story,
           id: task._id,
           number: num(task.number),
           title: task.title,
