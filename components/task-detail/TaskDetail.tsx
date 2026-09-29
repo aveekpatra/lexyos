@@ -403,6 +403,7 @@ export default function TaskDetail({ taskId }: { taskId: Id<"tasks"> }) {
                 <PropertyRow label="Date">
                   <DatePickerPopover
                     value={task.dueDate || undefined}
+                    allowRemove={!!task.projectId}
                     onChange={(d) =>
                       syncUpdate(d ? { id: task._id, dueDate: d } : { id: task._id, clearDueDate: true, userDate: format(new Date(), "yyyy-MM-dd") })
                     }

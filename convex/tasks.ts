@@ -409,9 +409,7 @@ export const update = mutation({
     }
 
     // Clearing the date removes it, and the times that only mean something on
-    // a day. (It used to reset to today, which the agent's "remove the date"
-    // could never do.) Undated tasks live on their project board and in search.
-    void userDate;
+    // a day. Only project tasks may stay undated (enforced below).
     if (clearDueDate) {
       patch.dueDate = undefined;
       patch.scheduledDate = undefined;
@@ -444,6 +442,18 @@ export const update = mutation({
           patch.scheduledDate = aligned;
         }
       }
+    }
+
+    // Every task has a project or a date. Only project tasks may be undated;
+    // an inbox task that would lose its last anchor lands on today instead.
+    const willHaveProject = "projectId" in patch ? !!patch.projectId : !!task.projectId;
+    const willHaveDate = "dueDate" in patch || "scheduledDate" in patch
+      ? !!(patch.dueDate ?? patch.scheduledDate)
+      : !!(task.dueDate || task.scheduledDate);
+    if (!willHaveProject && !willHaveDate) {
+      const today = userDate || new Date().toISOString().slice(0, 10);
+      patch.dueDate = today;
+      patch.scheduledDate = today;
     }
 
     await ctx.db.patch("tasks", id, patch);

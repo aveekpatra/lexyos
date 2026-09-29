@@ -324,6 +324,7 @@ const KanbanCard = React.memo(function KanbanCard({ task, isOverdue, context = "
             {!isSidebar && !hideDate && (
               <DatePickerPopover
                 value={task.dueDate}
+                allowRemove={!!task.projectId}
                 onChange={(date) => syncUpdateTask({ id: task._id, ...(date ? { dueDate: date } : { clearDueDate: true, userDate: format(new Date(), "yyyy-MM-dd") }) })}
               >
                 <TaskChip active={!!dateStr} className={dateStr ? "" : "opacity-0 group-hover:opacity-100"}>

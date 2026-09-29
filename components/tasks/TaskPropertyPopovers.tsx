@@ -48,12 +48,15 @@ interface DatePickerPopoverProps {
   value: string | undefined; // "YYYY-MM-DD"
   onChange: (date: string | undefined) => void;
   children: React.ReactNode;
+  /** Offer "Remove". Tasks: only in a project; an inbox task always has a date. */
+  allowRemove?: boolean;
 }
 
 export const DatePickerPopover = memo(function DatePickerPopover({
   value,
   onChange,
   children,
+  allowRemove = true,
 }: DatePickerPopoverProps) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -149,7 +152,7 @@ export const DatePickerPopover = memo(function DatePickerPopover({
             </button>
           ))}
         </div>
-        {value && (
+        {value && allowRemove && (
           <div className="mt-1.5">
             <button data-row onClick={() => select(undefined)} className={removeClass}>
               <IoTrash size={14} />

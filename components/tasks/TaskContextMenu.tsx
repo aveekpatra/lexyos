@@ -149,7 +149,7 @@ export function TaskContextMenu({ task, children, className, style }: {
                   {task.dueDate === d.date && <IoCheckmarkCircle className="ml-auto size-3.5 !text-brand-strong" />}
                 </MenuItem>
               ))}
-              {task.dueDate && (
+              {task.dueDate && task.projectId && (
                 <>
                   <MenuSeparator />
                   <MenuItem

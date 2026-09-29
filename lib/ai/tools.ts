@@ -291,7 +291,7 @@ export function createTools(auth: ToolAuth): Record<string, any> {
         location: z.string().optional().describe("Where it happens"),
         isAllDay: z.boolean().optional().describe("true for an all-day item with no clock time"),
         position: z.enum(["top", "bottom"]).optional().describe("Move it to the top or bottom of its list or board column"),
-        clearDueDate: z.boolean().optional().describe("Remove the date entirely"),
+        clearDueDate: z.boolean().optional().describe("Remove the date. Only tasks in a project may be undated; an inbox task gets today instead"),
         clearDueTime: z.boolean().optional().describe("Make it all-day"),
         clearScheduledStartTime: z.boolean().optional().describe("Remove the start time"),
         clearScheduledEndTime: z.boolean().optional().describe("Remove the end time, leaving an open-ended block"),
