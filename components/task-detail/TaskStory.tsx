@@ -144,6 +144,7 @@ export function TaskActivity({ task }: { task: Doc<"tasks"> }) {
         return { icon: IoRepeat, text: e.to == null ? "Stopped repeating" : e.from == null ? "Set to repeat" : "Repeat rule changed" };
       case "parentTaskId": return { icon: IoReturnDownForward, text: e.to ? "Made a subtask" : "No longer a subtask" };
       case "columnId": return { icon: IoGrid, text: "Moved to another column" };
+      case "source": return { icon: IoCalendar, text: e.to === "local" ? "Converted from a calendar event" : "Became a calendar event" };
       case "description": return { icon: IoReorderThree, text: "Description edited" };
       case "mention": {
         const label = str(field(e.to, "label"));

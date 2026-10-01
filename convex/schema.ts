@@ -84,7 +84,7 @@ export default defineSchema({
     at: v.number(),
     /** "web" | "mac" | "agent" | "google" | "system" */
     actor: v.string(),
-    /** "created", "occurrence", or a field: day, time, priority, status, outcome, title, projectId, recurrence, parentTaskId, columnId, description */
+    /** "created", "occurrence", or a field: day, time, priority, status, outcome, title, projectId, recurrence, parentTaskId, columnId, description, source */
     field: v.string(),
     from: v.optional(v.any()),
     to: v.optional(v.any()),

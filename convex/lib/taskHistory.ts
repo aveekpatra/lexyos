@@ -35,6 +35,7 @@ function view(t: Doc<"tasks">): View {
     parentTaskId: t.parentTaskId,
     columnId: t.columnId,
     description: t.description ? "set" : undefined,
+    source: t.source,
   };
 }
 

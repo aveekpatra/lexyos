@@ -993,6 +993,47 @@ function parseGoogleDateTime(
 }
 
 /**
+ * Turns a task imported from Google Calendar into an ordinary task. The event
+ * stays linked, but the task owns it from now on: a pull no longer deletes the
+ * task when the event goes, it counts as overdue like any task, and edits here
+ * are what sync. A row mirroring a repeating Google series is refused, because
+ * Google owns that rule.
+ */
+export const convertFromGoogle = mutation({
+  args: { agent: agentValidator,
+    id: v.id("tasks"),
+    projectId: v.optional(v.id("projects")),
+    columnId: v.optional(v.string()),
+    priority: v.optional(v.union(v.literal("p1"), v.literal("p2"), v.literal("p3"), v.literal("p4"))),
+  },
+  handler: async (ctx, args) => {
+    const identity = await getIdentity(ctx, args.agent);
+    if (!identity) throw new Error("Not authenticated");
+    const task = await ctx.db.get("tasks", args.id);
+    if (!task || task.userId !== identity.subject) throw new Error("Task not found");
+    if (task.source !== "google_calendar") throw new Error("This task is not a calendar event, nothing to convert");
+    if (task.googleRecurringEventId) {
+      throw new Error("This event is a repeating series in Google Calendar; its rule lives there, so it can't be converted");
+    }
+    if (args.projectId) {
+      const project = await ctx.db.get("projects", args.projectId);
+      if (!project || project.userId !== identity.subject) throw new Error("Project not found");
+    }
+
+    await ctx.db.patch("tasks", args.id, {
+      source: "local",
+      // Marks this as the latest version, so a pull of the unchanged event
+      // does not overwrite it; a later edit in Google still syncs back.
+      lastSyncedAt: Date.now(),
+      ...(args.projectId ? { projectId: args.projectId } : {}),
+      ...(args.columnId ? { columnId: args.columnId } : {}),
+      ...(args.priority ? { priority: args.priority } : {}),
+    });
+    await recordChanges(ctx, task, actorOf(args));
+  },
+});
+
+/**
  * A task of ours with no date was taken off the calendar on purpose. Its old
  * event can still be on Google until the queued delete runs, and a pull must
  * not use it to put the old day back (#585).

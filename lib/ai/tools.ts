@@ -501,6 +501,30 @@ export function createTools(auth: ToolAuth): Record<string, any> {
       }),
     }),
 
+    convert_event: ({
+      description: `Turn a Google Calendar event (a task with source "google_calendar") into an ordinary Lexyos task. Afterwards it counts as overdue when missed, survives its event being deleted in Google, and edits made here sync to the event. File it into a project, column or priority in the same call if the user said where it belongs. Events from a repeating Google series can't be converted; say so if asked.`,
+      inputSchema: z.object({
+        id: z.string().describe("The event's task id, or its number such as #142"),
+        projectId: z.string().optional().describe("Project to file it into (from list_projects)"),
+        columnId: z.string().optional().describe("Column in that project (from get_project)"),
+        priority: z.enum(["p1", "p2", "p3", "p4"]).optional().describe("Priority. Imported events start at p4."),
+      }),
+      execute: safe(async (args: any) => {
+        const id = await taskId(args.id);
+        await convex.mutation(api.tasks.convertFromGoogle, {
+          id,
+          ...(args.projectId ? { projectId: args.projectId as Id<"projects"> } : {}),
+          ...(args.columnId ? { columnId: args.columnId } : {}),
+          ...(args.priority ? { priority: args.priority } : {}),
+        });
+        const after = await convex.query(api.tasks.getById, { id });
+        return {
+          id, number: num(after?.number), title: after?.title, converted: after?.source === "local",
+          dueDate: after?.dueDate, dueTime: after?.dueTime, projectId: after?.projectId, columnId: after?.columnId, priority: after?.priority,
+        };
+      }),
+    }),
+
     complete_task: ({
       description: `Mark a task as done (or toggle it back to todo if already done). Use when the user says they finished something, completed a task, or want to mark it done. For a repeating task this does NOT mark it done: it records a done copy and moves the task to its next occurrence; the result tells you the new date.`,
       inputSchema: z.object({
