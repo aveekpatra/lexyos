@@ -18,6 +18,7 @@ import type * as graph from "../graph.js";
 import type * as lib_actor from "../lib/actor.js";
 import type * as lib_columns from "../lib/columns.js";
 import type * as lib_googleCalendar from "../lib/googleCalendar.js";
+import type * as lib_googleEvents from "../lib/googleEvents.js";
 import type * as lib_googleSync from "../lib/googleSync.js";
 import type * as lib_graph from "../lib/graph.js";
 import type * as lib_notesLib from "../lib/notesLib.js";
@@ -49,6 +50,7 @@ declare const fullApi: ApiFromModules<{
   "lib/actor": typeof lib_actor;
   "lib/columns": typeof lib_columns;
   "lib/googleCalendar": typeof lib_googleCalendar;
+  "lib/googleEvents": typeof lib_googleEvents;
   "lib/googleSync": typeof lib_googleSync;
   "lib/graph": typeof lib_graph;
   "lib/notesLib": typeof lib_notesLib;
