@@ -53,8 +53,8 @@ export async function syncTaskUpdateToGoogle(
   // A series mirror is never written back; Google (or Todoist) owns the rule.
   if (task.googleRecurringEventId) return null;
 
-  // Clearing the date removes it; there is no day to move the event to, so
-  // leave the Google event where it is.
+  // Clearing the date removes the event: tasks.update queues its deletion
+  // server-side for every client, so there is nothing to write from here.
   if ("clearDueDate" in changes && changes.clearDueDate) return null;
 
   // If task already has a Google event, update it

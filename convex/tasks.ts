@@ -415,6 +415,8 @@ export const update = mutation({
     sortOrder: v.optional(v.number()),
     googleEventId: v.optional(v.string()),
     googleCalendarId: v.optional(v.string()),
+    /** Forget the linked Google event (set once that event has been deleted). */
+    clearGoogleEventId: v.optional(v.boolean()),
     location: v.optional(v.string()),
     isAllDay: v.optional(v.boolean()),
     // Explicit clear flags — when true, clear the corresponding field
@@ -446,7 +448,7 @@ export const update = mutation({
     // `agent` is who is calling, not a task field: it must never reach the patch.
     const { agent, id, clearDueDate, clearDueTime, clearScheduledDate, clearScheduledStartTime,
       clearScheduledEndTime, clearProjectId, clearRecurrence, clearDescription, clearLabels, clearLocation,
-      clearColumnId, clearParentTaskId, userDate, syncTimeZone, ...updates } = args;
+      clearColumnId, clearParentTaskId, clearGoogleEventId, userDate, syncTimeZone, ...updates } = args;
     void agent;
 
     if (args.recurrence) validateRecurrence(args.recurrence);
@@ -458,6 +460,10 @@ export const update = mutation({
     }
     if (clearColumnId) patch.columnId = undefined;
     if (clearParentTaskId) patch.parentTaskId = undefined;
+    if (clearGoogleEventId) {
+      patch.googleEventId = undefined;
+      patch.googleCalendarId = undefined;
+    }
     if (args.parentTaskId) {
       const parent = await ctx.db.get("tasks", args.parentTaskId);
       if (!parent || parent.userId !== identity.subject || parent._id === id) throw new Error("Parent task not found");
@@ -558,11 +564,26 @@ export const update = mutation({
       patch.scheduledDate = today;
     }
 
+    // A task whose date was cleared has no day for its Google event. Left in
+    // place, the event keeps the old day and the next calendar pull copies it
+    // back onto the task (#585). So the event goes, for every client: the
+    // queue deletes it and then unlinks the task.
+    const dateAfter = ("dueDate" in patch ? patch.dueDate : task.dueDate) ||
+      ("scheduledDate" in patch ? patch.scheduledDate : task.scheduledDate);
+    const dropEvent = !!clearDueDate && !dateAfter && !!task.googleEventId &&
+      !task.googleRecurringEventId && !clearGoogleEventId && typeof args.googleEventId !== "string";
+
     await ctx.db.patch("tasks", id, patch);
     await recordChanges(ctx, task, actorOf(args));
     if ("description" in patch) await syncTaskMentions(ctx, id, actorOf(args));
-    // Linking an event is itself a sync step; everything else reconciles the event.
-    if (syncTimeZone && typeof args.googleEventId !== "string" && !task.parentTaskId) {
+    if (dropEvent) {
+      await queueGoogleSync(ctx, identity.subject, id, "delete", syncTimeZone ?? "UTC", {
+        googleEventId: task.googleEventId,
+        googleCalendarId: task.googleCalendarId,
+        reason: "dateCleared",
+      });
+    } else if (syncTimeZone && typeof args.googleEventId !== "string" && !clearGoogleEventId && !task.parentTaskId) {
+      // Linking an event is itself a sync step; everything else reconciles the event.
       await queueGoogleSync(ctx, identity.subject, id, "update", syncTimeZone);
     }
   },
@@ -971,6 +992,15 @@ function parseGoogleDateTime(
   return { dueDate, dueTime, scheduledDate, scheduledStartTime, scheduledEndTime };
 }
 
+/**
+ * A task of ours with no date was taken off the calendar on purpose. Its old
+ * event can still be on Google until the queued delete runs, and a pull must
+ * not use it to put the old day back (#585).
+ */
+function isDeliberatelyUndated(t: Doc<"tasks">): boolean {
+  return t.source !== "google_calendar" && !t.googleRecurringEventId && !t.dueDate && !t.scheduledDate;
+}
+
 export const upsertFromGoogle = mutation({
   args: {
     googleEventId: v.string(),
@@ -1008,6 +1038,8 @@ export const upsertFromGoogle = mutation({
       .first();
 
     const parsed = parseGoogleDateTime(args.startDateTime, args.endDateTime, args.startDate);
+
+    if (existing && isDeliberatelyUndated(existing)) return existing._id;
 
     if (existing) {
       // Update existing task — preserve user-modified fields (projectId, priority, status)
@@ -1127,6 +1159,7 @@ export const bulkUpsertFromGoogle = mutation({
       if (!existing && event.unifocusTaskId) {
         existing = existingByConvexId.get(event.unifocusTaskId) ?? undefined;
       }
+      if (existing && isDeliberatelyUndated(existing)) continue;
       const parsed = parseGoogleDateTime(event.startDateTime, event.endDateTime, event.startDate);
 
       // A series row replaces every flattened per-instance copy of the same series

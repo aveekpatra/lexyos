@@ -4,6 +4,7 @@ import { getGoogleAccessToken } from "@/app/actions/google-auth";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
+import type { FunctionReturnType } from "convex/server";
 import {
   pushTaskToGoogleCalendar,
   updateGoogleEvent,
@@ -11,6 +12,50 @@ import {
 } from "@/app/actions/calendarSync";
 
 export const maxDuration = 60;
+
+type QueueTask = NonNullable<FunctionReturnType<typeof api.tasks.getById>>;
+
+/** Make the task's Google event match the task as it is now. */
+async function updateEventFromTask(task: QueueTask & { googleEventId: string }, payload: Record<string, unknown>) {
+  // The server runs in UTC, so its own zone would shift the event.
+  // Use the task's zone, as the push path already does.
+  const tz = (payload.timeZone as string | undefined) || task.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const gUpdates: Record<string, unknown> = {};
+
+  // Build Google Calendar update from current task state
+  if (payload.title || task.title) {
+    const titlePrefix = task.status === "done" ? (task.outcome === "missed" ? "[Missed] " : "[Done] ") : "";
+    const rawTitle = task.title.replace(/^\[(Done|Missed)\]\s*/, "");
+    gUpdates.summary = titlePrefix + rawTitle;
+  }
+  if (task.description !== undefined) {
+    gUpdates.description = task.description;
+  }
+
+  const date = task.dueDate || task.scheduledDate;
+  const time = task.dueTime || task.scheduledStartTime;
+  if (date && time) {
+    const endTime = task.scheduledEndTime || (() => {
+      const [h, m] = time.split(":").map(Number);
+      return `${String(Math.floor((h * 60 + m + 60) / 60) % 24).padStart(2, "0")}:${String((h * 60 + m + 60) % 60).padStart(2, "0")}`;
+    })();
+    gUpdates.start = { dateTime: `${date}T${time}:00`, timeZone: tz };
+    gUpdates.end = { dateTime: `${date}T${endTime}:00`, timeZone: tz };
+  } else if (date) {
+    const next = new Date(date + "T00:00:00");
+    next.setDate(next.getDate() + 1);
+    gUpdates.start = { date };
+    gUpdates.end = { date: next.toISOString().slice(0, 10) };
+  }
+
+  if (Object.keys(gUpdates).length > 0) {
+    await updateGoogleEvent(
+      task.googleCalendarId || "primary",
+      task.googleEventId,
+      gUpdates,
+    );
+  }
+}
 
 export async function POST() {
   try {
@@ -108,44 +153,7 @@ export async function POST() {
             }
 
             const payload = (item.payload || {}) as Record<string, unknown>;
-            // The server runs in UTC, so its own zone would shift the event.
-            // Use the task's zone, as the push path already does.
-            const tz = (payload.timeZone as string | undefined) || task.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone;
-            const gUpdates: Record<string, unknown> = {};
-
-            // Build Google Calendar update from current task state
-            if (payload.title || task.title) {
-              const titlePrefix = task.status === "done" ? (task.outcome === "missed" ? "[Missed] " : "[Done] ") : "";
-              const rawTitle = task.title.replace(/^\[(Done|Missed)\]\s*/, "");
-              gUpdates.summary = titlePrefix + rawTitle;
-            }
-            if (task.description !== undefined) {
-              gUpdates.description = task.description;
-            }
-
-            const date = task.dueDate || task.scheduledDate;
-            const time = task.dueTime || task.scheduledStartTime;
-            if (date && time) {
-              const endTime = task.scheduledEndTime || (() => {
-                const [h, m] = time.split(":").map(Number);
-                return `${String(Math.floor((h * 60 + m + 60) / 60) % 24).padStart(2, "0")}:${String((h * 60 + m + 60) % 60).padStart(2, "0")}`;
-              })();
-              gUpdates.start = { dateTime: `${date}T${time}:00`, timeZone: tz };
-              gUpdates.end = { dateTime: `${date}T${endTime}:00`, timeZone: tz };
-            } else if (date) {
-              const next = new Date(date + "T00:00:00");
-              next.setDate(next.getDate() + 1);
-              gUpdates.start = { date };
-              gUpdates.end = { date: next.toISOString().slice(0, 10) };
-            }
-
-            if (Object.keys(gUpdates).length > 0) {
-              await updateGoogleEvent(
-                task.googleCalendarId || "primary",
-                task.googleEventId,
-                gUpdates,
-              );
-            }
+            await updateEventFromTask(task as QueueTask & { googleEventId: string }, payload);
             await convex.mutation(api.syncQueue.markDone, { id: item._id });
             processed++;
             break;
@@ -155,6 +163,21 @@ export async function POST() {
             const payload = (item.payload || {}) as Record<string, unknown>;
             const googleEventId = payload.googleEventId as string | undefined;
             const googleCalendarId = (payload.googleCalendarId as string) || "primary";
+
+            // A cleared date (tasks.update) queues this delete. If the task has a
+            // date again by now, the event stays and follows it; otherwise it
+            // goes and the task forgets it, so a pull cannot bring the day back.
+            const dateCleared = payload.reason === "dateCleared";
+            const task = dateCleared ? await convex.query(api.tasks.getById, { id: item.taskId }) : null;
+            const stillLinked = !!task && !!googleEventId && task.googleEventId === googleEventId;
+            if (dateCleared && stillLinked && (task!.dueDate || task!.scheduledDate)) {
+              if (!task!.googleRecurringEventId) {
+                await updateEventFromTask(task as QueueTask & { googleEventId: string }, payload);
+              }
+              await convex.mutation(api.syncQueue.markDone, { id: item._id });
+              processed++;
+              break;
+            }
 
             if (googleEventId) {
               try {
@@ -167,6 +190,9 @@ export async function POST() {
                   throw err;
                 }
               }
+            }
+            if (dateCleared && stillLinked) {
+              await convex.mutation(api.tasks.update, { id: item.taskId, clearGoogleEventId: true });
             }
             await convex.mutation(api.syncQueue.markDone, { id: item._id });
             processed++;

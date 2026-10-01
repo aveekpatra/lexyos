@@ -140,17 +140,29 @@ export const run = internalAction({
 });
 
 async function handle(ctx: ActionCtx, token: string, item: Doc<"pendingSyncQueue">): Promise<void> {
-  const payload = (item.payload ?? {}) as { timeZone?: string; googleEventId?: string; googleCalendarId?: string };
+  const payload = (item.payload ?? {}) as {
+    timeZone?: string; googleEventId?: string; googleCalendarId?: string; reason?: string;
+  };
   const tz = payload.timeZone || "UTC";
+
+  const t: Doc<"tasks"> | null = await ctx.runQuery(internal.googleSync.task, { id: item.taskId });
 
   if (item.action === "delete") {
     if (!payload.googleEventId) return;
-    const res = await google(token, "DELETE", eventPath(payload.googleCalendarId, payload.googleEventId));
-    if (!res.ok && res.status !== 404 && res.status !== 410) throw new Error(await failure(res));
-    return;
+    // The date was cleared (tasks.update). If it has a date again by now, the
+    // event stays and follows it; otherwise it goes and the task forgets it.
+    const stillLinked = !!t && t.googleEventId === payload.googleEventId;
+    const redated = payload.reason === "dateCleared" && stillLinked && !!(t!.dueDate || t!.scheduledDate);
+    if (!redated) {
+      const res = await google(token, "DELETE", eventPath(payload.googleCalendarId, payload.googleEventId));
+      if (!res.ok && res.status !== 404 && res.status !== 410) throw new Error(await failure(res));
+      if (payload.reason === "dateCleared" && stillLinked) {
+        await ctx.runMutation(internal.googleSync.unlinkEvent, { id: t!._id });
+      }
+      return;
+    }
   }
 
-  const t: Doc<"tasks"> | null = await ctx.runQuery(internal.googleSync.task, { id: item.taskId });
   if (!t || t.googleRecurringEventId) return;
 
   if (!t.googleEventId) {
