@@ -3,7 +3,7 @@ import { agentValidator, getIdentity } from "./lib/actor";
 import { query, mutation, internalMutation, type MutationCtx } from "./_generated/server";
 import { claimTaskNumber, ensureTaskCounter } from "./lib/taskNumbers";
 import { queueGoogleSync, syncTimeZoneValidator } from "./lib/googleSync";
-import { googleOwnsEvent } from "./lib/googleEvents";
+import { bareEventTitle, googleOwnsEvent } from "./lib/googleEvents";
 import { actorOf, clearHistory, recordChanges, recordCreated, recordOccurrence, type Actor } from "./lib/taskHistory";
 import { dropNode, syncMentions } from "./lib/graph";
 
@@ -1073,6 +1073,27 @@ function isDeliberatelyUndated(t: Doc<"tasks">): boolean {
   return t.source !== "google_calendar" && !t.googleRecurringEventId && !t.dueDate && !t.scheduledDate;
 }
 
+/**
+ * One-off cleanup (#619): strip "[Done] " / "[Missed] " that earlier pulls
+ * copied from calendar events into task titles. Safe to run again.
+ * Run with: npx convex run tasks:stripCalendarTitlePrefixes '{"dryRun":true}'
+ */
+export const stripCalendarTitlePrefixes = internalMutation({
+  args: { dryRun: v.optional(v.boolean()) },
+  handler: async (ctx, { dryRun }) => {
+    let changed = 0;
+    for await (const task of ctx.db.query("tasks")) {
+      const title = bareEventTitle(task.title);
+      if (title === task.title) continue;
+      changed++;
+      if (dryRun) continue;
+      await ctx.db.patch("tasks", task._id, { title });
+      await recordChanges(ctx, task, "system");
+    }
+    return { changed, dryRun: !!dryRun };
+  },
+});
+
 export const upsertFromGoogle = mutation({
   args: {
     googleEventId: v.string(),
@@ -1116,7 +1137,7 @@ export const upsertFromGoogle = mutation({
     if (existing) {
       // Update existing task — preserve user-modified fields (projectId, priority, status)
       const patch: Record<string, unknown> = {
-        title: args.title,
+        title: bareEventTitle(args.title),
         description: args.description,
         googleCalendarId: args.googleCalendarId,
         location: args.location,
@@ -1139,7 +1160,7 @@ export const upsertFromGoogle = mutation({
     } else {
       // Create new task from Google event
       return await ctx.db.insert("tasks", {
-        title: args.title,
+        title: bareEventTitle(args.title),
         description: args.description,
         status: "todo",
         priority: "p4",
@@ -1274,7 +1295,7 @@ export const bulkUpsertFromGoogle = mutation({
           // by completing it here, in which case the local roll wins.
           patch.googleRecurringEventId = event.googleRecurringEventId;
           if (event.recurrence) patch.recurrence = event.recurrence;
-          patch.title = event.title;
+          patch.title = bareEventTitle(event.title);
           patch.description = event.description;
           patch.location = event.location;
           const rolledAhead = !!existing.dueDate && !!parsed.dueDate && existing.dueDate > parsed.dueDate && existing.status !== "done";
@@ -1289,7 +1310,7 @@ export const bulkUpsertFromGoogle = mutation({
           }
         } else if (!userEditedSinceSync) {
           // Only overwrite content fields if Google's version is newer (user didn't edit since last sync)
-          patch.title = event.title;
+          patch.title = bareEventTitle(event.title);
           patch.description = event.description;
           patch.location = event.location;
           patch.isAllDay = event.isAllDay;
@@ -1305,7 +1326,7 @@ export const bulkUpsertFromGoogle = mutation({
       } else {
         // Create new task
         const newId = await ctx.db.insert("tasks", {
-          title: event.title,
+          title: bareEventTitle(event.title),
           description: event.description,
           status: "todo",
           priority: "p4",
