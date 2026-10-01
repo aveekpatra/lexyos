@@ -124,6 +124,32 @@ export const list = query({
 const OPEN_STATUSES = ["todo", "planned", "in_progress", "review"] as const;
 
 /**
+ * Done tasks of one day, for the timeline. The day is the task's dueDate, or
+ * its scheduledDate when it has none: tasks written by agents often carry only
+ * a dueDate, so asking by scheduledDate alone missed them.
+ */
+export const doneOnDay = query({
+  args: { agent: agentValidator, day: v.string() },
+  handler: async (ctx, args) => {
+    const identity = await getIdentity(ctx, args.agent);
+    if (!identity) return [];
+    const userId = identity.subject;
+    const [byDue, byScheduled] = await Promise.all([
+      ctx.db.query("tasks").withIndex("by_userId_and_dueDate", (q) => q.eq("userId", userId).eq("dueDate", args.day)).collect(),
+      ctx.db.query("tasks").withIndex("by_userId_and_scheduledDate", (q) => q.eq("userId", userId).eq("scheduledDate", args.day)).collect(),
+    ]);
+    const seen = new Set<string>();
+    return [...byDue, ...byScheduled]
+      .filter((t) => {
+        if (t.status !== "done" || seen.has(t._id)) return false;
+        seen.add(t._id);
+        return (t.dueDate || t.scheduledDate) === args.day;
+      })
+      .sort((a, b) => a.sortOrder - b.sortOrder);
+  },
+});
+
+/**
  * Every task that is not done, read through the status index so done history
  * (which only grows) is never scanned. Clients that render boards subscribe to
  * this instead of `list`, and fetch done rows only where they show them.
