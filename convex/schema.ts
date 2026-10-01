@@ -43,6 +43,8 @@ export default defineSchema({
     googleEventId: v.optional(v.string()),       // linked Google Calendar event ID
     /** Set when googleEventId is a series master: Google owns the rule, we only roll locally. */
     googleRecurringEventId: v.optional(v.string()),
+    /** Google's event type when it is not a plain event, e.g. "fromGmail" (convex/lib/googleEvents.ts). */
+    googleEventType: v.optional(v.string()),
     googleCalendarId: v.optional(v.string()),     // which calendar it's on (default "primary")
     // Calendar-sourced task fields
     source: v.optional(v.union(v.literal("local"), v.literal("google_calendar"))),

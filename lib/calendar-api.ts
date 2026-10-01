@@ -57,6 +57,8 @@ export interface GoogleEvent {
   };
   colorId?: string;
   status?: string;
+  /** "default", or a kind Google manages itself such as "fromGmail". */
+  eventType?: string;
   htmlLink?: string;
   calendarId?: string;
   calendarColor?: string;

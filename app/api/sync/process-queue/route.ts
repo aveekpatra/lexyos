@@ -5,6 +5,7 @@ import { ConvexHttpClient } from "convex/browser";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import type { FunctionReturnType } from "convex/server";
+import { googleOwnsEvent } from "@/convex/lib/googleEvents";
 import {
   pushTaskToGoogleCalendar,
   updateGoogleEvent,
@@ -145,8 +146,8 @@ export async function POST() {
             const task = await convex.query(api.tasks.getById, {
               id: item.taskId,
             });
-            if (!task || !task.googleEventId || task.googleRecurringEventId) {
-              // No Google event to update, or a series master we never rewrite: mark done
+            if (!task || !task.googleEventId || task.googleRecurringEventId || googleOwnsEvent(task)) {
+              // No Google event to update, a series master we never rewrite, or an event Google owns: mark done
               await convex.mutation(api.syncQueue.markDone, { id: item._id });
               processed++;
               continue;
@@ -170,8 +171,14 @@ export async function POST() {
             const dateCleared = payload.reason === "dateCleared";
             const task = dateCleared ? await convex.query(api.tasks.getById, { id: item.taskId }) : null;
             const stillLinked = !!task && !!googleEventId && task.googleEventId === googleEventId;
+            // A cleared date on an event Google owns: nothing we may change there.
+            if (dateCleared && stillLinked && googleOwnsEvent(task!)) {
+              await convex.mutation(api.syncQueue.markDone, { id: item._id });
+              processed++;
+              break;
+            }
             if (dateCleared && stillLinked && (task!.dueDate || task!.scheduledDate)) {
-              if (!task!.googleRecurringEventId) {
+              if (!task!.googleRecurringEventId && !googleOwnsEvent(task!)) {
                 await updateEventFromTask(task as QueueTask & { googleEventId: string }, payload);
               }
               await convex.mutation(api.syncQueue.markDone, { id: item._id });

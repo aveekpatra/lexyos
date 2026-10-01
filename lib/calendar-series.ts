@@ -17,6 +17,8 @@ export type SyncRow = {
   googleCalendarId: string;
   googleRecurringEventId?: string;
   recurrence?: Recurrence;
+  /** Set only when Google manages the event itself (convex/lib/googleEvents.ts). */
+  googleEventType?: string;
   title: string;
   description?: string;
   location?: string;
@@ -42,6 +44,7 @@ function rowFromEvent(e: GoogleEvent, tz: string): SyncRow {
   return {
     googleEventId: e.id,
     googleCalendarId: e.calendarId || "primary",
+    googleEventType: e.eventType && e.eventType !== "default" ? e.eventType : undefined,
     title: e.summary || "(No title)",
     description: e.description,
     location: e.location,

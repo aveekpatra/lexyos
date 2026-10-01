@@ -19,6 +19,7 @@ import { internalAction, internalMutation, internalQuery, type ActionCtx } from 
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { googleAccessToken as googleToken } from "./lib/googleCalendar";
+import { googleOwnsEvent } from "./lib/googleEvents";
 
 const GOOGLE = "https://www.googleapis.com/calendar/v3";
 const DEFAULT_EVENT_MINUTES = 60;
@@ -149,6 +150,8 @@ async function handle(ctx: ActionCtx, token: string, item: Doc<"pendingSyncQueue
 
   if (item.action === "delete") {
     if (!payload.googleEventId) return;
+    // A cleared date on an event Google owns: nothing we may change there.
+    if (payload.reason === "dateCleared" && t && googleOwnsEvent(t)) return;
     // The date was cleared (tasks.update). If it has a date again by now, the
     // event stays and follows it; otherwise it goes and the task forgets it.
     const stillLinked = !!t && t.googleEventId === payload.googleEventId;
@@ -163,7 +166,7 @@ async function handle(ctx: ActionCtx, token: string, item: Doc<"pendingSyncQueue
     }
   }
 
-  if (!t || t.googleRecurringEventId) return;
+  if (!t || t.googleRecurringEventId || googleOwnsEvent(t)) return;
 
   if (!t.googleEventId) {
     // Only local tasks with a date become events; imported ones already are one.

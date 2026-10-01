@@ -3,6 +3,7 @@ import { agentValidator, getIdentity } from "./lib/actor";
 import { query, mutation, internalMutation, type MutationCtx } from "./_generated/server";
 import { claimTaskNumber, ensureTaskCounter } from "./lib/taskNumbers";
 import { queueGoogleSync, syncTimeZoneValidator } from "./lib/googleSync";
+import { googleOwnsEvent } from "./lib/googleEvents";
 import { actorOf, clearHistory, recordChanges, recordCreated, recordOccurrence, type Actor } from "./lib/taskHistory";
 import { dropNode, syncMentions } from "./lib/graph";
 
@@ -464,6 +465,10 @@ export const update = mutation({
       patch.googleEventId = undefined;
       patch.googleCalendarId = undefined;
     }
+    // A different event (or none) means the old event's type no longer applies.
+    if (clearGoogleEventId || (typeof args.googleEventId === "string" && args.googleEventId !== task.googleEventId)) {
+      patch.googleEventType = undefined;
+    }
     if (args.parentTaskId) {
       const parent = await ctx.db.get("tasks", args.parentTaskId);
       if (!parent || parent.userId !== identity.subject || parent._id === id) throw new Error("Parent task not found");
@@ -570,7 +575,7 @@ export const update = mutation({
     // queue deletes it and then unlinks the task.
     const dateAfter = ("dueDate" in patch ? patch.dueDate : task.dueDate) ||
       ("scheduledDate" in patch ? patch.scheduledDate : task.scheduledDate);
-    const dropEvent = !!clearDueDate && !dateAfter && !!task.googleEventId &&
+    const dropEvent = !!clearDueDate && !dateAfter && !!task.googleEventId && !googleOwnsEvent(task) &&
       !task.googleRecurringEventId && !clearGoogleEventId && typeof args.googleEventId !== "string";
 
     await ctx.db.patch("tasks", id, patch);
@@ -582,7 +587,7 @@ export const update = mutation({
         googleCalendarId: task.googleCalendarId,
         reason: "dateCleared",
       });
-    } else if (syncTimeZone && typeof args.googleEventId !== "string" && !clearGoogleEventId && !task.parentTaskId) {
+    } else if (syncTimeZone && typeof args.googleEventId !== "string" && !clearGoogleEventId && !task.parentTaskId && !googleOwnsEvent(task)) {
       // Linking an event is itself a sync step; everything else reconciles the event.
       await queueGoogleSync(ctx, identity.subject, id, "update", syncTimeZone);
     }
@@ -1156,6 +1161,8 @@ export const bulkUpsertFromGoogle = mutation({
         googleUpdatedAt: v.optional(v.string()),
         // Convex task ID stored in Google's extendedProperties for round-trip identification
         unifocusTaskId: v.optional(v.string()),
+        /** Google's event type when it is not a plain event, e.g. "fromGmail". */
+        googleEventType: v.optional(v.string()),
         /** Present when this row stands for a whole recurring series (googleEventId is the master). */
         googleRecurringEventId: v.optional(v.string()),
         recurrence: v.optional(recurrenceValidator),
@@ -1227,6 +1234,7 @@ export const bulkUpsertFromGoogle = mutation({
           // Ensure googleEventId is set (important for unifocusTaskId round-trip matches)
           googleEventId: event.googleEventId,
           googleCalendarId: event.googleCalendarId,
+          googleEventType: event.googleEventType,
           calendarColor: event.calendarColor,
           htmlLink: event.htmlLink,
           timeZone: event.timeZone,
@@ -1283,6 +1291,7 @@ export const bulkUpsertFromGoogle = mutation({
           googleEventId: event.googleEventId,
           googleCalendarId: event.googleCalendarId,
           googleRecurringEventId: event.googleRecurringEventId,
+          googleEventType: event.googleEventType,
           recurrence: event.recurrence,
           source: "google_calendar",
           location: event.location,

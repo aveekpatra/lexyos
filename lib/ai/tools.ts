@@ -518,8 +518,10 @@ export function createTools(auth: ToolAuth): Record<string, any> {
           ...(args.priority ? { priority: args.priority } : {}),
         });
         const after = await convex.query(api.tasks.getById, { id });
+        const readOnly = after?.googleEventType === "fromGmail";
         return {
           id, number: num(after?.number), title: after?.title, converted: after?.source === "local",
+          ...(readOnly ? { calendarReadOnly: true, note: "Google made this event from a Gmail message, so its calendar entry can't be edited. Changes stay in Lexyos; tell the user." } : {}),
           dueDate: after?.dueDate, dueTime: after?.dueTime, projectId: after?.projectId, columnId: after?.columnId, priority: after?.priority,
         };
       }),

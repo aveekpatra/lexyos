@@ -19,12 +19,14 @@ import {
   endTimeFor,
   localDateStr,
 } from "@/lib/time-utils";
+import { googleOwnsEvent } from "@/convex/lib/googleEvents";
 
 /** Should changes to this task be synced back to Google Calendar? */
 export function shouldSyncToGoogle(task: Doc<"tasks">): boolean {
   // A task that mirrors a recurring series must never rewrite the master:
   // moving or renaming it would change every instance in Google (and Todoist).
-  return !!task.googleEventId && !task.googleRecurringEventId;
+  // Nor may it touch an event Google made itself (convex/lib/googleEvents.ts).
+  return !!task.googleEventId && !task.googleRecurringEventId && !googleOwnsEvent(task);
 }
 
 /** Format time parts into ISO datetime string (no timezone suffix) */
@@ -52,6 +54,8 @@ export async function syncTaskUpdateToGoogle(
   const tz = getUserTz();
   // A series mirror is never written back; Google (or Todoist) owns the rule.
   if (task.googleRecurringEventId) return null;
+  // An event Google made from Gmail can't be changed; the task keeps its own values.
+  if (googleOwnsEvent(task)) return null;
 
   // Clearing the date removes the event: tasks.update queues its deletion
   // server-side for every client, so there is nothing to write from here.
