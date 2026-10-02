@@ -4,6 +4,7 @@ Last updated: 2026-09-29
 
 Two repos:
 - `lexyos` (this one): Next.js 16 web + Convex backend. Pushes to `main` deploy the website on Vercel (www.lexyos.com). Convex prod: `CONVEX_DEPLOYMENT=prod:disciplined-mallard-514`.
+- `lexyos-mobile`: Expo SDK 57 React Native client (Android first) at `/Users/aveek/Downloads/Projects/lexyos-mobile`, private repo `aveekpatra/lexyos-mobile`. Custom UI (no Expo UI), Skia for the completion check and timer bar, focus timer with a scheduled "time's up" notification, adaptive icon from the Mac geometry (`scripts/icons.swift`). APK built locally with Gradle (see its README); OTA via `eas update --channel production --environment production` (EAS project `aveek.patra/lexyos-mobile`, runtime = app version). `lexyos://demo` shows sample data. Replaces the Kotlin `lexyos-android` repo.
 - `lexyos-mac`: native macOS client at `/Users/aveek/Downloads/Projects/lexyos-mac`, private repo `aveekpatra/lexyos-mac`, installed as /Applications/Lexyos.app, now 0.3.3 build 11.
 
 ## What exists
@@ -47,6 +48,7 @@ Two repos:
 - Convex: new modules need entries in `convex/_generated/api.d.ts` before `tsc`; helpers go in `convex/lib/`.
 - Testing as the user from the CLI: `agent: {secret, userId}` with AGENT_SECRET from `npx convex env get`, never printed; delete throwaway data after.
 - zsh: never name a shell variable `path`.
+- Android native builds: if CMake suddenly adds macOS flags (`-arch`, `-isysroot`), run `./gradlew --stop` and rebuild; a stale Gradle daemon causes it.
 - `ps %cpu` is a lifetime average; use `top` for current CPU.
 
 ## Not yet seen by the user
