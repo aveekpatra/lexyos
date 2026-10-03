@@ -46,9 +46,9 @@ export const set = mutation({
 
 /** Shallow-merge a partial settings object into `prefs`. Keys set to null are removed. */
 export const update = mutation({
-  args: { prefs: v.any() },
+  args: { agent: agentValidator, prefs: v.any() },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
+    const identity = await getIdentity(ctx, args.agent);
     if (!identity) throw new Error("Not authenticated");
     const userId = identity.subject;
     const existing = await ctx.db

@@ -15,12 +15,14 @@ import type * as calendarPull from "../calendarPull.js";
 import type * as crons from "../crons.js";
 import type * as googleSync from "../googleSync.js";
 import type * as graph from "../graph.js";
+import type * as http from "../http.js";
 import type * as lib_actor from "../lib/actor.js";
 import type * as lib_columns from "../lib/columns.js";
 import type * as lib_googleCalendar from "../lib/googleCalendar.js";
 import type * as lib_googleEvents from "../lib/googleEvents.js";
 import type * as lib_googleSync from "../lib/googleSync.js";
 import type * as lib_graph from "../lib/graph.js";
+import type * as lib_hash from "../lib/hash.js";
 import type * as lib_notesLib from "../lib/notesLib.js";
 import type * as lib_recurrence from "../lib/recurrence.js";
 import type * as lib_taskHistory from "../lib/taskHistory.js";
@@ -32,6 +34,7 @@ import type * as projects from "../projects.js";
 import type * as syncQueue from "../syncQueue.js";
 import type * as tasks from "../tasks.js";
 import type * as userPreferences from "../userPreferences.js";
+import type * as widgets from "../widgets.js";
 
 import type {
   ApiFromModules,
@@ -47,12 +50,14 @@ declare const fullApi: ApiFromModules<{
   crons: typeof crons;
   googleSync: typeof googleSync;
   graph: typeof graph;
+  http: typeof http;
   "lib/actor": typeof lib_actor;
   "lib/columns": typeof lib_columns;
   "lib/googleCalendar": typeof lib_googleCalendar;
   "lib/googleEvents": typeof lib_googleEvents;
   "lib/googleSync": typeof lib_googleSync;
   "lib/graph": typeof lib_graph;
+  "lib/hash": typeof lib_hash;
   "lib/notesLib": typeof lib_notesLib;
   "lib/recurrence": typeof lib_recurrence;
   "lib/taskHistory": typeof lib_taskHistory;
@@ -64,6 +69,7 @@ declare const fullApi: ApiFromModules<{
   syncQueue: typeof syncQueue;
   tasks: typeof tasks;
   userPreferences: typeof userPreferences;
+  widgets: typeof widgets;
 }>;
 
 /**

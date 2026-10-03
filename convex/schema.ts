@@ -269,6 +269,17 @@ export default defineSchema({
     .index("by_userId", ["userId"])
     .index("by_hash", ["hash"]),
 
+  // Home-screen widget tokens, one per device. Only a hash is stored.
+  widgetTokens: defineTable({
+    hash: v.string(),
+    userId: v.string(),
+    device: v.optional(v.string()),
+    createdAt: v.number(),
+    lastUsedAt: v.optional(v.number()),
+  })
+    .index("by_hash", ["hash"])
+    .index("by_userId", ["userId"]),
+
   aiChats: defineTable({
     messages: v.array(v.object({
       id: v.string(),
