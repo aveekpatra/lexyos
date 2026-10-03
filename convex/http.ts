@@ -102,7 +102,7 @@ http.route({
       const list = open.filter((t) => !t.parentTaskId && dayOf(t) === day)
         .sort((a, b) => (mins(startOf(a)) ?? 1e9) - (mins(startOf(b)) ?? 1e9) || a.sortOrder - b.sortOrder);
       const events = list.filter((t) => t.source === "google_calendar").length;
-      return { day, tasks: list.length - events, events, items: list.slice(0, 12).map(item) };
+      return { day, tasks: list.length - events, events, items: list.slice(0, 30).map(item) };
     });
 
     // Heatmap: a year of weeks ending this week, Monday first; widgets show as many as fit.
