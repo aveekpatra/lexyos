@@ -86,10 +86,11 @@ http.route({
       return { t, s, e };
     });
     const current = timed.find((x) => x.s <= nowMin && nowMin < x.e);
-    const next = timed.filter((x) => x.s > nowMin).sort((a, b) => a.s - b.s)[0];
+    const upcoming = timed.filter((x) => x.s > nowMin).sort((a, b) => a.s - b.s);
+    const next = upcoming[0];
 
-    // Heatmap: 20 weeks ending this week, Monday first.
-    const weeks = 20;
+    // Heatmap: a year of weeks ending this week, Monday first; widgets show as many as fit.
+    const weeks = 53;
     const weekday = (new Date(`${today}T12:00:00Z`).getUTCDay() + 6) % 7;
     const first = addDays(today, -(weeks - 1) * 7 - weekday);
     const since = Date.now() - (weeks * 7 + 2) * 86_400_000;
@@ -106,7 +107,12 @@ http.route({
     return json({
       at: Date.now(), today, nowMin,
       todayList: { items: todays.slice(0, 8).map(item), open: todays.length, done: doneToday.filter((t) => !t.parentTaskId).length, overdue },
-      upNext: { current: current ? item(current.t) : null, next: next ? item(next.t) : null, nextInMin: next ? next.s - nowMin : null, currentLeftMin: current ? current.e - nowMin : null },
+      upNext: {
+        current: current ? item(current.t) : null,
+        next: next ? item(next.t) : null,
+        // The rest of today's timed items after `next`, for the agenda layout.
+        later: upcoming.slice(1, 6).map((x) => item(x.t)),
+      },
       heatmap: { first, days, streak, best, total: days.reduce((a, b) => a + b, 0) },
       focus: prefsDoc?.prefs?.ui?.focusSession ?? null,
       nextFocusable: todays.find((t) => t.source !== "google_calendar") ? item(todays.find((t) => t.source !== "google_calendar")!) : null,
