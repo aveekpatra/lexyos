@@ -5,12 +5,12 @@ import { sha256 } from "./lib/hash";
 
 /*
  * Home-screen widgets (lexyos-mobile/src/widgets). They present the device's
- * widget token (convex/widgets.ts) and get back everything the four widgets
- * draw, or perform one tap. Work is done by the same functions the apps call,
+ * widget token (convex/widgets.ts) and get back everything the widgets draw,
+ * or perform one tap. Work is done by the same functions the apps call,
  * as that user, through the agent identity (convex/lib/actor.ts).
  */
 
-type Item = { id: string; title: string; number?: number; priority: string; start?: string; end?: string; event: boolean; color?: string };
+type Item = { id: string; title: string; number?: number; priority: string; start?: string; end?: string; event: boolean; color?: string; day?: string; done?: boolean };
 type Task = {
   _id: string; title: string; number?: number; priority: string; status: string; source?: string; parentTaskId?: string;
   dueDate?: string; scheduledDate?: string; dueTime?: string; scheduledStartTime?: string; scheduledEndTime?: string;
@@ -77,7 +77,9 @@ http.route({
     // Today: what the app's day view lists, timed first.
     const todays = open.filter((t) => !t.parentTaskId && dayOf(t) === today)
       .sort((a, b) => (mins(startOf(a)) ?? 1e9) - (mins(startOf(b)) ?? 1e9) || a.sortOrder - b.sortOrder);
-    const overdue = open.filter((t) => !t.parentTaskId && t.source !== "google_calendar" && (dayOf(t) ?? "9") < today).length;
+    const overdueTasks = open.filter((t) => !t.parentTaskId && t.source !== "google_calendar" && (dayOf(t) ?? "9") < today)
+      .sort((a, b) => (dayOf(a)! < dayOf(b)! ? 1 : dayOf(a)! > dayOf(b)! ? -1 : a.sortOrder - b.sortOrder));
+    const overdue = overdueTasks.length;
 
     // Up next: what is on now, and what comes after, among today's timed items.
     const timed = todays.filter((t) => !t.isAllDay && mins(startOf(t)) !== null).map((t) => {
@@ -88,6 +90,20 @@ http.route({
     const current = timed.find((x) => x.s <= nowMin && nowMin < x.e);
     const upcoming = timed.filter((x) => x.s > nowMin).sort((a, b) => a.s - b.s);
     const next = upcoming[0];
+
+    // Schedule: today's timed items, done ones too, for the day timeline.
+    const schedule = [...todays.filter((t) => !t.isAllDay && startOf(t)).map((t) => ({ ...item(t), done: false })),
+      ...doneToday.filter((t) => !t.parentTaskId && !t.isAllDay && startOf(t)).map((t) => ({ ...item(t as Task), done: true }))]
+      .sort((a, b) => mins(a.start)! - mins(b.start)!);
+
+    // The week ahead, today first: how full each day is, and its first few items.
+    const week = Array.from({ length: 7 }, (_, i) => {
+      const day = addDays(today, i);
+      const list = open.filter((t) => !t.parentTaskId && dayOf(t) === day)
+        .sort((a, b) => (mins(startOf(a)) ?? 1e9) - (mins(startOf(b)) ?? 1e9) || a.sortOrder - b.sortOrder);
+      const events = list.filter((t) => t.source === "google_calendar").length;
+      return { day, tasks: list.length - events, events, items: list.slice(0, 12).map(item) };
+    });
 
     // Heatmap: a year of weeks ending this week, Monday first; widgets show as many as fit.
     const weeks = 53;
@@ -106,7 +122,11 @@ http.route({
 
     return json({
       at: Date.now(), today, nowMin,
-      todayList: { items: todays.slice(0, 8).map(item), open: todays.length, done: doneToday.filter((t) => !t.parentTaskId).length, overdue },
+      todayList: { items: todays.slice(0, 40).map(item), open: todays.length, done: doneToday.filter((t) => !t.parentTaskId).length, overdue },
+      overdueList: overdueTasks.slice(0, 20).map((t) => ({ ...item(t), day: dayOf(t) })),
+      schedule,
+      week,
+      pomodoro: (() => { const p = prefsDoc?.prefs?.pomodoro ?? {}; return { focus: Number(p.workMin) || 25, short: Number(p.shortBreakMin) || 5, long: Number(p.longBreakMin) || 15, rounds: Number(p.roundsBeforeLongBreak) || 4 }; })(),
       upNext: {
         current: current ? item(current.t) : null,
         next: next ? item(next.t) : null,
