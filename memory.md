@@ -1,10 +1,11 @@
 # Memory: Lexyos (web, backend, Mac)
 
-Last updated: 2026-09-29
+Last updated: 2026-10-03
 
 Two repos:
 - `lexyos` (this one): Next.js 16 web + Convex backend. Pushes to `main` deploy the website on Vercel (www.lexyos.com). Convex prod: `CONVEX_DEPLOYMENT=prod:disciplined-mallard-514`.
 - `lexyos-mobile`: Expo SDK 57 React Native client (Android first) at `/Users/aveek/Downloads/Projects/lexyos-mobile`, private repo `aveekpatra/lexyos-mobile`. Custom UI (no Expo UI), Skia for the completion check and timer bar, focus timer with a scheduled "time's up" notification, adaptive icon from the Mac geometry (`scripts/icons.swift`). APK built locally with Gradle (see its README); OTA via `eas update --channel production --environment production` (EAS project `aveek.patra/lexyos-mobile`, runtime = app version). `lexyos://demo` shows sample data. Replaces the Kotlin `lexyos-android` repo.
+  - Home-screen widgets (v1.3.0, `src/widgets`): Today, Up next, Schedule, Focus, Activity (tabs Week/Month/Streak), Week, Progress, Add task. Data from `GET /widget/summary` and taps via `POST /widget/action` (`convex/http.ts`, per-device widget token in `convex/widgets.ts`). Tabs saved per widget id (`state.ts`). Only the Pomodoro ticks (native Chronometer patch in `patches/`); everything else uses clock times. `scripts/widget-preview.sh` renders every size/state on the Mac (WebKit) and makes the picker previews; `validate.tsx` runs the real tree builder. No React fragments in widget code (the library cannot build them). Widgets were designed after two critic-agent roasts; user's bar: visuals over text, scrolling lists, thumb tabs, realistic ranges, iOS-widget quality.
 - `lexyos-mac`: native macOS client at `/Users/aveek/Downloads/Projects/lexyos-mac`, private repo `aveekpatra/lexyos-mac`, installed as /Applications/Lexyos.app, now 0.3.3 build 11.
 
 ## What exists
@@ -50,16 +51,19 @@ Two repos:
 - zsh: never name a shell variable `path`.
 - Android native builds: if CMake suddenly adds macOS flags (`-arch`, `-isysroot`), run `./gradlew --stop` and rebuild; a stale Gradle daemon causes it.
 - `ps %cpu` is a lifetime average; use `top` for current CPU.
+- `/Applications/ego lite.app` is the user's own browser; never launch it headless (it opens in their running session). Use `scripts/widget-preview/snap.swift` (WKWebView) for screenshots.
+- `expo prebuild` deletes `android/local.properties`; write `sdk.dir=/opt/homebrew/share/android-commandlinetools` again before Gradle.
 
 ## Not yet seen by the user
 
 - Web: Notes pages, editor chips and pickers, Connections, Activity.
+- Mobile 1.3.0 widgets on a real phone: picker previews, list scrolling, tab taps, live Pomodoro digits.
 - Mac: Timeline pane, inline link pickers, Back/Forward, sidebar toggle.
 - Mac-driven Google Calendar updates for moves and completions (not confirmed in production).
 
 ## Next session starts with
 
-Ask how the Mac Timeline and the web Notes feel; fix what they flag.
+Ask how the 1.3.0 widgets behave on the phone (scrolling, tabs, previews, timer), then the Mac Timeline and web Notes; fix what they flag.
 
 ## Open questions
 
