@@ -710,9 +710,65 @@ async function completeTask(
     end = task.scheduledEndTime;
   }
   await ctx.db.patch("tasks", task._id, patch);
+  await carrySubtasks(ctx, task._id, snapshotId, next.date);
   await recordOccurrence(ctx, task, actor, !!missed);
 
   return { ...base, rolled: true, next: { date: next.date, start, end }, snapshotId };
+}
+
+/**
+ * A repeating checklist starts fresh each time it rolls. Whatever this
+ * occurrence closed (done or missed) is copied under its done record, then
+ * every subtask moves to the next date, reopened. Open ones simply come along.
+ */
+async function carrySubtasks(ctx: MutationCtx, liveId: Id<"tasks">, snapshotId: Id<"tasks">, nextDate: string) {
+  const subtasks = await ctx.db.query("tasks").withIndex("by_parentTaskId", (q) => q.eq("parentTaskId", liveId)).collect();
+  for (const sub of subtasks) {
+    // A subtask with its own rule keeps its own schedule.
+    if (sub.recurrence) continue;
+    const closed = sub.status === "done";
+    if (closed) {
+      const { _id, _creationTime, ...fields } = sub;
+      void _id; void _creationTime;
+      await ctx.db.insert("tasks", {
+        ...fields,
+        parentTaskId: snapshotId,
+        number: undefined,
+        googleEventId: undefined,
+        googleCalendarId: undefined,
+        lastSyncedAt: undefined,
+        googleUpdatedAt: undefined,
+        htmlLink: undefined,
+      });
+    }
+    const patch: Record<string, unknown> = {};
+    if (sub.dueDate) patch.dueDate = nextDate;
+    if (sub.scheduledDate) patch.scheduledDate = nextDate;
+    if (closed) Object.assign(patch, { status: "todo", completedAt: undefined, outcome: undefined, missedReason: undefined });
+    if (Object.keys(patch).length > 0) await ctx.db.patch("tasks", sub._id, patch);
+  }
+}
+
+/**
+ * Undo carrySubtasks for a retracted occurrence: drop the record's copies and,
+ * when the series moves back onto that date, hand their ticks back to the
+ * live subtasks (matched by title) on the old date.
+ */
+async function uncarrySubtasks(ctx: MutationCtx, snapshotId: Id<"tasks">, liveId: Id<"tasks">, restoreDate: string | null) {
+  const copies = await ctx.db.query("tasks").withIndex("by_parentTaskId", (q) => q.eq("parentTaskId", snapshotId)).collect();
+  if (restoreDate) {
+    const subtasks = await ctx.db.query("tasks").withIndex("by_parentTaskId", (q) => q.eq("parentTaskId", liveId)).collect();
+    for (const sub of subtasks) {
+      if (sub.recurrence) continue;
+      const copy = copies.find((c) => c.title === sub.title);
+      const patch: Record<string, unknown> = {};
+      if (sub.dueDate) patch.dueDate = restoreDate;
+      if (sub.scheduledDate) patch.scheduledDate = restoreDate;
+      if (copy) Object.assign(patch, { status: copy.status, completedAt: copy.completedAt, outcome: copy.outcome, missedReason: copy.missedReason });
+      if (Object.keys(patch).length > 0) await ctx.db.patch("tasks", sub._id, patch);
+    }
+  }
+  for (const copy of copies) await ctx.db.delete("tasks", copy._id);
 }
 
 export const toggleComplete = mutation({
@@ -789,6 +845,7 @@ async function toggleCompleteImpl(
             });
             await recordChanges(ctx, liveBefore, actor);
           }
+          await uncarrySubtasks(ctx, task._id, live._id, isLatest ? snapDate : null);
           await ctx.db.delete("tasks", task._id);
           return {
             googleEventId: live.googleEventId,
