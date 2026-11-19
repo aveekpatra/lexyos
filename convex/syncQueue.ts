@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import { agentValidator, getIdentity } from "./lib/actor";
 import { query, mutation } from "./_generated/server";
+import { internal } from "./_generated/api";
 
 /**
  * Sync queue mutations — manages pending Google Calendar sync operations.
@@ -40,10 +41,11 @@ export const enqueue = mutation({
         payload: mergedPayload,
         createdAt: new Date().toISOString(),
       });
+      await ctx.scheduler.runAfter(0, internal.googleSync.run, { userId });
       return existing._id;
     }
 
-    return await ctx.db.insert("pendingSyncQueue", {
+    const id = await ctx.db.insert("pendingSyncQueue", {
       userId,
       taskId: args.taskId,
       action: args.action,
@@ -52,6 +54,10 @@ export const enqueue = mutation({
       status: "pending",
       createdAt: new Date().toISOString(),
     });
+    // Run the worker now. Without this, items queued by the agent tools (MCP,
+    // chat) waited until the web app happened to open and drain the queue.
+    await ctx.scheduler.runAfter(0, internal.googleSync.run, { userId });
+    return id;
   },
 });
 

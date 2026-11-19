@@ -86,8 +86,10 @@ function getConvex(auth: ToolAuth): ConvexHttpClient {
 }
 
 // ─── Helper: get today's date in user's timezone ───
+// A UTC date is yesterday's date after midnight in Prague (until 01:00/02:00).
+const USER_TIME_ZONE = process.env.USER_TIME_ZONE || "Europe/Prague";
 function today() {
-  return new Date().toISOString().slice(0, 10);
+  return new Intl.DateTimeFormat("en-CA", { timeZone: USER_TIME_ZONE }).format(new Date());
 }
 
 // ─── Tool factory: creates tools that receive auth token at runtime ───
