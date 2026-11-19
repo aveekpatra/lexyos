@@ -19,7 +19,7 @@ import { internalAction, internalMutation, internalQuery, type ActionCtx } from 
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { googleAccessToken as googleToken, listCalendars } from "./lib/googleCalendar";
-import { googleOwnsEvent } from "./lib/googleEvents";
+import { googleOwnsEvent, replaceEventTimes } from "./lib/googleEvents";
 
 const GOOGLE = "https://www.googleapis.com/calendar/v3";
 const DEFAULT_EVENT_MINUTES = 60;
@@ -197,7 +197,7 @@ async function handle(ctx: ActionCtx, token: string, item: Doc<"pendingSyncQueue
     return;
   }
 
-  const res = await google(token, "PATCH", eventPath(t.googleCalendarId, t.googleEventId), eventBody(t, tz));
+  const res = await google(token, "PATCH", eventPath(t.googleCalendarId, t.googleEventId), replaceEventTimes(eventBody(t, tz)));
   if (res.status === 404 || res.status === 410) {
     await ctx.runMutation(internal.googleSync.unlinkEvent, { id: t._id });
     return;

@@ -5,6 +5,7 @@
  */
 import "server-only";
 import { getGoogleAccessToken } from "@/app/actions/google-auth";
+import { replaceEventTimes } from "@/convex/lib/googleEvents";
 
 const GOOGLE_CALENDAR_API = "https://www.googleapis.com/calendar/v3";
 
@@ -249,7 +250,7 @@ export async function updateCalendarEvent(
     `/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`,
     {
       method: "PATCH",
-      body: JSON.stringify(body),
+      body: JSON.stringify(replaceEventTimes(body)),
     }
   );
   return res.json();
