@@ -18,7 +18,7 @@ import { v } from "convex/values";
 import { internalAction, internalMutation, internalQuery, type ActionCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
-import { googleAccessToken as googleToken } from "./lib/googleCalendar";
+import { googleAccessToken as googleToken, listCalendars } from "./lib/googleCalendar";
 import { googleOwnsEvent } from "./lib/googleEvents";
 
 const GOOGLE = "https://www.googleapis.com/calendar/v3";
@@ -125,9 +125,14 @@ export const run = internalAction({
         return;
       }
 
+      // Items queued without a zone (the agent tools enqueue none) mean the
+      // user's own clock: read it from their calendar once, only when needed.
+      let zone: string | undefined;
       for (const item of pending.filter((p) => owned.includes(p._id))) {
         try {
-          await handle(ctx, token, item);
+          const queuedZone = (item.payload as { timeZone?: string } | undefined)?.timeZone;
+          if (!queuedZone && zone === undefined) zone = await calendarZone(token);
+          await handle(ctx, token, item, queuedZone || zone || "UTC");
           await ctx.runMutation(internal.googleSync.finish, { id: item._id });
         } catch (err) {
           await ctx.runMutation(internal.googleSync.fail, {
@@ -140,11 +145,24 @@ export const run = internalAction({
   },
 });
 
-async function handle(ctx: ActionCtx, token: string, item: Doc<"pendingSyncQueue">): Promise<void> {
+/**
+ * The zone of the user's primary calendar (else the first one): what a bare
+ * "08:45" means to them. The calendar pull reads times back in this zone, so
+ * writing them in UTC instead moved every such event by the UTC offset.
+ */
+async function calendarZone(token: string): Promise<string> {
+  try {
+    const calendars = await listCalendars(token);
+    return calendars.find((c) => c.primary)?.timeZone ?? calendars[0]?.timeZone ?? "UTC";
+  } catch {
+    return "UTC";
+  }
+}
+
+async function handle(ctx: ActionCtx, token: string, item: Doc<"pendingSyncQueue">, tz: string): Promise<void> {
   const payload = (item.payload ?? {}) as {
     timeZone?: string; googleEventId?: string; googleCalendarId?: string; reason?: string;
   };
-  const tz = payload.timeZone || "UTC";
 
   const t: Doc<"tasks"> | null = await ctx.runQuery(internal.googleSync.task, { id: item.taskId });
 

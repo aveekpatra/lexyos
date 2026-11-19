@@ -518,6 +518,14 @@ export const update = mutation({
       }
     }
 
+    // A clock time makes it a timed block. A leftover all-day flag would keep
+    // it in the all-day row of the timeline (#630); an explicit isAllDay wins.
+    if (args.isAllDay === undefined && task.isAllDay &&
+        ((typeof patch.dueTime === "string" && patch.dueTime) ||
+         (typeof patch.scheduledStartTime === "string" && patch.scheduledStartTime))) {
+      patch.isAllDay = false;
+    }
+
     // Reject an explicit end that is not after its start; store 23:59 instead
     // of an inverted block that every consumer would have to special-case.
     if (typeof patch.scheduledEndTime === "string") {
